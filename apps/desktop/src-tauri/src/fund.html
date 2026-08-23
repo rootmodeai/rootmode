@@ -416,8 +416,22 @@ async function sendSequential(approveData, depositData) {
   return send(pot, depositData);
 }
 
+function errText(e) {
+  if (!e) return "";
+  const nested = e.data && (e.data.message || (e.data.cause && e.data.cause.message));
+  return [e.message, nested, typeof e === "string" ? e : ""].filter(Boolean).join(" ");
+}
+
+function sendCallsUnsupported(e) {
+  if (!e || e.code === 4001) return false;
+  if (e.code === 5710 || e.code === -32601 || e.code === -32600) return true;
+  return /7702|unsupported contract|account upgraded|atomicRequired|sendCalls|not supported|does not support/i.test(errText(e));
+}
+
 async function sendApproveAndDeposit(approveData, depositData) {
-  // Atomic batch needs EIP-7702. Wallets refuse that on localhost (31337).
+  // Atomic batch is EIP-7702. MetaMask refuses it on localhost, and on Base it
+  // fails if the account is already delegated to a contract it does not know
+  // ("Account upgraded to unsupported contract"). Sequential always works.
   if (!onBase()) return sendSequential(approveData, depositData);
   try {
     const [from] = await eth("eth_requestAccounts");
@@ -435,11 +449,8 @@ async function sendApproveAndDeposit(approveData, depositData) {
     if (!id) throw new Error("wallet returned no batch id");
     return waitCalls(id);
   } catch (e) {
-    const msg = String((e && e.message) || e);
     if (e && e.code === 4001) throw e;
-    if (e && (e.code === 5710 || /7702/i.test(msg))) {
-      return sendSequential(approveData, depositData);
-    }
+    if (sendCallsUnsupported(e)) return sendSequential(approveData, depositData);
     throw e;
   }
 }
