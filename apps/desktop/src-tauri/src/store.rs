@@ -922,13 +922,13 @@ impl Db {
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
-    /// The MetaMask that last deposited, if this machine has recorded one.
-    pub fn last_deposit_client(&self) -> Result<Option<String>> {
+    /// The MetaMask that last deposited on this chain, if this machine has one.
+    pub fn last_deposit_client(&self, chain_id: u64) -> Result<Option<String>> {
         let conn = self.lock();
         let mut stmt = conn.prepare(
-            "SELECT client FROM deposits WHERE client <> '' ORDER BY at DESC LIMIT 1",
+            "SELECT client FROM deposits WHERE client <> '' AND chain_id = ?1 ORDER BY at DESC LIMIT 1",
         )?;
-        Ok(stmt.query_row([], |r| r.get(0)).optional()?)
+        Ok(stmt.query_row([chain_id as i64], |r| r.get(0)).optional()?)
     }
 }
 
@@ -1305,7 +1305,7 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].tx_hash, "0xbbb");
         assert_eq!(list[1].amount_micros, 5_000_000);
-        assert_eq!(db.last_deposit_client().unwrap().as_deref(), Some("0xabc"));
+        assert_eq!(db.last_deposit_client(8453).unwrap().as_deref(), Some("0xabc"));
     }
 
     #[test]

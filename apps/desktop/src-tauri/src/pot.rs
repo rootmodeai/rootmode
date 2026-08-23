@@ -218,12 +218,23 @@ fn home_dir() -> PathBuf {
         .unwrap_or_default()
 }
 
+fn use_local_chain() -> bool {
+    matches!(
+        std::env::var("ROOTMODE_USE_LOCAL_CHAIN").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
+
 fn usable(cfg: ChainConfig) -> Option<ChainConfig> {
     if cfg.pot.trim().is_empty() {
-        None
-    } else {
-        Some(cfg)
+        return None;
     }
+    // Leftover Anvil files from `./contracts/local.sh` must not override Base
+    // in a shipped build. Opt in with ROOTMODE_USE_LOCAL_CHAIN=1.
+    if cfg.chain_id == 31337 && !use_local_chain() {
+        return None;
+    }
+    Some(cfg)
 }
 
 fn load_chain_config_at(app_data: &Path) -> Option<ChainConfig> {
@@ -235,6 +246,9 @@ fn load_chain_config_at(app_data: &Path) -> Option<ChainConfig> {
         .or_else(|| read_chain_json(&app_data.join("local-chain.json")).and_then(usable))
         .or_else(|| serde_json::from_str(BUNDLED_CHAIN).ok().and_then(usable))
         .or_else(|| {
+            if !use_local_chain() {
+                return None;
+            }
             let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../../contracts/deployments/local.json");
             read_chain_json(&repo).and_then(usable)
@@ -295,7 +309,7 @@ pub async fn status(state: &AppState) -> Result<PotStatus> {
         });
     };
     let reachable = rpc(&cfg.rpc, "eth_chainId", serde_json::json!([])).await.is_ok();
-    let client = match state.db.last_deposit_client() {
+    let client = match state.db.last_deposit_client(cfg.chain_id) {
         Ok(Some(c)) if !c.trim().is_empty() => Some(c),
         _ => find_client(&cfg, &app_key).await,
     };
@@ -333,6 +347,7 @@ pub async fn deposits(state: &AppState) -> Result<Vec<Deposit>> {
         .db
         .list_deposits()?
         .into_iter()
+        .filter(|d| chain_id == 0 || d.chain_id == 0 || d.chain_id == chain_id)
         .map(|d| {
             let id = if d.chain_id != 0 { d.chain_id } else { chain_id };
             Deposit {
