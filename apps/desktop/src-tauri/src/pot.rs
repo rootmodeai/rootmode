@@ -209,7 +209,7 @@ pub fn load_chain_config(state: &AppState) -> Option<ChainConfig> {
 
 /// Baked into the binary. Empty `pot` means Base contracts are not deployed
 /// yet and the wallet stays unconfigured.
-const BUNDLED_CHAIN: &str = include_str!("chain.base.json");
+const BUNDLED_CHAIN: &str = include_str!("../chain.base.json");
 
 fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
