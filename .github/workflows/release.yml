@@ -105,12 +105,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # Tauri writes under src-tauri/target/<triple>/release/bundle or
-          # target/release/bundle when no --target was passed.
-          src=$(find apps/desktop/src-tauri/target -type f -name '${{ matrix.glob }}' | head -1)
+          # Workspace builds land in ./target; a crate-local build in
+          # src-tauri/target. Take the newest match so we do not pick a cache.
+          src=$(find target apps/desktop/src-tauri/target -type f -name '${{ matrix.glob }}' 2>/dev/null \
+            | xargs ls -t 2>/dev/null | head -1)
           if [ -z "$src" ]; then
-            echo "no ${{ matrix.glob }} under src-tauri/target"
-            find apps/desktop/src-tauri/target -type d | head -40
+            echo "no ${{ matrix.glob }} under target/ or src-tauri/target"
+            find target apps/desktop/src-tauri/target -type d 2>/dev/null | head -40
             exit 1
           fi
           cp "$src" "${{ matrix.stable }}"
