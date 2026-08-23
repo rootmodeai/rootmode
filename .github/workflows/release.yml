@@ -105,13 +105,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # Workspace builds land in ./target; a crate-local build in
-          # src-tauri/target. Take the newest match so we do not pick a cache.
-          src=$(find target apps/desktop/src-tauri/target -type f -name '${{ matrix.glob }}' 2>/dev/null \
-            | xargs ls -t 2>/dev/null | head -1)
+          # tauri-action already uploaded a versioned name. Pull that back and
+          # re-upload under the stable name the site Download button uses.
+          mkdir -p /tmp/rm-asset
+          gh release download "${{ github.ref_name }}" --dir /tmp/rm-asset --pattern '${{ matrix.glob }}'
+          src=$(find /tmp/rm-asset -type f -name '${{ matrix.glob }}' | head -1)
           if [ -z "$src" ]; then
-            echo "no ${{ matrix.glob }} under target/ or src-tauri/target"
-            find target apps/desktop/src-tauri/target -type d 2>/dev/null | head -40
+            echo "no ${{ matrix.glob }} on the release"
+            ls -la /tmp/rm-asset
             exit 1
           fi
           cp "$src" "${{ matrix.stable }}"
