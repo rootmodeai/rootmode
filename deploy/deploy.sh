@@ -37,6 +37,14 @@ EOF
 fi
 # shellcheck disable=SC1090
 set -a; . "./$ENV_FILE"; set +a
+# Caddy's `email` directive needs an address. An empty ACME_EMAIL would
+# leave `email` on a line by itself and Caddy would refuse to start.
+if [ -n "${ACME_EMAIL:-}" ]; then
+    CADDY_EMAIL="email ${ACME_EMAIL}"
+else
+    CADDY_EMAIL=""
+fi
+export CADDY_EMAIL
 
 # ---------------------------------------------------------------- preflight
 #

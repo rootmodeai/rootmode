@@ -57,7 +57,8 @@ services:
       - caddy-logs:/var/log/caddy
     environment:
       ROOTMODE_DOMAIN: ${ROOTMODE_DOMAIN:-rootmode.ai}
-      ACME_EMAIL: ${ACME_EMAIL:-}
+      # Full directive or empty. `email {$ACME_EMAIL}` crashes Caddy when unset.
+      CADDY_EMAIL: ${ACME_EMAIL:+email ${ACME_EMAIL}}
 
 volumes:
   stats-data:

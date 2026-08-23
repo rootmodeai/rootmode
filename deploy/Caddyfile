@@ -7,8 +7,9 @@
 # hostname.
 
 {
-	# Where expiry warnings go. Optional, and worth setting.
-	email {$ACME_EMAIL}
+	# Let's Encrypt expiry mail. Empty is fine — do not write a bare `email`
+	# directive, Caddy rejects that. deploy/.env ACME_EMAIL becomes this line.
+	{$CADDY_EMAIL}
 }
 
 {$ROOTMODE_DOMAIN} {
