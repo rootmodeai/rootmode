@@ -2,21 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
-import {IMockUSDC, IFeeVault, IRootmodePot, ISwapRouter} from "../src/interfaces.sol";
-
-contract LocalRouter is ISwapRouter {
-    IMockUSDC public immutable tokenOut;
-    constructor(IMockUSDC out) {
-        tokenOut = out;
-    }
-    function exactInputSingle(ExactInputSingleParams calldata p) external override returns (uint256) {
-        IMockUSDC(p.tokenIn).transferFrom(msg.sender, address(this), p.amountIn);
-        uint256 out = p.amountIn * 2;
-        require(out >= p.amountOutMinimum, "slippage");
-        tokenOut.mint(p.recipient, out);
-        return out;
-    }
-}
+import {IMockUSDC, IFeeVault, IRootmodePot} from "../src/interfaces.sol";
 
 /// Local Anvil stack: fake USDC, a fee vault, the pot.
 ///
@@ -37,21 +23,7 @@ contract DeployLocal is Script {
         new Dummy();
 
         IMockUSDC usdc = IMockUSDC(vm.deployCode("src/MockUSDC.vy"));
-        IMockUSDC project = IMockUSDC(vm.deployCode("src/MockUSDC.vy"));
-        LocalRouter router = new LocalRouter(project);
-        IFeeVault vault = IFeeVault(
-            vm.deployCode(
-                "src/FeeVault.vy",
-                abi.encode(
-                    address(usdc),
-                    address(project),
-                    address(router),
-                    uint24(3000),
-                    address(0x000000000000000000000000000000000000dEaD),
-                    uint64(7 days)
-                )
-            )
-        );
+        IFeeVault vault = IFeeVault(vm.deployCode("src/FeeVault.vy", abi.encode(address(usdc))));
         // 30s grace so a local withdraw-then-wait can reclaim unused lock.
         // Production would be 15 minutes.
         IRootmodePot pot = IRootmodePot(

@@ -91,9 +91,7 @@ export function Wallet() {
           </div>
         ) : pot?.configured && !pot.reachable ? (
           <div className="note" style={{ marginBottom: 12 }}>
-            Chain is configured but not reachable. Check the RPC, or start the
-            local chain with
-            <span className="mono"> ./contracts/local.sh</span>
+            Can't reach Base right now. Check the network and try again.
           </div>
         ) : (
           <div className="note" style={{ marginBottom: 12 }}>

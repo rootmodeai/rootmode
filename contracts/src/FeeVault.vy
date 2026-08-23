@@ -64,21 +64,10 @@ event SwapSet:
 
 
 @deploy
-def __init__(
-    usdc_: address,
-    projectToken_: address,
-    router_: address,
-    poolFee_: uint24,
-    sink_: address,
-    epoch_: uint64,
-):
+def __init__(usdc_: address):
+    """USDC only. Token, router, sink, epoch are set later with setSwap."""
     usdc = usdc_
     self.admin = msg.sender
-    self.projectToken = projectToken_
-    self.router = router_
-    self.poolFee = poolFee_
-    self.sink = sink_
-    self.epoch = epoch_
 
 
 @internal

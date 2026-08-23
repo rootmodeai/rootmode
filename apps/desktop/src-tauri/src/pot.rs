@@ -207,15 +207,38 @@ pub fn load_chain_config(state: &AppState) -> Option<ChainConfig> {
     load_chain_config_at(&state.app_data)
 }
 
+/// Baked into the binary. Empty `pot` means Base contracts are not deployed
+/// yet and the wallet stays unconfigured.
+const BUNDLED_CHAIN: &str = include_str!("chain.base.json");
+
+fn home_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_default()
+}
+
+fn usable(cfg: ChainConfig) -> Option<ChainConfig> {
+    if cfg.pot.trim().is_empty() {
+        None
+    } else {
+        Some(cfg)
+    }
+}
+
 fn load_chain_config_at(app_data: &Path) -> Option<ChainConfig> {
-    let path = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".rootmode/local-chain.json");
-    read_chain_json(&path).or_else(|| {
-        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../contracts/deployments/local.json");
-        read_chain_json(&repo)
-    }).or_else(|| {
-        read_chain_json(&app_data.join("local-chain.json"))
-    })
+    let home = home_dir().join(".rootmode");
+    read_chain_json(&home.join("chain.json"))
+        .and_then(usable)
+        .or_else(|| read_chain_json(&home.join("local-chain.json")).and_then(usable))
+        .or_else(|| read_chain_json(&app_data.join("chain.json")).and_then(usable))
+        .or_else(|| read_chain_json(&app_data.join("local-chain.json")).and_then(usable))
+        .or_else(|| serde_json::from_str(BUNDLED_CHAIN).ok().and_then(usable))
+        .or_else(|| {
+            let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../contracts/deployments/local.json");
+            read_chain_json(&repo).and_then(usable)
+        })
 }
 
 fn read_chain_json(path: &Path) -> Option<ChainConfig> {
@@ -377,7 +400,7 @@ pub async fn check(state: &AppState, price: f64, unpriced: bool, kind: JobKind) 
         return Ok(PotCheck {
             ready: false,
             needs_fund: true,
-            reason: "Start the local chain (./contracts/local.sh) and fund your pot.".into(),
+            reason: "Can't reach Base. Check the network, then deposit USDC in MetaMask.".into(),
             kind: "chain".into(),
             cap_micros: cap,
         });
@@ -1002,7 +1025,7 @@ async fn wait_ok(cfg: &ChainConfig, hash: &str) -> Result<()> {
 
 pub fn fund_url(state: &AppState) -> Result<String> {
     let cfg = load_chain_config(state).ok_or_else(|| {
-        AppError::Invalid("no local chain. Run ./contracts/local.sh first.".into())
+        AppError::Invalid("settlement is not configured on this build".into())
     })?;
     let app_key = app_key_address(state)?;
     Ok(format!(

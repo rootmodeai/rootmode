@@ -47,9 +47,15 @@ cd contracts && forge test
 `ForkE2E` hits live Base USDC for the channels contract.
 
 Production settlement is Base (`8453`), USDC
-`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`. Point the desktop chain
-config and the worker (`ROOTMODE_POT`, `ROOTMODE_RPC`, `ROOTMODE_PAY_KEY`)
-at a deployed `RootmodePot` / `FeeVault`. The worker's pay key is a normal
-Ethereum private key and needs ETH for gas.
+`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`.
+
+```sh
+BASE_RPC_URL=https://mainnet.base.org PRIVATE_KEY=0x… ./contracts/deploy-base.sh
+```
+
+That writes `deployments/base.json` and bakes the addresses into the next
+desktop build (`apps/desktop/src-tauri/chain.base.json`). Point workers at
+the same pot (`ROOTMODE_POT`, `ROOTMODE_RPC`, `ROOTMODE_PAY_KEY`). The
+worker's pay key is a normal Ethereum key and needs ETH for gas.
 
 `FEE_BPS = 1000` is a constant. Changing it is a new contract.

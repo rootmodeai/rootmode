@@ -13,7 +13,7 @@ export function fundingKindFromText(text: string): FundingKind | null {
   if (/does not cover|deposit more|fund your pot|this provider charges|could not lock funds/i.test(text)) {
     return "empty";
   }
-  if (/local chain|not running|\.\/contracts\/local/i.test(text)) {
+  if (/local chain|not running|\.\/contracts\/local|can't reach base|settlement is not configured/i.test(text)) {
     return "chain";
   }
   return null;
@@ -26,7 +26,7 @@ function title(kind: FundingKind): string {
     case "empty":
       return "Your wallet needs more USDC";
     case "chain":
-      return "The local chain is not running";
+      return "Can't reach the network";
     default:
       return "";
   }

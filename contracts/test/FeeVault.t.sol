@@ -38,16 +38,12 @@ contract FeeVaultTest is Test {
         usdc = IMockUSDC(deployCode("src/MockUSDC.vy"));
         project = IMockUSDC(deployCode("src/MockUSDC.vy"));
         router = new MockRouter(project);
-        vault = IFeeVault(
-            deployCode(
-                "src/FeeVault.vy",
-                abi.encode(address(usdc), address(project), address(router), uint24(3000), sink, EPOCH)
-            )
-        );
+        vault = IFeeVault(deployCode("src/FeeVault.vy", abi.encode(address(usdc))));
         usdc.mint(address(vault), 1_000e6); // a week of fees
     }
 
     function _enableBuyToken() internal {
+        vault.setSwap(address(project), address(router), 3000, sink, EPOCH);
         vault.setBuyToken(true);
         vm.warp(block.timestamp + EPOCH);
     }
@@ -55,6 +51,10 @@ contract FeeVaultTest is Test {
     function test_the_deployer_is_admin_and_buybacks_start_off() public view {
         assertEq(vault.admin(), address(this));
         assertFalse(vault.buyToken());
+        assertEq(vault.projectToken(), address(0));
+        assertEq(vault.router(), address(0));
+        assertEq(vault.sink(), address(0));
+        assertEq(vault.epoch(), 0);
     }
 
     function test_admin_can_withdraw_collected_usdc() public {
@@ -137,12 +137,7 @@ contract FeeVaultTest is Test {
     }
 
     function test_turning_buyToken_on_needs_a_swap_path() public {
-        IFeeVault blank = IFeeVault(
-            deployCode(
-                "src/FeeVault.vy",
-                abi.encode(address(usdc), address(0), address(0), uint24(0), address(0), uint64(0))
-            )
-        );
+        IFeeVault blank = IFeeVault(deployCode("src/FeeVault.vy", abi.encode(address(usdc))));
         vm.expectRevert("SwapUnset");
         blank.setBuyToken(true);
 

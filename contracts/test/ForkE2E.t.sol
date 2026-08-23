@@ -44,12 +44,8 @@ contract ForkE2E is Test {
 
         project = IMockUSDC(deployCode("src/MockUSDC.vy"));
         router = new MockRouter(project);
-        vault = IFeeVault(
-            deployCode(
-                "src/FeeVault.vy",
-                abi.encode(address(USDC), address(project), address(router), uint24(3000), sink, EPOCH)
-            )
-        );
+        vault = IFeeVault(deployCode("src/FeeVault.vy", abi.encode(address(USDC))));
+        vault.setSwap(address(project), address(router), 3000, sink, EPOCH);
         channels = IRootmodeChannels(deployCode("src/RootmodeChannels.vy", abi.encode(address(USDC), address(vault))));
 
         _fundUsdc(client, 100e6);
