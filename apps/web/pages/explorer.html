@@ -926,22 +926,31 @@
     ].join("");
   }
 
+  // Feed strings (worker label, model id, caps, peer) are attacker-controlled:
+  // a node reports whatever it likes and only proves it owns a keypair, not
+  // that the text is safe. Escape before it ever reaches innerHTML.
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
   function drawRows(id, items) {
     var max = Math.max.apply(null, items.map(function (i) { return i.value; })) || 1;
     document.getElementById(id).innerHTML = items.map(function (it, i) {
       return '<div class="row-item"><span class="rank">' + (i + 1) + '</span>' +
-             '<span class="name"><span>' + it.name + '</span>' +
+             '<span class="name"><span>' + esc(it.name) + '</span>' +
              '<span class="meter"><i style="width:' + Math.max(2, (it.value / max) * 100) + '%"></i></span></span>' +
-             '<span class="val">' + it.display + "</span></div>";
+             '<span class="val">' + esc(it.display) + "</span></div>";
     }).join("");
   }
 
   function drawWorkers() {
     document.querySelector("#workers tbody").innerHTML = DATA.workers.map(function (w) {
       return "<tr>" +
-        '<td class="id">' + w.peer.slice(0, 12) + "…</td>" +
-        "<td>" + w.label + "</td>" +
-        "<td>" + w.caps.join(", ") + "</td>" +
+        '<td class="id">' + esc(w.peer.slice(0, 12)) + "…</td>" +
+        "<td>" + esc(w.label) + "</td>" +
+        "<td>" + w.caps.map(esc).join(", ") + "</td>" +
         '<td class="num">' + w.models + "</td>" +
         '<td class="num">' + (w.tokens_24h ? compact(w.tokens_24h) : "—") + "</td>" +
         '<td class="num">' + full(w.requests_24h) + "</td>" +

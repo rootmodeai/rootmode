@@ -137,11 +137,16 @@ impl Channels {
         ticket: &SpendTicket,
         sig: &str,
         domain: &Domain,
+        app_key: &str,
         expected_delta: Micros,
         now: i64,
     ) -> Result<Micros, String> {
-        let _signer = ticket
-            .recover(domain, sig)
+        // The signer must be the account's on-chain app key — the key the pot
+        // checks `settle` against. Recovering *a* signer is not enough: a ticket
+        // signed by any other key can never be redeemed, so banking it would
+        // only poison this channel's ledger.
+        ticket
+            .check(domain, sig, app_key, now.max(0) as u64)
             .map_err(|e| e.to_string())?;
         let id = channel_id(&ticket.client, &ticket.worker_payout, "pot");
         let mut open = self.open.write().unwrap_or_else(|e| e.into_inner());

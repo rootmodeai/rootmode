@@ -7,7 +7,19 @@ people's machines.
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, Field, field_validator
+
+# Worker-declared text (label, caps, model ids) is shown on the public explorer.
+# Keep it to a safe character set so a report cannot smuggle markup into the
+# page. The signature is checked over the raw request body (see main.py), so
+# tidying the stored/served value here does not affect verification.
+_UNSAFE = re.compile(r"[^\w .,:+/@()\[\]-]")
+
+
+def _clean(value: str, limit: int = 64) -> str:
+    return _UNSAFE.sub("", value)[:limit]
 
 # A frame far bigger than any honest report, refused before it is parsed.
 MAX_BODY_BYTES = 64 * 1024
@@ -59,4 +71,14 @@ class Report(BaseModel):
             return None
         v = v.strip().upper()
         return v if len(v) == 2 and v.isalpha() else None
+
+    @field_validator("label")
+    @classmethod
+    def _clean_label(cls, v: str) -> str:
+        return _clean(v)
+
+    @field_validator("caps", "models")
+    @classmethod
+    def _clean_items(cls, v: list[str]) -> list[str]:
+        return [_clean(x) for x in v if isinstance(x, str) and _clean(x)]
 

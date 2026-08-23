@@ -252,8 +252,25 @@ contract RootmodePotTest is Test {
     }
 
     function _channel() internal view returns (uint256 paid, uint256 reserved, uint64, uint64, address, uint256 earned) {
-        (uint256 r, uint256 p, uint64 d, uint64 c, address k, uint256 e) = pot.channels(client, worker);
+        (uint256 r, uint256 p, uint64 d, uint64 c, address k, uint256 e,,) = pot.channels(client, worker);
         return (p, r, d, c, k, e);
+    }
+
+    /// A client must not be able to lower its live per-job cap after work is
+    /// delivered to block settlement and reclaim the whole reserve. The channel
+    /// keeps the cap it had at reserve, so settle still pays the worker.
+    function test_lowering_maxPerJob_cannot_block_a_reserved_settle() public {
+        uint64 deadline = uint64(block.timestamp + 1 hours);
+        pot.reserve(client, worker, MAX_JOB, deadline, _reserve(worker, MAX_JOB, deadline));
+
+        // The grief attempt: zero the account's live caps after reserving.
+        vm.prank(client);
+        pot.setLimits(0, 0, address(0));
+
+        // Settlement still succeeds against the channel's frozen snapshot.
+        pot.settle(client, worker, 250_000, deadline, _spend(worker, 250_000, deadline));
+        assertEq(usdc.balanceOf(worker), 225_000, "worker is paid despite the cap change");
+        assertEq(usdc.balanceOf(vault), 25_000);
     }
 
     function _reserve(address payout, uint256 maxAmount, uint64 deadline) internal view returns (bytes memory) {

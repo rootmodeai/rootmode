@@ -185,7 +185,9 @@ def buyback(minOut: uint256) -> uint256:
     # that has begun should not be re-enterable.
     self.lastBuyback = convert(block.timestamp, uint64)
 
-    extcall IERC20(usdc).approve(self.router, spend)
+    approved: bool = extcall IERC20(usdc).approve(self.router, spend)
+    if not approved:
+        raise "ApproveFailed"
     received: uint256 = extcall ISwapRouter(self.router).exactInputSingle(
         ExactInputSingleParams(
             tokenIn=usdc,

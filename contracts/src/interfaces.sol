@@ -84,7 +84,9 @@ interface IRootmodePot {
             uint64 deadline,
             uint64 closeAt,
             address appKey,
-            uint256 earned
+            uint256 earned,
+            uint256 maxPerJob,
+            uint256 maxPerDay
         );
     function deposit(uint256 amount, uint256 maxPerJob, uint256 maxPerDay, address appKey) external;
     function depositWithPermit(

@@ -11,12 +11,26 @@ use rootmode_core::payments::{address_of, keccak, SpendTicket};
 use crate::config::PaymentsConfig;
 use crate::error::{Result, WorkerError};
 
-/// Remaining billable lock: `reserved - earned`. `None` if we cannot look.
-pub async fn remaining_lock(
+/// The on-chain channel: remaining billable lock (`reserved - earned`) and the
+/// `appKey` the pot checks `settle` signatures against. `None` when there is no
+/// RPC to look; the app key is the zero address when no reserve has been mined
+/// for this pair yet.
+#[derive(Debug, Clone)]
+pub struct ChannelState {
+    pub remaining: u64,
+    pub app_key: String,
+}
+
+/// True for the zero address (an empty on-chain app-key slot).
+pub fn is_zero_address(addr: &str) -> bool {
+    addr.trim_start_matches("0x").chars().all(|c| c == '0')
+}
+
+pub async fn channel_state(
     payments: &PaymentsConfig,
     client: &str,
     worker: &str,
-) -> Result<Option<u64>> {
+) -> Result<Option<ChannelState>> {
     if payments.rpc.trim().is_empty() || payments.contract.trim().is_empty() {
         return Ok(None);
     }
@@ -36,17 +50,25 @@ pub async fn remaining_lock(
     let hex = raw.as_str().unwrap_or("0x").trim_start_matches("0x");
     // six words: reserved, paid, deadline, closeAt, appKey, earned
     if hex.len() < 64 * 6 {
-        return Ok(Some(0));
+        return Ok(Some(ChannelState {
+            remaining: 0,
+            app_key: String::new(),
+        }));
     }
     let reserved = read_u64(&hex[0..64]);
     let close_at = read_u64(&hex[64 * 3..64 * 4]);
+    // The address is the low 20 bytes (last 40 hex chars) of word 4.
+    let app_key = format!("0x{}", &hex[64 * 4 + 24..64 * 5]);
     let earned = read_u64(&hex[64 * 5..64 * 6]);
     if close_at != 0 {
         return Err(WorkerError::Rejected(
             "this client is closing the channel; unused lock is returning".into(),
         ));
     }
-    Ok(Some(reserved.saturating_sub(earned)))
+    Ok(Some(ChannelState {
+        remaining: reserved.saturating_sub(earned),
+        app_key,
+    }))
 }
 
 /// Record and pay the ticket. Best-effort: a failure leaves the ticket on

@@ -357,7 +357,9 @@ impl JobPayload {
             JobPayload::Video(p) => (p.model_hash.as_deref(), p.checkpoint_id.as_deref()),
         };
         id.map(str::to_string)
-            .or_else(|| hash.map(|h| format!("sha256:{}", &h[..h.len().min(12)])))
+            // char-safe truncation: `model_hash` is client-controlled, so a
+            // byte slice at 12 could split a multibyte char and panic.
+            .or_else(|| hash.map(|h| format!("sha256:{}", h.chars().take(12).collect::<String>())))
             .unwrap_or_else(|| "peer default".to_string())
     }
 }

@@ -1029,7 +1029,8 @@ pub fn fund_url(state: &AppState) -> Result<String> {
     })?;
     let app_key = app_key_address(state)?;
     Ok(format!(
-        "http://127.0.0.1:{FUND_PORT}/?rpc={}&pot={}&usdc={}&appKey={}&chainId={}&worker={}",
+        "http://127.0.0.1:{FUND_PORT}/?t={}&rpc={}&pot={}&usdc={}&appKey={}&chainId={}&worker={}",
+        fund_token(),
         urlencoding_lite(&cfg.rpc),
         cfg.pot,
         cfg.usdc,
@@ -1049,6 +1050,32 @@ struct PendingPublic {
     cumulative: u64,
     deadline: u64,
     sig: String,
+}
+
+/// A per-launch secret that gates the fund server. It rides in `fund_url`, so
+/// the page the app opens carries it, but a foreign web origin cannot guess it
+/// — which stops both a cross-site `POST /flush` (an on-chain settle) and a
+/// page opened with attacker-chosen contract addresses (approval phishing),
+/// since the server refuses any request without it.
+fn fund_token() -> &'static str {
+    static T: OnceLock<String> = OnceLock::new();
+    T.get_or_init(|| {
+        use rand::Rng;
+        let bytes: [u8; 24] = rand::thread_rng().gen();
+        format!("rm-{}", hex::encode(bytes))
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct FundAuth {
+    #[serde(default)]
+    t: String,
+}
+
+impl FundAuth {
+    fn ok(&self) -> bool {
+        !self.t.is_empty() && self.t == fund_token()
+    }
 }
 
 fn pending_public() -> Vec<PendingPublic> {
@@ -1081,10 +1108,15 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
             let page = html.clone();
             let data = app_data.clone();
             let db_path = app_data.join("rootmode.sqlite");
+            use axum::extract::Query;
+            use axum::response::IntoResponse;
             let app = axum::Router::new()
                 .route(
                     "/",
-                    axum::routing::get(move || async move {
+                    axum::routing::get(move |q: Query<FundAuth>| async move {
+                        if !q.ok() {
+                            return (axum::http::StatusCode::FORBIDDEN, "forbidden").into_response();
+                        }
                         (
                             [(
                                 axum::http::header::CONTENT_TYPE,
@@ -1092,20 +1124,34 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
                             )],
                             page,
                         )
+                            .into_response()
                     }),
                 )
                 .route(
                     "/pending",
-                    axum::routing::get(|| async { axum::Json(pending_public()) }),
+                    axum::routing::get(|q: Query<FundAuth>| async move {
+                        if !q.ok() {
+                            return (axum::http::StatusCode::FORBIDDEN, "forbidden").into_response();
+                        }
+                        axum::Json(pending_public()).into_response()
+                    }),
                 )
                 .route(
                     "/flush",
-                    axum::routing::post(move || {
+                    axum::routing::post(move |q: Query<FundAuth>| {
                         let data = data.clone();
                         async move {
+                            if !q.ok() {
+                                return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                    .into_response();
+                            }
                             match flush_all(&data).await {
-                                Ok(n) => (axum::http::StatusCode::OK, n.to_string()),
-                                Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                                Ok(n) => (axum::http::StatusCode::OK, n.to_string()).into_response(),
+                                Err(e) => (
+                                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                    e.to_string(),
+                                )
+                                    .into_response(),
                             }
                         }
                     }),
@@ -1114,17 +1160,25 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
                     "/deposit",
                     axum::routing::post({
                         let db_path = db_path.clone();
-                        move |axum::Json(body): axum::Json<DepositBody>| {
+                        move |q: Query<FundAuth>, axum::Json(body): axum::Json<DepositBody>| {
                             let db_path = db_path.clone();
                             async move {
+                                if !q.ok() {
+                                    return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                        .into_response();
+                                }
                                 match save_deposit(&db_path, body) {
-                                    Ok(()) => (axum::http::StatusCode::NO_CONTENT, String::new()),
+                                    Ok(()) => {
+                                        (axum::http::StatusCode::NO_CONTENT, String::new())
+                                            .into_response()
+                                    }
                                     Err(e) => {
                                         log::warn!("record deposit: {e}");
                                         (
                                             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                                             e.to_string(),
                                         )
+                                            .into_response()
                                     }
                                 }
                             }

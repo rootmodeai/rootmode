@@ -291,7 +291,18 @@ pub fn apply_message(state: &AppState, job_id: Uuid, msg: WorkerMessage) -> Resu
                 }
             }
             let thinking = r.thinking.clone();
-            let record = results::materialize(&r, &state.download_dir())?;
+            // Only a worker on this machine (the in-process mock) may hand back
+            // a filesystem path; a remote peer must send bytes, or it could name
+            // the identity/wallet key and have the client read it.
+            let local = state
+                .db
+                .get_job(job_id)
+                .ok()
+                .flatten()
+                .and_then(|job| state.db.get_peer(&job.peer_id).ok().flatten())
+                .map(|peer| peer.is_mock())
+                .unwrap_or(false);
+            let record = results::materialize(&r, &state.download_dir(), local)?;
             state.db.insert_result(&record)?;
             state
                 .db

@@ -974,7 +974,10 @@ fn stream_answer(
                 Some(WorkerMessage::JobDelta(d)) => {
                     st.raw.push_str(&d.text);
                     let peeled = translate::peel_thinking(&st.raw);
-                    if peeled.len() > st.emitted {
+                    // `peel_thinking` rewrites the string, so a byte offset from
+                    // a prior pass may land mid-character; clamp to a boundary
+                    // rather than panic-slice on worker-controlled text.
+                    if peeled.len() > st.emitted && peeled.is_char_boundary(st.emitted) {
                         let fresh = peeled[st.emitted..].to_string();
                         st.emitted = peeled.len();
                         match st.shape {

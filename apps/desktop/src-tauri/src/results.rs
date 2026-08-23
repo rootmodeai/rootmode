@@ -13,7 +13,13 @@ use crate::error::{AppError, Result};
 use crate::store::{now, ResultRecord};
 
 /// Persist a result and return the record to store and show.
-pub fn materialize(result: &JobResult, download_dir: &Path) -> Result<ResultRecord> {
+///
+/// `local` is true only for a worker running on this machine (the in-process
+/// mock). A filesystem path in `image_path_or_b64` is honored *only* then — a
+/// remote peer naming a local path would otherwise be an arbitrary-file-read
+/// primitive reaching the identity and wallet keys. A remote peer must also
+/// commit to a content hash; an empty one is refused rather than trusted.
+pub fn materialize(result: &JobResult, download_dir: &Path, local: bool) -> Result<ResultRecord> {
     match result.kind {
         JobKind::Llm => {
             let text = result
@@ -21,7 +27,7 @@ pub fn materialize(result: &JobResult, download_dir: &Path) -> Result<ResultReco
                 .clone()
                 .ok_or_else(|| AppError::Invalid("llm result has no text".into()))?;
             let actual = sha256_hex(text.as_bytes());
-            verify(&actual, &result.sha256)?;
+            verify(&actual, &result.sha256, local)?;
             Ok(ResultRecord {
                 job_id: result.job_id,
                 kind: JobKind::Llm,
@@ -41,9 +47,9 @@ pub fn materialize(result: &JobResult, download_dir: &Path) -> Result<ResultReco
             let payload = result.image_path_or_b64.as_deref().ok_or_else(|| {
                 AppError::Invalid(format!("{what} result has no {what} data"))
             })?;
-            let bytes = decode_image_payload(payload)?;
+            let bytes = decode_image_payload(payload, local)?;
             let actual = sha256_hex(&bytes);
-            verify(&actual, &result.sha256)?;
+            verify(&actual, &result.sha256, local)?;
 
             let path = write_image(&bytes, &actual, download_dir)?;
             Ok(ResultRecord {
@@ -59,8 +65,19 @@ pub fn materialize(result: &JobResult, download_dir: &Path) -> Result<ResultReco
     }
 }
 
-fn verify(actual: &str, claimed: &str) -> Result<()> {
-    if claimed.is_empty() || actual.eq_ignore_ascii_case(claimed) {
+fn verify(actual: &str, claimed: &str, local: bool) -> Result<()> {
+    // A same-machine (mock) worker may omit the hash; a remote peer must commit
+    // to one, so an empty claim from the network is a refusal, not a pass.
+    if claimed.is_empty() {
+        return if local {
+            Ok(())
+        } else {
+            Err(AppError::Invalid(
+                "result has no content hash; a remote peer must commit to one".into(),
+            ))
+        };
+    }
+    if actual.eq_ignore_ascii_case(claimed) {
         Ok(())
     } else {
         Err(AppError::Invalid(format!(
@@ -69,14 +86,24 @@ fn verify(actual: &str, claimed: &str) -> Result<()> {
     }
 }
 
-/// `image_path_or_b64` is base64 over the wire. A filesystem path is accepted
-/// only for a worker running on this machine — a remote peer naming a local
-/// path would otherwise be an arbitrary-file-read primitive.
-fn decode_image_payload(payload: &str) -> Result<Vec<u8>> {
-    if looks_like_path(payload) {
+/// A path read may never come from the network.
+const MAX_LOCAL_READ: u64 = 64 * 1024 * 1024;
+
+/// `image_path_or_b64` is base64 over the wire. A filesystem path is honored
+/// **only** when `local` — a worker running on this machine (the mock). A
+/// remote peer naming a local path would otherwise be an arbitrary-file-read
+/// primitive reaching the identity and wallet keys; for a remote peer a path
+/// simply falls through to base64 and is refused there.
+fn decode_image_payload(payload: &str, local: bool) -> Result<Vec<u8>> {
+    if local && looks_like_path(payload) {
         let path = PathBuf::from(payload);
         if !path.is_absolute() {
             return Err(AppError::Invalid("image path must be absolute".into()));
+        }
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.len() > MAX_LOCAL_READ {
+                return Err(AppError::Invalid("image file is too large".into()));
+            }
         }
         return std::fs::read(&path).map_err(|e| {
             AppError::Invalid(format!("cannot read image at {}: {e}", path.display()))
@@ -152,7 +179,7 @@ mod tests {
     fn writes_png_named_by_hash() {
         let d = dir();
         let bytes = b"\x89PNG\r\n\x1a\nnot-really-a-png-but-close-enough";
-        let rec = materialize(&image_result(bytes, None), &d).unwrap();
+        let rec = materialize(&image_result(bytes, None), &d, true).unwrap();
         let path = PathBuf::from(rec.image_path.unwrap());
         assert!(path.exists());
         assert!(path
@@ -170,18 +197,37 @@ mod tests {
         let err = materialize(
             &image_result(b"\x89PNG\r\n\x1a\nx", Some(&"a".repeat(64))),
             &d,
+            true,
         )
         .unwrap_err();
         assert!(err.to_string().contains("hash mismatch"));
     }
 
     #[test]
+    fn a_remote_worker_cannot_name_a_local_path() {
+        let d = dir();
+        // A remote (non-local) result that names an absolute path must not be
+        // read from disk — it falls through to base64 and is refused there.
+        let mut r = image_result(b"unused", Some(&"b".repeat(64)));
+        r.image_path_or_b64 = Some("/etc/passwd".into());
+        let err = materialize(&r, &d, false).unwrap_err().to_string();
+        assert!(err.contains("not valid base64"), "{err}");
+    }
+
+    #[test]
+    fn a_remote_result_must_carry_a_hash() {
+        // Empty claimed hash is accepted from the mock, refused from the network.
+        assert!(verify("abc", "", true).is_ok());
+        assert!(verify("abc", "", false).is_err());
+    }
+
+    #[test]
     fn path_payloads_are_read_only_when_absolute_and_present() {
         // Relative, path-shaped input is never opened — it falls through to
         // base64 and fails there.
-        assert!(decode_image_payload("etc/passwd").is_err());
+        assert!(decode_image_payload("etc/passwd", true).is_err());
         // An absolute path that is not there is an error, not an empty image.
-        let err = decode_image_payload("/definitely/not/here.png").unwrap_err();
+        let err = decode_image_payload("/definitely/not/here.png", true).unwrap_err();
         assert!(err.to_string().contains("cannot read image"));
     }
 
@@ -206,6 +252,7 @@ mod tests {
                 meta: serde_json::json!({}),
             },
             &d,
+            true,
         )
         .unwrap();
         let path = PathBuf::from(rec.image_path.unwrap());

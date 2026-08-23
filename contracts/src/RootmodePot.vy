@@ -65,6 +65,12 @@ struct Channel:
     # Highest spend ticket recorded. Close may only return reserved - earned.
     # Billed work stays the worker's even if they have not collected yet.
     earned: uint256
+    # Per-job and per-day caps, snapshotted at the first reserve. Settlement is
+    # checked against these, not the account's live limits, so lowering the
+    # limits after work is delivered cannot block settle and reclaim the lock.
+    # Appended last so the on-chain word layout the worker reads is unchanged.
+    maxPerJob: uint256
+    maxPerDay: uint256
 
 accounts: public(HashMap[address, Account])
 channels: public(HashMap[address, HashMap[address, Channel]])
@@ -211,6 +217,9 @@ def reserve(
 
     if self.channels[client][workerPayout].appKey == empty(address):
         self.channels[client][workerPayout].appKey = self.accounts[client].appKey
+        # Freeze the caps for the life of this channel.
+        self.channels[client][workerPayout].maxPerJob = self.accounts[client].maxPerJob
+        self.channels[client][workerPayout].maxPerDay = self.accounts[client].maxPerDay
     elif self.channels[client][workerPayout].appKey != self.accounts[client].appKey:
         raise "BadSignature"
 
@@ -309,10 +318,12 @@ def _recognize(
         raise "OverCap"
     delta: uint256 = cumulative - earned
 
-    if self.accounts[client].maxPerJob == 0 or delta > self.accounts[client].maxPerJob:
+    # Caps come from the channel's snapshot, taken at reserve, not the account's
+    # live limits — a client cannot lower them after work to block settlement.
+    if self.channels[client][workerPayout].maxPerJob == 0 or delta > self.channels[client][workerPayout].maxPerJob:
         raise "OverCap"
     self._rollDay(client)
-    maxPerDay: uint256 = self.accounts[client].maxPerDay
+    maxPerDay: uint256 = self.channels[client][workerPayout].maxPerDay
     if maxPerDay > 0 and self.accounts[client].spentToday + delta > maxPerDay:
         raise "OverCap"
 

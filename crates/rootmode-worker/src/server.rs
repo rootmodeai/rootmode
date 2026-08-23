@@ -56,6 +56,14 @@ fn payout_of(raw: &str) -> Option<String> {
     looks_right.then(|| address.to_string())
 }
 
+/// Caps on what untrusted peers can make this node hold at once, independent
+/// of the GPU semaphore (which only gates `backend.run`, long after a frame is
+/// buffered and verified). Generous enough never to touch honest use; low
+/// enough that a flood of large submits cannot exhaust memory or file
+/// descriptors before any admission gate.
+const MAX_CONNECTIONS: usize = 512;
+const MAX_INFLIGHT_JOBS: usize = 256;
+
 pub struct Worker {
     config: Config,
     identity: Identity,
@@ -63,6 +71,12 @@ pub struct Worker {
     /// Bounds concurrent jobs across every connection, because the GPU is
     /// shared whether or not the clients know about each other.
     permits: Arc<Semaphore>,
+    /// Bounds concurrent inbound connections, so one peer cannot open a
+    /// thousand sockets and exhaust descriptors/memory before any job runs.
+    conn_permits: Arc<Semaphore>,
+    /// Bounds jobs being parsed, verified and queued at once — the work before
+    /// a GPU permit — capping the memory a flood of large submits can pin.
+    job_permits: Arc<Semaphore>,
     /// What this node has served since the last report. Always counted;
     /// only sent anywhere when the operator configured a collector.
     meter: Meter,
@@ -76,11 +90,28 @@ pub struct Worker {
     pending_pays: Mutex<HashMap<Uuid, tokio::sync::oneshot::Sender<JobPay>>>,
     /// Prepaid 1M-token chunks, held until actual capture or timeout.
     pending_bonds: Mutex<HashMap<Uuid, Bond>>,
+    /// Test-only override for the on-chain channel read, so the priced-flow
+    /// tests can exercise streaming and capture without a live RPC while the
+    /// production path still goes to the chain.
+    #[cfg(test)]
+    test_channel: Mutex<Option<crate::chain::ChannelState>>,
 }
 
 struct Bond {
     pay: JobPay,
     delta: u64,
+    /// The account's on-chain app key, read once when the bond is admitted.
+    /// Every later ticket on this job (top-up, capture) must be signed by it,
+    /// checked against this copy so no extra RPC round-trip is needed.
+    app_key: String,
+}
+
+/// Unix seconds now, saturating to 0 before the epoch.
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Removes a job from the cancellable set the moment it stops existing —
@@ -111,12 +142,45 @@ impl Worker {
             registry,
             channels: Arc::new(Channels::load(&config.payments.channels_file)),
             permits,
+            conn_permits: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+            job_permits: Arc::new(Semaphore::new(MAX_INFLIGHT_JOBS)),
             meter: Meter::new(),
             cancellations: Mutex::new(HashMap::new()),
             pending_pays: Mutex::new(HashMap::new()),
             pending_bonds: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            test_channel: Mutex::new(None),
             config,
         }
+    }
+
+    /// Read the payer's channel: its remaining lock and the on-chain app key.
+    /// In test builds an injected value stands in for the RPC so the priced
+    /// flow can be exercised in-process.
+    async fn read_channel(
+        &self,
+        payer: &str,
+        payout: &str,
+    ) -> Result<Option<crate::chain::ChannelState>> {
+        #[cfg(test)]
+        if let Some(state) = self
+            .test_channel
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+        {
+            return Ok(Some(state));
+        }
+        crate::chain::channel_state(&self.config.payments, payer, payout).await
+    }
+
+    #[cfg(test)]
+    fn set_test_channel(&self, remaining: u64, app_key: &str) {
+        *self.test_channel.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(crate::chain::ChannelState {
+                remaining,
+                app_key: app_key.to_string(),
+            });
     }
 
     /// Build everything from a config file: identity, backends, model list.
@@ -247,7 +311,15 @@ impl Worker {
         self.pending_bonds
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(submit.job_id, Bond { pay: bond, delta });
+            .insert(
+                submit.job_id,
+                Bond {
+                    pay: bond,
+                    delta,
+                    // Filled by `ensure_lock` once it has read the on-chain key.
+                    app_key: String::new(),
+                },
+            );
         Ok(delta)
     }
 
@@ -316,33 +388,68 @@ impl Worker {
         }
     }
 
-    /// Confirm the payer still has unused lock on-chain. Skip when there is
-    /// no RPC: holdback still stops the goods leaving without a signature.
+    /// Confirm, before any GPU time, that this priced job will actually pay:
+    /// the payer still has unused lock, and the prepaid ticket is signed by the
+    /// account's on-chain app key — the key the contract checks `settle`
+    /// against. A ticket signed by anyone else settles to nothing, so serving
+    /// it is free work. The app key is stashed on the bond so the later top-up
+    /// and capture tickets are held to the same bar.
+    ///
+    /// Fails closed: a priced node that cannot read the chain (no RPC, or a
+    /// transient RPC error) cannot verify payment and so must refuse, rather
+    /// than serve for free.
     async fn ensure_lock(&self, submit: &JobSubmit) -> std::result::Result<(), WorkerError> {
         let Some(payout) = payout_of(&self.config.worker.payout_address) else {
             return Ok(());
         };
         let Some(payer) = submit.payer.as_deref() else {
-            if self.config.payments.require_auth || !self.config.payments.rpc.trim().is_empty() {
+            return Err(WorkerError::Rejected(
+                "priced jobs need a payer address so this node can check the on-chain lock".into(),
+            ));
+        };
+        let domain = self
+            .config
+            .payments
+            .domain()
+            .ok_or_else(|| WorkerError::Rejected("this node has no settlement contract".into()))?;
+
+        let state = match self.read_channel(payer, &payout).await {
+            Ok(Some(state)) => state,
+            Ok(None) => {
                 return Err(WorkerError::Rejected(
-                    "priced jobs need a payer address so this node can check the on-chain lock"
+                    "this node cannot verify payment without an RPC (set payments.rpc); \
+                     priced work refused"
                         .into(),
                 ));
             }
-            return Ok(());
+            // A configured RPC that errored is transient — fail closed rather
+            // than serve a priced job we cannot check.
+            Err(e) => return Err(e),
         };
-        match crate::chain::remaining_lock(&self.config.payments, payer, &payout).await {
-            Ok(None) => Ok(()),
-            Ok(Some(0)) => Err(WorkerError::Rejected(
+        if state.remaining == 0 {
+            return Err(WorkerError::Rejected(
                 "no remaining reserve on this channel; lock funds before sending work".into(),
-            )),
-            Ok(Some(_)) => Ok(()),
-            Err(e) if self.config.payments.require_auth => Err(e),
-            Err(e) => {
-                tracing::warn!("could not check on-chain lock: {e}");
-                Ok(())
-            }
+            ));
         }
+        if crate::chain::is_zero_address(&state.app_key) {
+            return Err(WorkerError::Rejected(
+                "no app key is registered on-chain for this payer".into(),
+            ));
+        }
+        if let Some(bond) = submit.bond.as_ref() {
+            bond.ticket
+                .check(&domain, &bond.sig, &state.app_key, now_secs())
+                .map_err(|e| WorkerError::Rejected(format!("chunk ticket: {e}")))?;
+        }
+        if let Some(entry) = self
+            .pending_bonds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(&submit.job_id)
+        {
+            entry.app_key = state.app_key;
+        }
+        Ok(())
     }
 
     /// The open payment channels, for settlement and for the operator's screen.
@@ -480,12 +587,20 @@ impl Worker {
                 accepted = listener.accept() => {
                     match accepted {
                         Ok((stream, addr)) => {
-                            let worker = self.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = worker.serve_connection(stream).await {
-                                    tracing::info!(%addr, "connection ended: {e}");
+                            match self.conn_permits.clone().try_acquire_owned() {
+                                Ok(permit) => {
+                                    let worker = self.clone();
+                                    tokio::spawn(async move {
+                                        let _permit = permit;
+                                        if let Err(e) = worker.serve_connection(stream).await {
+                                            tracing::info!(%addr, "connection ended: {e}");
+                                        }
+                                    });
                                 }
-                            });
+                                // At the ceiling: drop the stream (closing it)
+                                // rather than pile on more concurrent work.
+                                Err(_) => tracing::warn!(%addr, "connection limit reached; refusing"),
+                            }
                         }
                         Err(e) => tracing::warn!("accept failed: {e}"),
                     }
@@ -588,9 +703,16 @@ impl Worker {
                 tracing::info!(peer = %hello.peer_id, "client said hello");
             }
             Ok(ClientMessage::JobSubmit(submit)) => {
+                let job_id = submit.job_id;
+                // Bound in-flight jobs before retaining the (up to 64 MiB) raw
+                // frame or spawning: a flood cannot pin unbounded memory.
+                let Ok(permit) = self.job_permits.clone().try_acquire_owned() else {
+                    tracing::warn!(%job_id, "in-flight job limit reached; refusing");
+                    send_failed(tx, job_id, "worker is busy; too many jobs in flight");
+                    return;
+                };
                 let worker = self.clone();
                 let tx = tx.clone();
-                let job_id = submit.job_id;
                 let raw = text.to_string();
                 let notify = Arc::new(tokio::sync::Notify::new());
                 self.cancellations
@@ -598,6 +720,7 @@ impl Worker {
                     .unwrap_or_else(|e| e.into_inner())
                     .insert(job_id, notify.clone());
                 tokio::spawn(async move {
+                    let _permit = permit;
                     worker
                         .handle_submit_cancellable(submit, tx, notify, Some(raw))
                         .await
@@ -666,6 +789,10 @@ impl Worker {
             send_failed(&tx, job_id, &e.to_string());
             return;
         }
+        // `raw` was only needed for signature verification against the exact
+        // wire bytes. Release it now — held to the job's end it would pin up to
+        // 64 MiB per in-flight job.
+        drop(raw);
 
         let mut submit = submit;
         let holdback = self.holdback_for(&submit.payload);
@@ -963,14 +1090,20 @@ impl Worker {
         let Some(domain) = self.config.payments.domain() else {
             return false;
         };
-        if pay.ticket.recover(&domain, &pay.sig).is_err() {
-            return false;
-        }
-        let new_delta = pay.ticket.cumulative.saturating_sub(already);
         let mut bonds = self.pending_bonds.lock().unwrap_or_else(|e| e.into_inner());
         let Some(bond) = bonds.get_mut(&job_id) else {
             return false;
         };
+        // A top-up ticket must be signed by the same on-chain app key as the
+        // original bond, or it will never settle.
+        if pay
+            .ticket
+            .check(&domain, &pay.sig, &bond.app_key, now_secs())
+            .is_err()
+        {
+            return false;
+        }
+        let new_delta = pay.ticket.cumulative.saturating_sub(already);
         if new_delta <= bond.delta {
             return false;
         }
@@ -998,6 +1131,7 @@ impl Worker {
         let Some(bond) = bond else {
             return;
         };
+        let app_key = bond.app_key.clone();
         let amount = amount.min(bond.delta).max(1);
         let usage = match &submit.payload {
             JobPayload::Llm(p) => TokenUsage::measure(
@@ -1051,9 +1185,9 @@ impl Worker {
         };
 
         let chosen = match paid {
-            Some(pay) if self.bank_pay(submit, &pay, amount).is_ok() => pay,
+            Some(pay) if self.bank_pay(submit, &pay, amount, &app_key).is_ok() => pay,
             _ => {
-                if let Err(e) = self.bank_pay(submit, &bond.pay, bond.delta) {
+                if let Err(e) = self.bank_pay(submit, &bond.pay, bond.delta, &app_key) {
                     tracing::warn!(%job_id, "could not bank prepaid chunk: {e}");
                     return;
                 }
@@ -1089,6 +1223,7 @@ impl Worker {
         submit: &JobSubmit,
         pay: &JobPay,
         amount: u64,
+        app_key: &str,
     ) -> std::result::Result<(), String> {
         if pay.job_id != submit.job_id {
             return Err("pay ticket is for a different job".into());
@@ -1108,12 +1243,8 @@ impl Worker {
                 return Err("ticket is for a different payer".into());
             }
         }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
         self.channels
-            .accept_spend(&pay.ticket, &pay.sig, &domain, amount, now)
+            .accept_spend(&pay.ticket, &pay.sig, &domain, app_key, amount, now_secs() as i64)
             .map_err(|e| format!("payment authorisation: {e}"))?;
         Ok(())
     }
@@ -1632,12 +1763,25 @@ mod tests {
         cfg
     }
 
+    /// The address `sign_pay` signs with; here the paying client and the
+    /// account's app key are the same key.
+    fn test_payer() -> String {
+        use k256::ecdsa::SigningKey;
+        use rootmode_core::payments::address_of;
+        let key = SigningKey::from_bytes(&[8u8; 32].into()).unwrap();
+        address_of(key.verifying_key())
+    }
+
     fn priced_worker() -> Worker {
-        Worker::new(
+        let worker = Worker::new(
             priced_config(),
             Identity::generate(),
             crate::backends::testing::registry_priced(JobKind::Llm, 20.0),
-        )
+        );
+        // Stand in for the on-chain read: ample remaining lock, and the app key
+        // the prepaid ticket is signed by.
+        worker.set_test_channel(u64::MAX, &test_payer());
+        worker
     }
 
     fn sign_pay(job_id: Uuid, amount: u64, worker_payout: &str) -> JobPay {
@@ -1683,6 +1827,8 @@ mod tests {
 
     fn priced_submit(job_id: Uuid, chunk: u64) -> JobSubmit {
         let mut submit = JobSubmit::new(job_id, "client", payload());
+        // The payer names whose on-chain lock and app key the worker checks.
+        submit.payer = Some(test_payer());
         submit.bond = Some(sign_pay(
             job_id,
             chunk,

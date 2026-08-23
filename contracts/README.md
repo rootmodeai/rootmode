@@ -7,8 +7,11 @@ deploy script stay in Solidity and call them through `src/interfaces.sol`.
 Clients deposit USDC once. The wallet deposits, sets caps, and withdraws
 **unlocked** funds. Work is paid from a per-worker lock the client's **app
 key** signs — a forked client cannot skip that by editing JavaScript. The
-**worker** signs `settle` with its own Ethereum key so collection does not
-depend on the client.
+**worker** submits the `settle` transaction (and pays its gas) with its own
+Ethereum key, so it does not need the client online to *collect* — but the
+amount is still authorised by the client's app-key ticket, which the contract
+verifies. The caps a job is checked against are frozen at `reserve`, so
+lowering them afterwards cannot block a settle for work already delivered.
 
 ```
 deposit → reserve (lock) → stream against prepaid slices → capture actual

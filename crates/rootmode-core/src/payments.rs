@@ -294,6 +294,30 @@ impl SpendTicket {
     pub fn recover(&self, domain: &Domain, sig: &str) -> Result<String> {
         recover(&self.digest(domain)?, sig)
     }
+
+    /// Everything a worker must confirm before doing or banking priced work.
+    ///
+    /// `app_key` is the key the client registered on the pot for this account —
+    /// exactly what the contract checks `settle` against. A ticket signed by any
+    /// other key can never settle, so recovering *a* signer is not enough: the
+    /// signer must be `app_key`, and the ticket must not have expired. This is
+    /// the pot-path equivalent of [`SpendingAuth::check`], which the earlier
+    /// session-auth path already had.
+    pub fn check(&self, domain: &Domain, sig: &str, app_key: &str, now: u64) -> Result<()> {
+        if self.deadline <= now {
+            return Err(CoreError::Invalid(format!(
+                "spend ticket expired at {}, it is now {now}",
+                self.deadline
+            )));
+        }
+        let signer = self.recover(domain, sig)?;
+        if !signer.eq_ignore_ascii_case(app_key) {
+            return Err(CoreError::Signature(format!(
+                "ticket signed by {signer}, not by the account's app key {app_key}"
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// `jobId` on chain is the keccak of the protocol job uuid, so a UUID fits a bytes32.
@@ -355,20 +379,22 @@ pub fn recover(digest: &[u8; 32], sig_hex: &str) -> Result<String> {
     };
     let signature = Signature::from_slice(&bytes[..64])
         .map_err(|e| CoreError::Signature(format!("bad signature: {e}")))?;
-    let low = signature.normalize_s().unwrap_or(signature);
-    for rec_byte in [v, v ^ 1] {
-        let Some(recovery) = RecoveryId::from_byte(rec_byte) else {
-            continue;
-        };
-        for sig in [&signature, &low] {
-            if let Ok(key) = VerifyingKey::recover_from_prehash(digest, sig, recovery) {
-                return Ok(address_of(&key));
-            }
-        }
+    // Match the contract's `ecrecover`, which rejects a high-s (malleable)
+    // signature and uses the recovery id exactly as given. If this helper
+    // "repaired" a signature by normalizing s or flipping v, it would recover a
+    // signer here that the contract — handed the raw bytes at settle — does not,
+    // so the worker would do the work and never be paid. `normalize_s` returns
+    // `Some` only when the input was high-s, which is exactly what to reject.
+    if signature.normalize_s().is_some() {
+        return Err(CoreError::Signature(
+            "signature has a high-s value (malleable); the contract will reject it".into(),
+        ));
     }
-    Err(CoreError::Signature(
-        "cannot recover a signer from this signature".into(),
-    ))
+    let recovery =
+        RecoveryId::from_byte(v).ok_or_else(|| CoreError::Signature("bad recovery id".into()))?;
+    let key = VerifyingKey::recover_from_prehash(digest, &signature, recovery)
+        .map_err(|e| CoreError::Signature(format!("cannot recover a signer: {e}")))?;
+    Ok(address_of(&key))
 }
 
 /// The Ethereum address of a public key: last 20 bytes of the keccak of the
@@ -562,5 +588,32 @@ mod tests {
         };
         let sig = sign(&key, &ticket.digest(&domain()).unwrap());
         assert_eq!(recover(&ticket.digest(&domain()).unwrap(), &sig).unwrap(), address);
+    }
+
+    /// A spend ticket must be signed by the account's registered app key, not
+    /// merely by *some* key. This is the check whose absence let any throwaway
+    /// key authorize a priced job; if it regresses, this fails.
+    #[test]
+    fn a_spend_ticket_signed_by_the_wrong_key_is_refused() {
+        let (app, app_addr) = wallet(20);
+        let (thief, _) = wallet(21);
+        let ticket = SpendTicket {
+            client: "0x00000000000000000000000000000000000000a1".into(),
+            worker_payout: "0x00000000000000000000000000000000000000b0".into(),
+            cumulative: 250_000,
+            deadline: 9_000_000_000,
+        };
+        // Signed by the thief, but the account's registered app key is `app`.
+        let bad = sign(&thief, &ticket.digest(&domain()).unwrap());
+        let err = ticket
+            .check(&domain(), &bad, &app_addr, 1_000)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not by the account's app key"), "{err}");
+        // The real app key's signature is accepted...
+        let good = sign(&app, &ticket.digest(&domain()).unwrap());
+        assert!(ticket.check(&domain(), &good, &app_addr, 1_000).is_ok());
+        // ...but not once it has expired.
+        assert!(ticket.check(&domain(), &good, &app_addr, 9_000_000_001).is_err());
     }
 }

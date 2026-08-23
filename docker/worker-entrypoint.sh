@@ -190,8 +190,10 @@ else
         fi
     } > "$CONFIG"
 
-    echo "wrote $CONFIG:"
-    sed 's/^/  /' "$CONFIG"
+    echo "wrote $CONFIG (api_key redacted):"
+    # Never print the upstream backend credential to stdout — it would land in
+    # docker logs / journald. (The pay key is already kept out of the config.)
+    sed -e 's/^\([[:space:]]*api_key[[:space:]]*=[[:space:]]*\).*/\1"***"/' -e 's/^/  /' "$CONFIG"
 fi
 
 exec rootmode-worker "$@" --config "$CONFIG"

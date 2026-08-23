@@ -651,7 +651,7 @@ $("deposit").onclick = async () => {
     try {
       const rec = await eth("eth_getTransactionReceipt", [hash]);
       const [from] = await eth("eth_requestAccounts");
-      await fetch("/deposit", {
+      await fetch("/deposit?t=" + encodeURIComponent(q.get("t") || ""), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
