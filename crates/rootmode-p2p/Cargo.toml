@@ -1,0 +1,29 @@
+[package]
+name = "rootmode-p2p"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "libp2p node shared by the rootmode client, worker and bootstrap server"
+
+[[bin]]
+name = "rootmode-bootstrap"
+path = "src/bin/bootstrap.rs"
+
+[dependencies]
+rootmode-core = { path = "../rootmode-core" }
+
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+hex.workspace = true
+
+futures = "0.3"
+libp2p = { version = "0.56", features = [
+  "tokio", "tcp", "dns", "noise", "yamux", "macros",
+  "kad", "identify", "ping", "relay", "dcutr", "mdns", "ed25519",
+] }
+libp2p-stream = "0.4.0-alpha"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+tracing = "0.1"
+clap = { version = "4", features = ["derive"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -1,0 +1,821 @@
+<title>RootmodeProtocol v1</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="Versioned JSON messages between a client and a worker: five message types, two transports, and one rule that keeps a future v2 from breaking anything running today." />
+<meta name="theme-color" content="#7433f7" />
+<link rel="canonical" href="https://rootmode.ai/protocol" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="rootmode" />
+<meta property="og:title" content="RootmodeProtocol v1" />
+<meta property="og:description" content="Versioned JSON messages between a client and a worker: five message types, two transports, and one rule that keeps a future v2 from breaking anything running today." />
+<meta property="og:url" content="https://rootmode.ai/protocol" />
+<meta property="og:image" content="https://rootmode.ai/assets/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="RootmodeProtocol v1" />
+<meta name="twitter:description" content="Versioned JSON messages between a client and a worker: five message types, two transports, and one rule that keeps a future v2 from breaking anything running today." />
+<meta name="twitter:image" content="https://rootmode.ai/assets/og.png" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<style>
+  /* ---------- tokens: light is the default, always ---------- */
+  :root {
+    --paper:      #ffffff;
+    --paper-2:    #f5f1ff;
+    --paper-3:    #ffffff;
+    --line:       #e4dbf7;
+    --ink:        #180f38;
+    --ink-2:      #5f5680;
+    --ink-3:      #8b82ab;
+    --accent:     #7433f7;
+    --accent-ink: #5a1fe0;
+    --accent-bg:  #f0e7ff;
+    --band:       #180f38;
+    --dot:        rgba(116, 51, 247, .13);
+    --code-bg:    #180f38;
+    --code-fg:    #e9e4fa;
+    --code-dim:   #7c73a0;
+    --code-accent: #b9a5ff;
+    --code-amber: #e0a879;
+    --warn-bg:    #fdf5ef;
+    --warn-line:  #d9843f;
+    --card-shadow: 0 30px 60px -40px rgba(18, 16, 28, .45);
+    --btn-ink:    #180f38;
+    --btn-on:     #ffffff;
+
+    --sans: "Avenir Next", "Helvetica Neue", ui-sans-serif, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --pad: clamp(18px, 4vw, 40px);
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #0d0f11;
+    --paper-2:    #150f2c;
+    --paper-3:    #1a1338;
+    --line:       #2e2454;
+    --ink:        #f3f0ff;
+    --ink-2:      #a79ecb;
+    --ink-3:      #7d74a3;
+    --accent:     #a78bfa;
+    --accent-ink: #cabaff;
+    --accent-bg:  #241a4d;
+    --band:       #150f2c;
+    --dot:        rgba(167, 139, 250, .11);
+    --code-bg:    #0c0722;
+    --code-fg:    #e9e4fa;
+    --code-dim:   #786f9c;
+    --code-accent: #b9a5ff;
+    --code-amber: #e0a879;
+    --warn-bg:    #1d1611;
+    --warn-line:  #c07c3c;
+    --card-shadow: 0 30px 60px -40px rgba(0, 0, 0, .9);
+    --btn-ink:    #f3f0ff;
+    --btn-on:     #0d0f11;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 17px; line-height: 1.62;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+
+  .wrap { width: min(900px, 100%); margin-inline: auto; padding-inline: var(--pad); }
+  .wide { width: min(1120px, 100%); margin-inline: auto; padding-inline: var(--pad); }
+
+  h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -0.035em; text-wrap: balance; line-height: 1.05; }
+  h1 { font-size: clamp(38px, 6vw, 68px); }
+  h2 { font-size: clamp(27px, 3.6vw, 40px); }
+  h3 { font-size: 19px; letter-spacing: -0.02em; line-height: 1.25; }
+  p { margin: 0; }
+  a { color: var(--accent-ink); }
+  .accentword { color: var(--accent); }
+
+  code {
+    font-family: var(--mono); font-size: 0.88em;
+    background: var(--paper-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 5px; color: var(--ink);
+  }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent);
+    display: flex; align-items: center; gap: 9px;
+  }
+  .eyebrow::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 0 4px var(--accent-bg);
+  }
+
+  /* ---------- nav ---------- */
+  .nav { position: sticky; top: 14px; z-index: 40; padding-inline: var(--pad); margin-top: 14px; }
+  .nav-inner {
+    width: min(1120px, 100%); margin-inline: auto;
+    display: flex; align-items: center; gap: 10px;
+    background: color-mix(in srgb, var(--paper) 85%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 8px 8px 18px;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; letter-spacing: -0.03em; font-size: 17px; text-decoration: none; color: var(--ink); }
+  .doclinks { display: flex; gap: 22px; margin-inline: auto; font-size: 15px; font-weight: 500; }
+  .doclinks a { color: var(--ink-2); text-decoration: none; }
+  .doclinks a:hover { color: var(--ink); }
+  .doclinks a[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  @media (max-width: 860px) { .doclinks { gap: 14px; font-size: 14px; margin-inline: 0 auto; } }
+  @media (max-width: 620px) { .doclinks { display: none; } .nav-inner { justify-content: space-between; } }
+
+  .icon-btn {
+    width: 38px; height: 38px; flex: none; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--paper-3); color: var(--ink);
+    display: grid; place-items: center; cursor: pointer; padding: 0;
+    transition: border-color .15s ease, color .15s ease;
+  }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .icon-btn .moon { display: none; }
+  :root[data-theme="dark"] .icon-btn .sun { display: none; }
+  :root[data-theme="dark"] .icon-btn .moon { display: block; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    padding: 13px 24px; border-radius: 999px; border: 1px solid transparent;
+    font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer; font-family: inherit;
+    transition: transform .15s ease, background .15s ease, border-color .15s ease, color .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-solid { background: var(--btn-ink); color: var(--btn-on); }
+  .btn-solid:hover { background: var(--accent); color: #fff; }
+  .btn-accent { background: var(--accent); color: #fff; }
+  .btn-ghost { border-color: var(--line); background: var(--paper-3); color: var(--ink); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { padding: 10px 18px; font-size: 14px; }
+  a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  /* ---------- dotted ground ---------- */
+  .dots { position: relative; }
+  .dots::before {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background-image: radial-gradient(var(--dot) 1.5px, transparent 1.6px);
+    background-size: 15px 15px;
+    -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 40%, #000 20%, transparent 78%);
+    mask-image: radial-gradient(ellipse 75% 65% at 50% 40%, #000 20%, transparent 78%);
+  }
+  .dots > * { position: relative; z-index: 1; }
+
+  /* ---------- page header ---------- */
+  .top { padding-block: clamp(48px, 7vw, 88px) clamp(34px, 5vw, 56px); }
+  .top .inner { display: grid; gap: 20px; justify-items: start; }
+  .lede { font-size: clamp(17px, 1.9vw, 20px); color: var(--ink-2); max-width: 58ch; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+  section { padding-block: clamp(44px, 6vw, 76px); }
+  .band { background: var(--paper-2); border-block: 1px solid var(--line); }
+  .head { display: grid; gap: 14px; max-width: 60ch; margin-bottom: 30px; }
+  .head p { color: var(--ink-2); }
+  .stack { display: grid; gap: 22px; }
+  .stack > p { color: var(--ink-2); }
+
+  /* ---------- cards ---------- */
+  .reqs, .facts { display: grid; gap: 16px; grid-template-columns: repeat(3, minmax(0,1fr)); }
+  @media (max-width: 820px) { .reqs, .facts { grid-template-columns: 1fr; } }
+  .req, .fact {
+    background: var(--paper-3); border: 1px solid var(--line); border-radius: 18px;
+    padding: 24px; display: grid; gap: 9px; align-content: start;
+  }
+  .req p, .fact p { font-size: 15.5px; color: var(--ink-2); }
+  .fact .no { font-family: var(--mono); font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--warn-line); font-weight: 700; }
+
+  /* ---------- numbered flow ---------- */
+  .flow { display: grid; gap: 30px; counter-reset: s; }
+  .stepblk { display: grid; gap: 14px; padding-left: 54px; position: relative; }
+  .stepblk::before {
+    counter-increment: s; content: counter(s);
+    position: absolute; left: 0; top: 0;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--accent-bg); color: var(--accent-ink);
+    display: grid; place-items: center; font-size: 14px; font-weight: 800;
+  }
+  .stepblk p { color: var(--ink-2); }
+  @media (max-width: 560px) { .stepblk { padding-left: 0; padding-top: 46px; } }
+
+  /* ---------- terminal / code ---------- */
+  .term, .exchange { background: var(--code-bg); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .term-bar, .exchange-bar { display: flex; align-items: center; gap: 7px; padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .term-bar i, .exchange-bar i { width: 9px; height: 9px; border-radius: 50%; background: #443a6e; display: block; }
+  .term-bar b, .exchange-bar b { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--code-dim); margin-left: 8px; }
+  .term pre, .exchange pre { margin: 0; padding: 18px 16px; overflow-x: auto; font-family: var(--mono); font-size: 12.6px; line-height: 1.85; color: var(--code-fg); }
+  .term .c, .exchange .c { color: var(--code-dim); }
+  .term .g, .exchange .to { color: var(--code-accent); }
+  .term .p, .exchange .from { color: var(--code-amber); }
+
+  /* ---------- tables ---------- */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--paper-3); }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; background: var(--paper-2); }
+  tr:last-child td { border-bottom: 0; }
+  td code { background: none; border: 0; padding: 0; color: var(--accent-ink); white-space: nowrap; }
+  td:last-child { color: var(--ink-2); }
+
+  /* ---------- callout ---------- */
+  .note { border-left: 3px solid var(--warn-line); background: var(--warn-bg); border-radius: 0 14px 14px 0; padding: 17px 20px; display: grid; gap: 6px; }
+  .note b { font-size: 15px; }
+  .note p { font-size: 15px; color: var(--ink-2); }
+
+  /* ---------- checklists ---------- */
+  .checklist, .bullets { display: grid; gap: 16px; }
+  .ck, .bl { display: grid; grid-template-columns: 22px 1fr; gap: 3px 12px; align-items: start; }
+  .ck svg, .bl svg { grid-row: span 2; margin-top: 3px; color: var(--accent); }
+  .ck strong, .bl strong { font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
+  .ck span, .bl span { color: var(--ink-2); font-size: 15px; }
+
+  /* ---------- accordions ---------- */
+  .trouble { display: grid; gap: 10px; }
+  details { border: 1px solid var(--line); border-radius: 16px; background: var(--paper-3); padding: 16px 20px; }
+  summary { cursor: pointer; list-style: none; font-weight: 700; letter-spacing: -0.02em; font-size: 17px; display: flex; justify-content: space-between; gap: 18px; align-items: center; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; color: var(--accent); font-weight: 700; }
+  details[open] summary::after { content: "3"; }
+  details p { margin-top: 10px; color: var(--ink-2); font-size: 15.5px; max-width: 66ch; }
+  details p + p { margin-top: 9px; }
+
+  /* ---------- diagram ---------- */
+  .diagram { background: var(--paper-3); border: 1px solid var(--line); border-radius: 20px; padding: clamp(18px, 3vw, 30px); overflow-x: auto; }
+  .diagram svg { display: block; min-width: 560px; width: 100%; height: auto; }
+  .diagram .box { fill: var(--paper-3); stroke: var(--line); }
+  .diagram .box-dark { fill: var(--band); stroke: var(--line); }
+  .diagram .lbl { font-family: var(--sans); font-size: 13px; font-weight: 700; fill: var(--ink); }
+  .diagram .lbl-inv { font-family: var(--sans); font-size: 13px; font-weight: 700; fill: #f3f0ff; }
+  .diagram .sub { font-family: var(--sans); font-size: 11.5px; fill: var(--ink-2); }
+  .diagram .sub-inv { font-family: var(--sans); font-size: 11.5px; fill: #918ab3; }
+  .diagram .wire { stroke: var(--line); stroke-width: 1.5; fill: none; }
+  .diagram .wire-live { stroke: var(--accent); stroke-width: 2; fill: none; stroke-dasharray: 5 6; animation: dash 1.4s linear infinite; }
+  @keyframes dash { to { stroke-dashoffset: -22; } }
+  .diagram .edge { font-family: var(--mono); font-size: 11px; fill: var(--ink-3); }
+  .diagram .edge-live { font-family: var(--mono); font-size: 11px; fill: var(--accent); }
+
+  /* ---------- key pair block ---------- */
+  .keys { display: grid; gap: 10px; background: var(--paper-3); border: 1px solid var(--line); border-radius: 16px; padding: 20px; overflow-x: auto; }
+  .keys div { display: grid; grid-template-columns: 84px 1fr; gap: 14px; align-items: baseline; font-family: var(--mono); font-size: 12.5px; }
+  .keys span:first-child { color: var(--ink-3); }
+  .keys span:last-child { color: var(--ink); word-break: break-all; }
+
+  /* ---------- protocol: rules ---------- */
+  .rules { display: grid; gap: 12px; counter-reset: r; }
+  .rule { display: grid; grid-template-columns: 30px 1fr; gap: 14px; align-items: start; background: var(--paper-3); border: 1px solid var(--line); border-radius: 14px; padding: 17px 19px; }
+  .rule::before {
+    counter-increment: r; content: counter(r);
+    width: 28px; height: 28px; border-radius: 50%; background: var(--accent-bg); color: var(--accent-ink);
+    display: grid; place-items: center; font-size: 12.5px; font-weight: 800;
+  }
+  .rule p { font-size: 16px; color: var(--ink-2); }
+  .rule p b { color: var(--ink); font-weight: 700; }
+
+  /* ---------- protocol: messages ---------- */
+  .msg { background: var(--paper-3); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+  .msg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 15px 18px; border-bottom: 1px solid var(--line); background: var(--paper-2); }
+  .msg-head h3 { font-family: var(--mono); font-size: 15px; font-weight: 700; letter-spacing: 0; }
+  .dir { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; margin-left: auto; font-weight: 700; }
+  .dir.out { background: var(--accent-bg); color: var(--accent-ink); }
+  .dir.in { background: var(--warn-bg); color: var(--warn-line); }
+  .msg-body { display: grid; gap: 16px; padding: 18px; }
+  .msg-body > p { font-size: 15.5px; color: var(--ink-2); }
+  .msg pre {
+    margin: 0; padding: 16px; overflow-x: auto; background: var(--code-bg); border-radius: 12px;
+    font-family: var(--mono); font-size: 12.6px; line-height: 1.8; color: var(--code-fg);
+  }
+  .msg pre .k { color: var(--code-accent); }
+  .msg pre .s { color: var(--code-amber); }
+  .msg pre .c { color: var(--code-dim); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 9px; }
+  .chip { font-family: var(--mono); font-size: 13px; color: var(--ink-2); background: var(--paper-3); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; }
+
+  /* ---------- cta + footer ---------- */
+  .cta-box { background: var(--band); border-radius: 28px; padding: clamp(32px, 5vw, 56px) var(--pad); text-align: center; display: grid; gap: 18px; justify-items: center; }
+  .cta-box h2 { color: #f3f0ff; }
+  .cta-box p { color: #9b92bd; max-width: 48ch; }
+  .cta-box .btn-solid { background: #f3f0ff; color: #180f38; }
+  .cta-box .btn-ghost { background: transparent; border-color: #382c63; color: #f3f0ff; }
+
+  footer { border-top: 1px solid var(--line); padding-block: 30px; margin-top: clamp(40px, 6vw, 70px); }
+  .foot { display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: center; font-size: 14px; color: var(--ink-2); }
+  .foot a { text-decoration: none; color: inherit; }
+  .foot a:hover { color: var(--accent); }
+  .foot .right { margin-left: auto; }
+
+  /* ---------- reveal ---------- */
+  .rv { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+  .rv.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .rv { opacity: 1; transform: none; }
+    .diagram .wire-live { animation: none; }
+    * { transition: none !important; }
+  }
+  .kindhead { font-family: var(--mono); font-size: 14px; font-weight: 700; letter-spacing: 0; color: var(--accent-ink); }
+  .sub-note { font-size: 15px; color: var(--ink-3); }
+  .stack h3 { margin-top: 6px; }
+
+  /* ---------- shared navigation: identical on every page ---------- */
+  .nav { position: sticky; top: 14px; z-index: 40; padding-inline: var(--pad); margin-top: 14px; }
+  .nav-inner {
+    width: min(1120px, 100%); margin-inline: auto;
+    display: flex; align-items: center; gap: 10px;
+    background: color-mix(in srgb, var(--paper) 85%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 8px 8px 18px; height: 56px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 9px; flex: none;
+    font-weight: 800; letter-spacing: -0.03em; font-size: 17px;
+    text-decoration: none; color: var(--ink);
+  }
+  .navlinks {
+    display: flex; align-items: center; gap: 22px;
+    margin-inline: auto; font-size: 15px; font-weight: 500;
+  }
+  .navlinks a { color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+  .navlinks a:hover { color: var(--ink); }
+  .navlinks a[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .nav .icon-btn {
+    width: 38px; height: 38px; flex: none; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--paper-3); color: var(--ink);
+    display: grid; place-items: center; cursor: pointer; padding: 0;
+  }
+  .nav .btn-sm { flex: none; padding: 10px 18px; font-size: 14px; }
+  .nav .menu-btn { display: none; }
+  @media (max-width: 900px) { .navlinks { gap: 15px; font-size: 14px; } }
+  @media (max-width: 680px) {
+    .navlinks { display: none; }
+    .nav-inner { justify-content: space-between; }
+    .nav .menu-btn { display: grid; }
+  }
+  /* The links hidden above reappear here, one tap away — a nav that only
+     works above 680px is a nav phones don't have. */
+  .nav-drop {
+    display: none;
+    width: min(1120px, 100%); margin: 8px auto 0;
+    background: color-mix(in srgb, var(--paper) 96%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 18px; padding: 8px;
+  }
+  .nav-drop a {
+    display: block; padding: 11px 14px; border-radius: 11px;
+    color: var(--ink-2); text-decoration: none; font-size: 15px; font-weight: 500;
+  }
+  .nav-drop a:hover { background: var(--paper-2); color: var(--ink); }
+  .nav-drop a[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .nav.open .nav-drop { display: block; }
+</style>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="/" aria-label="rootmode home">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <rect x="9" y="2" width="6" height="6" rx="1.4" />
+        <rect x="16" y="9" width="6" height="6" rx="1.4" />
+        <rect x="2" y="16" width="6" height="6" rx="1.4" />
+        <rect x="9" y="16" width="6" height="6" rx="1.4" />
+        <rect x="16" y="16" width="6" height="6" rx="1.4" />
+      </svg>
+      rootmode
+    </a>
+    <nav class="navlinks" aria-label="Pages">
+      <a href="/">Home</a>
+      <a href="/manifesto">Manifesto</a>
+      <a href="/explorer">Explorer</a>
+      <a href="/worker">Run a worker</a>
+      <a href="/discovery">Discovery</a>
+      <a href="/protocol" aria-current="page">Protocol</a>
+      <a href="/brand">Brand</a>
+    </nav>
+    <button class="icon-btn menu-btn" id="nav-menu" type="button" aria-label="Open menu" aria-expanded="false">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <button class="icon-btn" id="theme" type="button" aria-label="Switch to dark theme" title="Switch theme">
+      <svg class="sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+    <a class="btn btn-solid btn-sm" href="/download">Download</a>
+  </div>
+  <nav class="nav-drop" aria-label="Pages, expanded">
+      <a href="/">Home</a>
+      <a href="/manifesto">Manifesto</a>
+      <a href="/explorer">Explorer</a>
+      <a href="/worker">Run a worker</a>
+      <a href="/discovery">Discovery</a>
+      <a href="/protocol" aria-current="page">Protocol</a>
+      <a href="/brand">Brand</a>
+    </nav>
+</header>
+<script>
+  // Mobile nav: the pill collapses the links at 680px, this is what gets them
+  // back. Closes itself on a link tap so it never sits open over the page you
+  // just asked to go to.
+  (function () {
+    var nav = document.querySelector(".nav");
+    var btn = document.getElementById("nav-menu");
+    if (!nav || !btn) return;
+    btn.addEventListener("click", function () {
+      var open = nav.classList.toggle("open");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    });
+    nav.querySelectorAll(".nav-drop a").forEach(function (a) {
+      a.addEventListener("click", function () {
+        nav.classList.remove("open");
+        btn.setAttribute("aria-expanded", "false");
+      });
+    });
+  })();
+</script>
+
+
+<main>
+  <section class="top dots">
+    <div class="wrap inner rv">
+      <p class="eyebrow">Specification</p>
+      <h1>RootmodeProtocol v1.</h1>
+      <p class="lede">
+        Versioned JSON messages between a client and a worker. Five message types,
+        two transports, and one rule that keeps a future v2 from breaking anything
+        running today.
+      </p>
+      <div class="actions">
+        <a class="btn btn-solid" href="#messages">The messages</a>
+        <a class="btn btn-ghost" href="https://github.com/rootmodeai/rootmode/blob/main/docs/PROTOCOL.md">Source document</a>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Rules</p>
+        <h2>Six of them, and they don't move.</h2>
+        <p>
+          The message shapes are defined in
+          <code>crates/rootmode-core/src/protocol.rs</code>. That file and this page
+          are kept in sync — if they disagree, the Rust types are the truth and this
+          is a bug.
+        </p>
+      </div>
+      <div class="rules">
+        <div class="rule"><p>Every message carries <code>"v"</code>. This describes <b>v: 1</b>.</p></div>
+        <div class="rule"><p>Every message carries <code>"type"</code>. A receiver that doesn't recognise a type <b>ignores the message</b> — it does not close the connection. This is how v2 messages will reach v1 clients harmlessly.</p></div>
+        <div class="rule"><p>A message with a <em>known</em> type but a version other than 1, or a malformed body, is rejected.</p></div>
+        <div class="rule"><p>Frames larger than <b>64 MiB</b> are refused.</p></div>
+        <div class="rule"><p><code>job_id</code> is a UUID v4 generated by the client. A worker echoes it back unchanged. Messages about a job_id the client didn't submit are ignored.</p></div>
+        <div class="rule"><p>Peer ids are hex-encoded ed25519 public keys, 64 lowercase hex characters. There's no registry: <b>the id is the key</b>.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Transport</p>
+        <h2>Two pipes, identical meaning.</h2>
+      </div>
+      <div class="bullets">
+        <div class="bl">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>WebSocket — one JSON value per text frame</strong>
+          <span><code>ws://host:port/path</code> or <code>wss://…</code>. Nothing else is accepted: no <code>http://</code>, no <code>file://</code>.</span>
+        </div>
+        <div class="bl">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>libp2p stream — one JSON value per line</strong>
+          <span>Protocol <code>/rootmode/1.0.0</code>, newline-delimited, over a Noise-encrypted, peer-id-authenticated connection. Used when a peer was discovered rather than typed in; its endpoint is written <code>p2p://&lt;hex peer id&gt;</code>.</span>
+        </div>
+        <div class="bl">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>The shape of an exchange</strong>
+          <span>The client connects, sends <code>peer.hello</code>, then either closes (a probe) or sends one <code>job.submit</code> and reads until the job is terminal. A worker may send <code>peer.announce</code> at any time, typically right after hello.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="messages">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Client → worker</p>
+        <h2>Saying hello, and asking for work.</h2>
+      </div>
+
+      <div class="msg">
+        <div class="msg-head"><h3>peer.hello</h3><span class="dir out">client → worker</span></div>
+        <div class="msg-body">
+          <p>Sent immediately after connecting.</p>
+          <pre>{ <span class="k">"v"</span>: 1, <span class="k">"type"</span>: <span class="s">"peer.hello"</span>, <span class="k">"peer_id"</span>: <span class="s">"hex_ed25519_public_key"</span> }</pre>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="msg-head"><h3>job.submit</h3><span class="dir out">client → worker</span></div>
+        <div class="msg-body">
+          <pre>{
+  <span class="k">"v"</span>: 1,
+  <span class="k">"type"</span>: <span class="s">"job.submit"</span>,
+  <span class="k">"job_id"</span>: <span class="s">"550e8400-e29b-41d4-a716-446655440000"</span>,
+  <span class="k">"from"</span>: <span class="s">"peer_id_hex"</span>,
+  <span class="k">"payload"</span>: { <span class="k">"kind"</span>: <span class="s">"llm"</span>, <span class="c">…kind-specific fields</span> },
+  <span class="k">"sig"</span>: <span class="s">"optional_signature_over_canonical_json"</span>
+}</pre>
+          <p><code>payload</code> is discriminated by <code>kind</code>. Payloads are validated against these bounds <b>before</b> they leave the client.</p>
+
+          <h3 class="kindhead">kind: "llm"</h3>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>model_hash</code></td><td>string?</td><td>sha256 of the weights, when the peer advertises one</td></tr>
+                <tr><td><code>model_id</code></td><td>string?</td><td>human-facing id, e.g. llama-3.1-8b-instruct</td></tr>
+                <tr><td><code>messages</code></td><td>array</td><td>{ role: system|user|assistant, content: string }</td></tr>
+                <tr><td><code>max_tokens</code></td><td>u32</td><td>default 512, must be 1..=131072</td></tr>
+                <tr><td><code>temperature</code></td><td>f32</td><td>default 0.7, must be 0.0..=2.0</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="kindhead">kind: "image"</h3>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>model_hash</code></td><td>string?</td><td>sha256 of the checkpoint</td></tr>
+                <tr><td><code>checkpoint_id</code></td><td>string?</td><td>human-facing id</td></tr>
+                <tr><td><code>prompt</code></td><td>string</td><td>required, non-empty, at most 8000 characters</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            A model and words, and nothing else. Sampler steps, guidance, size and
+            scheduler are how an operator built their pipeline — a client can't know
+            what suits a checkpoint it has never seen, so it isn't asked to. The worker
+            reports the seed and settings it used in the result's <code>meta</code>, so
+            they're visible after the fact without being dictated beforehand.
+          </p>
+        </div>
+      </div>
+
+      <div class="note">
+        <b>Signatures are optional in v1 — a worker may require them.</b>
+        <p>
+          <code>sig</code> is a hex ed25519 signature by the key named in
+          <code>from</code>, over the <b>canonical JSON</b> of the whole message with
+          <code>sig</code> removed: object keys sorted lexicographically, no
+          insignificant whitespace, <code>sig</code> absent from the pre-image. To
+          verify: remove <code>sig</code>, re-serialise canonically, check against
+          <code>from</code>. If <code>from</code> doesn't match the key you pinned for
+          that endpoint, treat it as a different peer.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Worker → client</p>
+        <h2>Progress, results, and what the node can do.</h2>
+      </div>
+
+      <div class="msg">
+        <div class="msg-head"><h3>job.status</h3><span class="dir in">worker → client</span></div>
+        <div class="msg-body">
+          <pre>{
+  <span class="k">"v"</span>: 1,
+  <span class="k">"type"</span>: <span class="s">"job.status"</span>,
+  <span class="k">"job_id"</span>: <span class="s">"uuid"</span>,
+  <span class="k">"status"</span>: <span class="s">"queued|running|done|failed"</span>,
+  <span class="k">"progress"</span>: 0.0,
+  <span class="k">"error"</span>: null
+}</pre>
+          <p><code>done</code> and <code>failed</code> are terminal — the client stops reading after either. <code>progress</code> is 0.0..=1.0 and advisory.</p>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="msg-head"><h3>job.result</h3><span class="dir in">worker → client</span></div>
+        <div class="msg-body">
+          <pre>{
+  <span class="k">"v"</span>: 1,
+  <span class="k">"type"</span>: <span class="s">"job.result"</span>,
+  <span class="k">"job_id"</span>: <span class="s">"uuid"</span>,
+  <span class="k">"kind"</span>: <span class="s">"llm|image"</span>,
+  <span class="k">"sha256"</span>: <span class="s">"hex"</span>,
+  <span class="k">"text"</span>: <span class="s">"…"</span>,
+  <span class="k">"image_path_or_b64"</span>: <span class="s">"…"</span>,
+  <span class="k">"meta"</span>: { <span class="k">"model"</span>: <span class="s">"…"</span> }
+}</pre>
+          <div class="bullets">
+            <div class="bl">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <strong>sha256 is the hash of the result bytes</strong>
+              <span>The UTF-8 text for <code>llm</code>, the image file for <code>image</code>. The client recomputes it and <b>rejects a result whose bytes don't match the claim</b>.</span>
+            </div>
+            <div class="bl">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <strong>One field per kind is required</strong>
+              <span><code>llm</code> needs <code>text</code>; <code>image</code> needs <code>image_path_or_b64</code> — standard base64 of the file bytes over a network. A filesystem path only means anything for a worker on the same machine, must be absolute, and the client won't read a relative one.</span>
+            </div>
+            <div class="bl">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <strong>meta is free-form</strong>
+              <span>Displayed as-is. Seed, sampler settings, model name — whatever the worker chose to report.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="msg-head"><h3>peer.announce</h3><span class="dir in">worker → client</span></div>
+        <div class="msg-body">
+          <pre>{
+  <span class="k">"v"</span>: 1,
+  <span class="k">"type"</span>: <span class="s">"peer.announce"</span>,
+  <span class="k">"peer_id"</span>: <span class="s">"hex"</span>,
+  <span class="k">"country"</span>: <span class="s">"DE"</span>,
+  <span class="k">"caps"</span>: [<span class="s">"llm"</span>, <span class="s">"image"</span>],
+  <span class="k">"models"</span>: [{ <span class="k">"id"</span>: <span class="s">"lustify-v7"</span>, <span class="k">"sha256"</span>: <span class="s">"…"</span>, <span class="k">"kind"</span>: <span class="s">"image"</span> }],
+  <span class="k">"max_concurrent"</span>: 1
+}</pre>
+          <p>
+            <code>country</code> is an optional ISO 3166-1 alpha-2 code the operator
+            declared, shown beside the node's name in the client. It is a claim, not a
+            measurement — nothing looks the endpoint's address up in a geolocation
+            service, because that would hand a third party the list of peers a client
+            talks to. Absent means they did not say.
+          </p>
+          <p>
+            The client uses this for capability badges and model pickers. If the user
+            pinned a public key for the endpoint and the announced <code>peer_id</code>
+            differs, the peer is marked <b>mismatch</b> and no job is sent.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Worked example</p>
+        <h2>A whole job, start to finish.</h2>
+      </div>
+      <div class="exchange">
+        <div class="exchange-bar"><i></i><i></i><i></i><b>client ↔ worker</b></div>
+        <pre><span class="to">→</span> {"v":1,"type":"peer.hello","peer_id":"9f2c…"}
+<span class="from">←</span> {"v":1,"type":"peer.announce","peer_id":"41ab…","caps":["llm"],"models":[],"max_concurrent":1}
+<span class="to">→</span> {"v":1,"type":"job.submit","job_id":"550e…","from":"9f2c…","payload":{"kind":"llm",
+     "model_id":"m","messages":[{"role":"user","content":"ping"}],
+     "max_tokens":64,"temperature":0.0},"sig":"a71…"}
+<span class="from">←</span> {"v":1,"type":"job.status","job_id":"550e…","status":"running","progress":0.3,"error":null}
+<span class="from">←</span> {"v":1,"type":"job.result","job_id":"550e…","kind":"llm","sha256":"ba78…","text":"pong","meta":{"model":"m"}}
+<span class="from">←</span> {"v":1,"type":"job.status","job_id":"550e…","status":"done","progress":1.0,"error":null}</pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">If you're implementing a worker</p>
+        <h2>Four rules that aren't negotiable.</h2>
+      </div>
+      <div class="bullets">
+        <div class="bl">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>Never pass any field of a job into a shell</strong>
+          <span>Job kinds map to fixed workflows. Model text is data, never a command.</span>
+        </div>
+        <div class="bl">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>Treat prompt, messages and meta as untrusted</strong>
+          <span>They came from a stranger, because they did.</span>
+        </div>
+        <div class="bl">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>Bound everything</strong>
+          <span>Dimensions, steps, token counts, concurrent jobs.</span>
+        </div>
+        <div class="bl">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>No filesystem paths for remote clients</strong>
+          <span>Don't put one in <code>image_path_or_b64</code> unless the client is on the same machine.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Edges</p>
+        <h2>What sits outside v1.</h2>
+      </div>
+
+      <h3>Discovery isn't part of this protocol</h3>
+      <p >
+        Peers are found through the DHT — see
+        <a href="/discovery">discovery &amp; bootstrap</a> — which resolves a
+        <em>key</em> to a route. Once connected, the exchange above is identical whether
+        the address was typed in or discovered. The records a worker publishes are
+        derived from the same <code>peer.announce</code> it sends on connect:
+      </p>
+      <div class="chips">
+        <span class="chip">rootmode/cap/llm</span>
+        <span class="chip">rootmode/cap/image</span>
+        <span class="chip">rootmode/model/&lt;model id&gt;</span>
+      </div>
+      <p >
+        The announce read over a direct connection is the authoritative one — a DHT
+        record is a claim by whoever wrote it.
+      </p>
+
+      <h3>Not in v1</h3>
+      <p >
+        Brokered queues, payments, IPFS CIDs, streaming token deltas, signed announces,
+        and a bid/quote step before submitting. New <code>type</code> values are
+        reserved for them; v1 clients ignore what they don't know.
+      </p>
+
+      <h3>Tools, added after v1</h3>
+      <p >
+        <code>LlmParams</code> carries an optional <code>tools</code> list, and
+        <code>ChatMessage</code> an optional <code>tool_calls</code> /
+        <code>tool_call_id</code>. A <code>job.result</code> may carry
+        <code>tool_calls</code> with no <code>text</code>: a model choosing to act
+        rather than answer.
+      </p>
+      <div class="msg">
+        <div class="msg-body">
+          <pre>{ <span class="k">"name"</span>: <span class="s">"Read"</span>, <span class="k">"description"</span>: <span class="s">"Read a file"</span>,
+  <span class="k">"input_schema"</span>: { <span class="k">"type"</span>: <span class="s">"object"</span>,
+    <span class="k">"properties"</span>: { <span class="k">"path"</span>: { <span class="k">"type"</span>: <span class="s">"string"</span> } } } }
+
+{ <span class="k">"id"</span>: <span class="s">"call_ab"</span>, <span class="k">"name"</span>: <span class="s">"Read"</span>, <span class="k">"arguments"</span>: <span class="s">"{\"path\":\"a.txt\"}"</span> }</pre>
+        </div>
+      </div>
+      <p >
+        <code>arguments</code> is a JSON <b>string</b>, not an object — that's what
+        OpenAI-compatible servers emit, and re-parsing it here would lose whatever the
+        model actually produced when it isn't valid JSON. All three fields default to
+        empty, so this is additive: an older worker ignores them and answers as it
+        always did, an older client never sends them, and the protocol version stays 1.
+      </p>
+
+      <div class="actions">
+        <a class="btn btn-solid" href="/worker">Run a worker</a>
+        <a class="btn btn-ghost" href="/discovery">Discovery &amp; bootstrap</a>
+        <a class="btn btn-ghost" href="https://github.com/rootmodeai/rootmode/blob/main/docs/PROTOCOL.md">Source document</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wide foot">
+    <span>RootmodeProtocol v1</span>
+    <span>·</span>
+    <span>unknown types are ignored, not fatal</span>
+    <span class="right"><a href="/brand">Brand</a> · <a href="/">← Back to rootmode</a></span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement, btn = document.getElementById("theme"), saved = null;
+    try { saved = localStorage.getItem("rootmode.theme"); } catch (e) {}
+    if (saved === "dark") root.setAttribute("data-theme", "dark");
+    function label() {
+      btn.setAttribute("aria-label",
+        root.getAttribute("data-theme") === "dark" ? "Switch to light theme" : "Switch to dark theme");
+    }
+    label();
+    btn.addEventListener("click", function () {
+      var dark = root.getAttribute("data-theme") === "dark";
+      if (dark) root.removeAttribute("data-theme"); else root.setAttribute("data-theme", "dark");
+      try { localStorage.setItem("rootmode.theme", dark ? "light" : "dark"); } catch (e) {}
+      label();
+    });
+  })();
+  (function () {
+    var els = document.querySelectorAll(".rv");
+    if (!("IntersectionObserver" in window) || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      els.forEach(function (el) { el.classList.add("in"); }); return;
+    }
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, { rootMargin: "0px 0px -12% 0px" });
+    els.forEach(function (el) { io.observe(el); });
+  })();
+</script>

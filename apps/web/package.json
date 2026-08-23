@@ -1,0 +1,10 @@
+{
+  "name": "rootmode-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pre-launch landing page for rootmode.ai",
+  "scripts": {
+    "start": "node preview.mjs",
+    "preview": "node preview.mjs"
+  }
+}

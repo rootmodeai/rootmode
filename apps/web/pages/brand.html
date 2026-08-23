@@ -1,0 +1,450 @@
+<title>rootmode brand</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="The rootmode mark, colours, and type — for press, partners, and anyone drawing us." />
+<meta name="theme-color" content="#7433f7" />
+<link rel="canonical" href="https://rootmode.ai/brand" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="rootmode" />
+<meta property="og:title" content="rootmode brand" />
+<meta property="og:description" content="The rootmode mark, colours, and type — for press, partners, and anyone drawing us." />
+<meta property="og:url" content="https://rootmode.ai/brand" />
+<meta property="og:image" content="https://rootmode.ai/assets/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="rootmode brand" />
+<meta name="twitter:description" content="The rootmode mark, colours, and type — for press, partners, and anyone drawing us." />
+<meta name="twitter:image" content="https://rootmode.ai/assets/og.png" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<style>
+  :root {
+    --paper:      #ffffff;
+    --paper-2:    #f5f1ff;
+    --paper-3:    #ffffff;
+    --line:       #e4dbf7;
+    --ink:        #180f38;
+    --ink-2:      #5f5680;
+    --ink-3:      #8b82ab;
+    --accent:     #7433f7;
+    --accent-ink: #5a1fe0;
+    --accent-bg:  #f0e7ff;
+    --band:       #180f38;
+    --void:       #0d0f11;
+    --cell:       #e8eaed;
+    --violet:     #7433f7;
+    --dot:        rgba(116, 51, 247, .13);
+    --card-shadow: 0 30px 60px -40px rgba(18, 16, 28, .45);
+    --btn-ink:    #180f38;
+    --btn-on:     #ffffff;
+    --sans: "Avenir Next", "Helvetica Neue", ui-sans-serif, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --pad: clamp(18px, 4vw, 40px);
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0d0f11;
+    --paper-2:    #150f2c;
+    --paper-3:    #1a1338;
+    --line:       #2e2454;
+    --ink:        #f3f0ff;
+    --ink-2:      #a79ecb;
+    --ink-3:      #7d74a3;
+    --accent:     #a78bfa;
+    --accent-ink: #cabaff;
+    --accent-bg:  #241a4d;
+    --band:       #150f2c;
+    --dot:        rgba(167, 139, 250, .11);
+    --card-shadow: 0 30px 60px -40px rgba(0, 0, 0, .9);
+    --btn-ink:    #f3f0ff;
+    --btn-on:     #0d0f11;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 17px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+  .wrap { width: min(1120px, 100%); margin-inline: auto; padding-inline: var(--pad); }
+  h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -0.035em; text-wrap: balance; line-height: 1.03; }
+  h1 { font-size: clamp(40px, 7vw, 72px); }
+  h2 { font-size: clamp(26px, 4vw, 40px); }
+  h3 { font-size: 18px; letter-spacing: -0.02em; line-height: 1.25; }
+  p { margin: 0; }
+  a { color: inherit; }
+  .lede { font-size: clamp(17px, 2vw, 21px); color: var(--ink-2); max-width: 46ch; font-weight: 500; }
+  .sub { color: var(--ink-2); max-width: 56ch; }
+  .mono { font-family: var(--mono); font-size: 13px; letter-spacing: 0; }
+
+  .icon-btn {
+    width: 38px; height: 38px; flex: none; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--paper-3); color: var(--ink);
+    display: grid; place-items: center; cursor: pointer; padding: 0;
+  }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .icon-btn .moon { display: none; }
+  :root[data-theme="dark"] .icon-btn .sun { display: none; }
+  :root[data-theme="dark"] .icon-btn .moon { display: block; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    padding: 13px 24px; border-radius: 999px; border: 1px solid transparent;
+    font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-solid { background: var(--btn-ink); color: var(--btn-on); }
+  .btn-solid:hover { background: var(--accent); color: #fff; }
+  .btn-ghost { border-color: var(--line); background: var(--paper-3); color: var(--ink); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { padding: 10px 18px; font-size: 14px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  .nav { position: sticky; top: 14px; z-index: 40; padding-inline: var(--pad); margin-top: 14px; }
+  .nav-inner {
+    width: min(1120px, 100%); margin-inline: auto;
+    display: flex; align-items: center; gap: 10px;
+    background: color-mix(in srgb, var(--paper) 85%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 8px 8px 18px; height: 56px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 9px; flex: none;
+    font-weight: 800; letter-spacing: -0.03em; font-size: 17px;
+    text-decoration: none; color: var(--ink);
+  }
+  .navlinks {
+    display: flex; align-items: center; gap: 22px;
+    margin-inline: auto; font-size: 15px; font-weight: 500;
+  }
+  .navlinks a { color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+  .navlinks a:hover { color: var(--ink); }
+  .navlinks a[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .nav .menu-btn { display: none; }
+  @media (max-width: 900px) { .navlinks { gap: 15px; font-size: 14px; } }
+  @media (max-width: 680px) {
+    .navlinks { display: none; }
+    .nav-inner { justify-content: space-between; }
+    .nav .menu-btn { display: grid; }
+  }
+  .nav-drop {
+    display: none;
+    width: min(1120px, 100%); margin: 8px auto 0;
+    background: color-mix(in srgb, var(--paper) 96%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 18px; padding: 8px;
+  }
+  .nav-drop a {
+    display: block; padding: 11px 14px; border-radius: 11px;
+    color: var(--ink-2); text-decoration: none; font-size: 15px; font-weight: 500;
+  }
+  .nav-drop a:hover { background: var(--paper-2); color: var(--ink); }
+  .nav-drop a[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .nav.open .nav-drop { display: block; }
+
+  .hero { padding-block: clamp(48px, 8vw, 88px) clamp(28px, 5vw, 48px); }
+  .hero-inner { display: grid; gap: 16px; max-width: 640px; }
+  section { padding-block: clamp(36px, 6vw, 72px); }
+  .soft { background: var(--paper-2); border-block: 1px solid var(--line); }
+
+  .swatches { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 28px; }
+  @media (max-width: 880px) { .swatches { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .swatch {
+    background: var(--paper-3); border: 1px solid var(--line); border-radius: 18px;
+    overflow: hidden; text-align: left; cursor: pointer; padding: 0; font: inherit; color: inherit;
+    display: grid; width: 100%;
+  }
+  .swatch:hover { border-color: var(--accent); }
+  .chip { height: 92px; }
+  .swatch .meta { padding: 14px 16px 16px; display: grid; gap: 4px; }
+  .swatch .meta b { font-size: 15px; }
+  .swatch .meta span { color: var(--ink-2); font-size: 13px; }
+  .copied { color: var(--accent) !important; }
+
+  .marks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 28px; }
+  .marks.social { grid-template-columns: 220px 1fr; }
+  @media (max-width: 720px) { .marks, .marks.social { grid-template-columns: 1fr; } }
+  .mark {
+    background: var(--paper-3); border: 1px solid var(--line); border-radius: 18px;
+    padding: 18px; display: grid; gap: 14px;
+  }
+  .mark img {
+    width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; display: block;
+  }
+  .mark .row { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .mark a { color: var(--accent-ink); text-decoration: none; font-size: 14px; font-weight: 600; }
+
+  .banner-card {
+    margin-top: 16px; background: var(--paper-3); border: 1px solid var(--line);
+    border-radius: 18px; overflow: hidden;
+  }
+  .banner-card img { width: 100%; display: block; }
+  .banner-card .row { padding: 16px 18px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+  .banner-card a { color: var(--accent-ink); text-decoration: none; font-size: 14px; font-weight: 600; }
+
+  .rules { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 28px; }
+  @media (max-width: 720px) { .rules { grid-template-columns: 1fr; } }
+  .rule { background: var(--paper-3); border: 1px solid var(--line); border-radius: 18px; padding: 22px; display: grid; gap: 10px; }
+  .rule ul { margin: 0; padding-left: 18px; color: var(--ink-2); display: grid; gap: 8px; font-size: 15.5px; }
+  .rule h3 { color: var(--accent); }
+
+  .type-card {
+    margin-top: 28px; background: var(--paper-3); border: 1px solid var(--line);
+    border-radius: 18px; padding: clamp(22px, 4vw, 36px);
+  }
+  .wordmark { font-size: clamp(36px, 7vw, 64px); font-weight: 800; letter-spacing: -0.045em; line-height: 1; }
+  .tag { margin-top: 10px; font-size: clamp(18px, 2.4vw, 24px); color: var(--ink-2); font-weight: 500; }
+  .type-meta { margin-top: 22px; color: var(--ink-2); font-size: 15px; display: grid; gap: 6px; }
+
+  footer { border-top: 1px solid var(--line); padding-block: 30px; }
+  .foot { display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: center; font-size: 14px; color: var(--ink-2); }
+  .foot a { text-decoration: none; }
+  .foot a:hover { color: var(--accent); }
+  .foot .right { margin-left: auto; }
+</style>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="/" aria-label="rootmode home">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <rect x="9" y="2" width="6" height="6" rx="1.4" />
+        <rect x="16" y="9" width="6" height="6" rx="1.4" />
+        <rect x="2" y="16" width="6" height="6" rx="1.4" />
+        <rect x="9" y="16" width="6" height="6" rx="1.4" />
+        <rect x="16" y="16" width="6" height="6" rx="1.4" />
+      </svg>
+      rootmode
+    </a>
+    <nav class="navlinks" aria-label="Pages">
+      <a href="/">Home</a>
+      <a href="/manifesto">Manifesto</a>
+      <a href="/explorer">Explorer</a>
+      <a href="/worker">Run a worker</a>
+      <a href="/discovery">Discovery</a>
+      <a href="/protocol">Protocol</a>
+      <a href="/brand" aria-current="page">Brand</a>
+    </nav>
+    <button class="icon-btn menu-btn" id="nav-menu" type="button" aria-label="Open menu" aria-expanded="false">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <button class="icon-btn" id="theme" type="button" aria-label="Switch to dark theme" title="Switch theme">
+      <svg class="sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+    <a class="btn btn-solid btn-sm" href="/download">Download</a>
+  </div>
+  <nav class="nav-drop" aria-label="Pages, expanded">
+    <a href="/">Home</a>
+    <a href="/manifesto">Manifesto</a>
+    <a href="/explorer">Explorer</a>
+    <a href="/worker">Run a worker</a>
+    <a href="/discovery">Discovery</a>
+    <a href="/protocol">Protocol</a>
+    <a href="/brand" aria-current="page">Brand</a>
+  </nav>
+</header>
+<script>
+  (function () {
+    var nav = document.querySelector(".nav");
+    var btn = document.getElementById("nav-menu");
+    if (!nav || !btn) return;
+    btn.addEventListener("click", function () {
+      var open = nav.classList.toggle("open");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    });
+    nav.querySelectorAll(".nav-drop a").forEach(function (a) {
+      a.addEventListener("click", function () {
+        nav.classList.remove("open");
+        btn.setAttribute("aria-expanded", "false");
+      });
+    });
+  })();
+</script>
+
+<main>
+  <section class="hero">
+    <div class="wrap hero-inner">
+      <h1>Brand</h1>
+      <p class="lede">The mark, the colours, and how to use them. For press, partners, and anyone drawing rootmode.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>The mark</h2>
+      <p class="sub" style="margin-top:12px">A Conway glider — five cells, nothing else. It is the hacker emblem. The avatar is the glider on void. The wordmark does not go in the picture.</p>
+      <div class="marks">
+        <div class="mark">
+          <img src="assets/brand/mark-void.png" alt="Glider on void" />
+          <div class="row">
+            <b>On void</b>
+            <span><a href="assets/brand/mark-void.png" download>PNG</a> · <a href="assets/brand/mark-void.svg" download>SVG</a></span>
+          </div>
+        </div>
+        <div class="mark">
+          <img src="assets/brand/mark-violet.png" alt="Glider on violet" />
+          <div class="row">
+            <b>On violet</b>
+            <span><a href="assets/brand/mark-violet.png" download>PNG</a> · <a href="assets/brand/mark-violet.svg" download>SVG</a></span>
+          </div>
+        </div>
+        <div class="mark">
+          <img src="assets/brand/mark-paper.png" alt="Glider on paper" />
+          <div class="row">
+            <b>On paper</b>
+            <span><a href="assets/brand/mark-paper.png" download>PNG</a> · <a href="assets/brand/mark-paper.svg" download>SVG</a></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="soft">
+    <div class="wrap">
+      <h2>Colour</h2>
+      <p class="sub" style="margin-top:12px">Three colours do the work. Violet is the only chroma. Click a card to copy the hex.</p>
+      <div class="swatches">
+        <button class="swatch" data-hex="#7433f7" type="button">
+          <div class="chip" style="background:#7433f7"></div>
+          <div class="meta"><b>Violet</b><span class="mono">#7433f7</span><span>RGB 116 51 247</span></div>
+        </button>
+        <button class="swatch" data-hex="#0d0f11" type="button">
+          <div class="chip" style="background:#0d0f11"></div>
+          <div class="meta"><b>Void</b><span class="mono">#0d0f11</span><span>RGB 13 15 17</span></div>
+        </button>
+        <button class="swatch" data-hex="#e8eaed" type="button">
+          <div class="chip" style="background:#e8eaed"></div>
+          <div class="meta"><b>Paper</b><span class="mono">#e8eaed</span><span>RGB 232 234 237</span></div>
+        </button>
+        <button class="swatch" data-hex="#a78bfa" type="button">
+          <div class="chip" style="background:#a78bfa"></div>
+          <div class="meta"><b>Light violet</b><span class="mono">#a78bfa</span><span>RGB 167 139 250</span></div>
+        </button>
+        <button class="swatch" data-hex="#180f38" type="button">
+          <div class="chip" style="background:#180f38"></div>
+          <div class="meta"><b>Ink</b><span class="mono">#180f38</span><span>RGB 24 15 56</span></div>
+        </button>
+      </div>
+      <p class="sub" style="margin-top:18px">Violet is for the living thing — a button, a wash, the active state. Surfaces stay void or paper. On a dark UI the same violet lifts to light violet so it still reads. Ink is type on a light page.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Wordmark</h2>
+      <div class="type-card">
+        <div class="wordmark">rootmode</div>
+        <div class="tag">Decentralised AI Inference Network</div>
+        <div class="type-meta">
+          <div>Always lowercase. Never RootMode, Root Mode, or Rootmode.</div>
+          <div>Wordmark: Futura / Avenir Next, extra bold, tight tracking.</div>
+          <div>UI: the system sans on desktop; Avenir Next on the site.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="soft">
+    <div class="wrap">
+      <h2>X / social</h2>
+      <p class="sub" style="margin-top:12px">Profile is the glider only. Banner is void until the glider, then a violet wash to the top-right.</p>
+      <div class="marks social">
+        <div class="mark">
+          <img src="assets/brand/profile.png" alt="X profile picture" />
+          <div class="row">
+            <b>Profile 800×800</b>
+            <a href="assets/brand/profile.png" download>PNG</a>
+          </div>
+        </div>
+        <div class="banner-card" style="margin-top:0">
+          <img src="assets/brand/banner.png" alt="X banner" />
+          <div class="row">
+            <b>Banner 1500×500</b>
+            <a href="assets/brand/banner.png" download>PNG</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Do, and don’t</h2>
+      <div class="rules">
+        <div class="rule">
+          <h3>Do</h3>
+          <ul>
+            <li>Use the five-cell glider, this orientation, on a 4×4 grid.</li>
+            <li>Keep the avatar glider-only. Type lives on the banner or next to the mark, not inside it.</li>
+            <li>Let violet arrive as a wash — dark until the glider, then open toward the top-right.</li>
+            <li>Write <b>rootmode</b> in lowercase.</li>
+          </ul>
+        </div>
+        <div class="rule">
+          <h3>Don’t</h3>
+          <ul>
+            <li>Don’t recolour the mark mint, gold, or a rainbow. Violet is the chroma.</li>
+            <li>Don’t outline the cells, add a drop shadow, or extrude them.</li>
+            <li>Don’t rotate the glider off-grid or rearrange the five cells.</li>
+            <li>Don’t lock the wordmark into the profile picture.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span><b>rootmode</b></span>
+    <a href="/worker">Run a worker</a>
+    <a href="/discovery">Discovery</a>
+    <a href="/protocol">Protocol</a>
+    <a href="/brand">Brand</a>
+    <a href="https://github.com/rootmodeai/rootmode">GitHub</a>
+    <span class="right"><a href="mailto:hello@rootmode.ai">hello@rootmode.ai</a></span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var btn = document.getElementById("theme");
+    var saved = null;
+    try { saved = localStorage.getItem("rootmode.theme"); } catch (e) {}
+    if (saved === "dark") root.setAttribute("data-theme", "dark");
+    function label() {
+      var dark = root.getAttribute("data-theme") === "dark";
+      btn.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+    }
+    label();
+    btn.addEventListener("click", function () {
+      var dark = root.getAttribute("data-theme") === "dark";
+      if (dark) root.removeAttribute("data-theme"); else root.setAttribute("data-theme", "dark");
+      try { localStorage.setItem("rootmode.theme", dark ? "light" : "dark"); } catch (e) {}
+      label();
+    });
+  })();
+
+  (function () {
+    document.querySelectorAll(".swatch").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var hex = btn.getAttribute("data-hex");
+        var el = btn.querySelector(".mono");
+        function said() {
+          var prev = el.textContent;
+          el.textContent = "copied";
+          el.classList.add("copied");
+          setTimeout(function () { el.textContent = prev; el.classList.remove("copied"); }, 900);
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(hex).then(said).catch(function () { said(); });
+        } else {
+          said();
+        }
+      });
+    });
+  })();
+</script>

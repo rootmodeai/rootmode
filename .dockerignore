@@ -1,0 +1,22 @@
+# Build artefacts and dependencies — the image builds its own.
+target/
+**/node_modules/
+apps/desktop/dist/
+apps/desktop/src-tauri/gen/
+
+# Never send key material or local state into a build context.
+*.key
+*.sqlite*
+worker.toml
+bootstrap.key
+channels.json
+.env
+.claude/
+
+.git/
+.github/
+.DS_Store
+**/__pycache__/
+contracts/cache/
+contracts/out/
+contracts/broadcast/

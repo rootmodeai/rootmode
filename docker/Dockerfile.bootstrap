@@ -1,0 +1,48 @@
+# rootmode-bootstrap
+#
+# Build from the repository root:
+#   docker build -f docker/Dockerfile.bootstrap -t rootmode-bootstrap .
+#
+# The entry point new nodes dial to find each other, and a relay for nodes
+# behind NAT. It holds no directory and never sees a job.
+
+FROM rust:1.90-bookworm AS build
+WORKDIR /src
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# A bootstrap node needs nothing from the desktop app or the worker, so drop
+# them from the workspace rather than resolving their dependency trees.
+RUN sed -i '/apps\/desktop/d; /rootmode-worker/d' Cargo.toml
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --profile fast -p rootmode-p2p --bin rootmode-bootstrap \
+ && cp target/fast/rootmode-bootstrap /usr/local/bin/rootmode-bootstrap
+
+# ---------------------------------------------------------------------------
+
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --system --uid 10001 --create-home --home-dir /var/lib/rootmode rootmode
+
+COPY --from=build /usr/local/bin/rootmode-bootstrap /usr/local/bin/rootmode-bootstrap
+
+USER rootmode
+WORKDIR /var/lib/rootmode
+
+# bootstrap.key lives here. Losing it changes the node's peer id, which means
+# every worker and client configured with the old address stops connecting.
+VOLUME ["/var/lib/rootmode"]
+
+EXPOSE 4001
+
+# WORKDIR is the volume, so the binary's own defaults (listen on 0.0.0.0:4001,
+# key at ./bootstrap.key) already land in the right places. Passing flags to
+# `docker run` adds to that rather than replacing it.
+ENTRYPOINT ["/usr/local/bin/rootmode-bootstrap"]

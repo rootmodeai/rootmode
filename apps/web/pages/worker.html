@@ -1,0 +1,750 @@
+<title>Run a rootmode worker</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="Turn a machine with GPUs into a peer on the network. One compose file, pointed at the vLLM or ComfyUI you already run. No application, no approval queue." />
+<meta name="theme-color" content="#7433f7" />
+<link rel="canonical" href="https://rootmode.ai/worker" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="rootmode" />
+<meta property="og:title" content="Run a rootmode worker" />
+<meta property="og:description" content="Turn a machine with GPUs into a peer on the network. One compose file, pointed at the vLLM or ComfyUI you already run. No application, no approval queue." />
+<meta property="og:url" content="https://rootmode.ai/worker" />
+<meta property="og:image" content="https://rootmode.ai/assets/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Run a rootmode worker" />
+<meta name="twitter:description" content="Turn a machine with GPUs into a peer on the network. One compose file, pointed at the vLLM or ComfyUI you already run. No application, no approval queue." />
+<meta name="twitter:image" content="https://rootmode.ai/assets/og.png" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<style>
+  /* ---------- tokens: light is the default, always ---------- */
+  :root {
+    --paper:      #ffffff;
+    --paper-2:    #f5f1ff;
+    --paper-3:    #ffffff;
+    --line:       #e4dbf7;
+    --ink:        #180f38;
+    --ink-2:      #5f5680;
+    --ink-3:      #8b82ab;
+    --accent:     #7433f7;
+    --accent-ink: #5a1fe0;
+    --accent-bg:  #f0e7ff;
+    --band:       #180f38;
+    --dot:        rgba(116, 51, 247, .13);
+    --code-bg:    #180f38;
+    --code-fg:    #e9e4fa;
+    --code-dim:   #7c73a0;
+    --code-accent: #b9a5ff;
+    --code-amber: #e0a879;
+    --warn-bg:    #fdf5ef;
+    --warn-line:  #d9843f;
+    --card-shadow: 0 30px 60px -40px rgba(18, 16, 28, .45);
+    --btn-ink:    #180f38;
+    --btn-on:     #ffffff;
+
+    --sans: "Avenir Next", "Helvetica Neue", ui-sans-serif, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --pad: clamp(18px, 4vw, 40px);
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #0d0f11;
+    --paper-2:    #150f2c;
+    --paper-3:    #1a1338;
+    --line:       #2e2454;
+    --ink:        #f3f0ff;
+    --ink-2:      #a79ecb;
+    --ink-3:      #7d74a3;
+    --accent:     #a78bfa;
+    --accent-ink: #cabaff;
+    --accent-bg:  #241a4d;
+    --band:       #150f2c;
+    --dot:        rgba(167, 139, 250, .11);
+    --code-bg:    #0c0722;
+    --code-fg:    #e9e4fa;
+    --code-dim:   #786f9c;
+    --code-accent: #b9a5ff;
+    --code-amber: #e0a879;
+    --warn-bg:    #1d1611;
+    --warn-line:  #c07c3c;
+    --card-shadow: 0 30px 60px -40px rgba(0, 0, 0, .9);
+    --btn-ink:    #f3f0ff;
+    --btn-on:     #0d0f11;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 17px; line-height: 1.62;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+
+  .wrap { width: min(900px, 100%); margin-inline: auto; padding-inline: var(--pad); }
+  .wide { width: min(1120px, 100%); margin-inline: auto; padding-inline: var(--pad); }
+
+  h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -0.035em; text-wrap: balance; line-height: 1.05; }
+  h1 { font-size: clamp(38px, 6vw, 68px); }
+  h2 { font-size: clamp(27px, 3.6vw, 40px); }
+  h3 { font-size: 19px; letter-spacing: -0.02em; line-height: 1.25; }
+  p { margin: 0; }
+  a { color: var(--accent-ink); }
+  .accentword { color: var(--accent); }
+
+  code {
+    font-family: var(--mono); font-size: 0.88em;
+    background: var(--paper-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 5px; color: var(--ink);
+  }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent);
+    display: flex; align-items: center; gap: 9px;
+  }
+  .eyebrow::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 0 4px var(--accent-bg);
+  }
+
+  /* ---------- nav ---------- */
+  .nav { position: sticky; top: 14px; z-index: 40; padding-inline: var(--pad); margin-top: 14px; }
+  .nav-inner {
+    width: min(1120px, 100%); margin-inline: auto;
+    display: flex; align-items: center; gap: 10px;
+    background: color-mix(in srgb, var(--paper) 85%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 8px 8px 18px;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; letter-spacing: -0.03em; font-size: 17px; text-decoration: none; color: var(--ink); }
+  .doclinks { display: flex; gap: 22px; margin-inline: auto; font-size: 15px; font-weight: 500; }
+  .doclinks a { color: var(--ink-2); text-decoration: none; }
+  .doclinks a:hover { color: var(--ink); }
+  .doclinks a[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  @media (max-width: 860px) { .doclinks { gap: 14px; font-size: 14px; margin-inline: 0 auto; } }
+  @media (max-width: 620px) { .doclinks { display: none; } .nav-inner { justify-content: space-between; } }
+
+  .icon-btn {
+    width: 38px; height: 38px; flex: none; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--paper-3); color: var(--ink);
+    display: grid; place-items: center; cursor: pointer; padding: 0;
+    transition: border-color .15s ease, color .15s ease;
+  }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .icon-btn .moon { display: none; }
+  :root[data-theme="dark"] .icon-btn .sun { display: none; }
+  :root[data-theme="dark"] .icon-btn .moon { display: block; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    padding: 13px 24px; border-radius: 999px; border: 1px solid transparent;
+    font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer; font-family: inherit;
+    transition: transform .15s ease, background .15s ease, border-color .15s ease, color .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-solid { background: var(--btn-ink); color: var(--btn-on); }
+  .btn-solid:hover { background: var(--accent); color: #fff; }
+  .btn-accent { background: var(--accent); color: #fff; }
+  .btn-ghost { border-color: var(--line); background: var(--paper-3); color: var(--ink); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { padding: 10px 18px; font-size: 14px; }
+  a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  /* ---------- dotted ground ---------- */
+  .dots { position: relative; }
+  .dots::before {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background-image: radial-gradient(var(--dot) 1.5px, transparent 1.6px);
+    background-size: 15px 15px;
+    -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 40%, #000 20%, transparent 78%);
+    mask-image: radial-gradient(ellipse 75% 65% at 50% 40%, #000 20%, transparent 78%);
+  }
+  .dots > * { position: relative; z-index: 1; }
+
+  /* ---------- page header ---------- */
+  .top { padding-block: clamp(48px, 7vw, 88px) clamp(34px, 5vw, 56px); }
+  .top .inner { display: grid; gap: 20px; justify-items: start; }
+  .lede { font-size: clamp(17px, 1.9vw, 20px); color: var(--ink-2); max-width: 58ch; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+  section { padding-block: clamp(44px, 6vw, 76px); }
+  .band { background: var(--paper-2); border-block: 1px solid var(--line); }
+  .head { display: grid; gap: 14px; max-width: 60ch; margin-bottom: 30px; }
+  .head p { color: var(--ink-2); }
+  .stack { display: grid; gap: 22px; }
+  .stack > p { color: var(--ink-2); }
+
+  /* ---------- cards ---------- */
+  .reqs, .facts { display: grid; gap: 16px; grid-template-columns: repeat(3, minmax(0,1fr)); }
+  @media (max-width: 820px) { .reqs, .facts { grid-template-columns: 1fr; } }
+  .req, .fact {
+    background: var(--paper-3); border: 1px solid var(--line); border-radius: 18px;
+    padding: 24px; display: grid; gap: 9px; align-content: start;
+  }
+  .req p, .fact p { font-size: 15.5px; color: var(--ink-2); }
+  .fact .no { font-family: var(--mono); font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--warn-line); font-weight: 700; }
+
+  /* ---------- numbered flow ---------- */
+  .flow { display: grid; gap: 30px; counter-reset: s; }
+  .stepblk { display: grid; gap: 14px; padding-left: 54px; position: relative; }
+  .stepblk::before {
+    counter-increment: s; content: counter(s);
+    position: absolute; left: 0; top: 0;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--accent-bg); color: var(--accent-ink);
+    display: grid; place-items: center; font-size: 14px; font-weight: 800;
+  }
+  .stepblk p { color: var(--ink-2); }
+  @media (max-width: 560px) { .stepblk { padding-left: 0; padding-top: 46px; } }
+
+  /* ---------- terminal / code ---------- */
+  .term, .exchange { background: var(--code-bg); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .term-bar, .exchange-bar { display: flex; align-items: center; gap: 7px; padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .term-bar i, .exchange-bar i { width: 9px; height: 9px; border-radius: 50%; background: #443a6e; display: block; }
+  .term-bar b, .exchange-bar b { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--code-dim); margin-left: 8px; }
+  .term pre, .exchange pre { margin: 0; padding: 18px 16px; overflow-x: auto; font-family: var(--mono); font-size: 12.6px; line-height: 1.85; color: var(--code-fg); }
+  .term .c, .exchange .c { color: var(--code-dim); }
+  .term .g, .exchange .to { color: var(--code-accent); }
+  .term .p, .exchange .from { color: var(--code-amber); }
+
+  /* ---------- tables ---------- */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--paper-3); }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; background: var(--paper-2); }
+  tr:last-child td { border-bottom: 0; }
+  td code { background: none; border: 0; padding: 0; color: var(--accent-ink); white-space: nowrap; }
+  td:last-child { color: var(--ink-2); }
+
+  /* ---------- callout ---------- */
+  .note { border-left: 3px solid var(--warn-line); background: var(--warn-bg); border-radius: 0 14px 14px 0; padding: 17px 20px; display: grid; gap: 6px; }
+  .note b { font-size: 15px; }
+  .note p { font-size: 15px; color: var(--ink-2); }
+
+  /* ---------- checklists ---------- */
+  .checklist, .bullets { display: grid; gap: 16px; }
+  .ck, .bl { display: grid; grid-template-columns: 22px 1fr; gap: 3px 12px; align-items: start; }
+  .ck svg, .bl svg { grid-row: span 2; margin-top: 3px; color: var(--accent); }
+  .ck strong, .bl strong { font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
+  .ck span, .bl span { color: var(--ink-2); font-size: 15px; }
+
+  /* ---------- accordions ---------- */
+  .trouble { display: grid; gap: 10px; }
+  details { border: 1px solid var(--line); border-radius: 16px; background: var(--paper-3); padding: 16px 20px; }
+  summary { cursor: pointer; list-style: none; font-weight: 700; letter-spacing: -0.02em; font-size: 17px; display: flex; justify-content: space-between; gap: 18px; align-items: center; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; color: var(--accent); font-weight: 700; }
+  details[open] summary::after { content: "3"; }
+  details p { margin-top: 10px; color: var(--ink-2); font-size: 15.5px; max-width: 66ch; }
+  details p + p { margin-top: 9px; }
+
+  /* ---------- diagram ---------- */
+  .diagram { background: var(--paper-3); border: 1px solid var(--line); border-radius: 20px; padding: clamp(18px, 3vw, 30px); overflow-x: auto; }
+  .diagram svg { display: block; min-width: 560px; width: 100%; height: auto; }
+  .diagram .box { fill: var(--paper-3); stroke: var(--line); }
+  .diagram .box-dark { fill: var(--band); stroke: var(--line); }
+  .diagram .lbl { font-family: var(--sans); font-size: 13px; font-weight: 700; fill: var(--ink); }
+  .diagram .lbl-inv { font-family: var(--sans); font-size: 13px; font-weight: 700; fill: #f3f0ff; }
+  .diagram .sub { font-family: var(--sans); font-size: 11.5px; fill: var(--ink-2); }
+  .diagram .sub-inv { font-family: var(--sans); font-size: 11.5px; fill: #918ab3; }
+  .diagram .wire { stroke: var(--line); stroke-width: 1.5; fill: none; }
+  .diagram .wire-live { stroke: var(--accent); stroke-width: 2; fill: none; stroke-dasharray: 5 6; animation: dash 1.4s linear infinite; }
+  @keyframes dash { to { stroke-dashoffset: -22; } }
+  .diagram .edge { font-family: var(--mono); font-size: 11px; fill: var(--ink-3); }
+  .diagram .edge-live { font-family: var(--mono); font-size: 11px; fill: var(--accent); }
+
+  /* ---------- key pair block ---------- */
+  .keys { display: grid; gap: 10px; background: var(--paper-3); border: 1px solid var(--line); border-radius: 16px; padding: 20px; overflow-x: auto; }
+  .keys div { display: grid; grid-template-columns: 84px 1fr; gap: 14px; align-items: baseline; font-family: var(--mono); font-size: 12.5px; }
+  .keys span:first-child { color: var(--ink-3); }
+  .keys span:last-child { color: var(--ink); word-break: break-all; }
+
+  /* ---------- protocol: rules ---------- */
+  .rules { display: grid; gap: 12px; counter-reset: r; }
+  .rule { display: grid; grid-template-columns: 30px 1fr; gap: 14px; align-items: start; background: var(--paper-3); border: 1px solid var(--line); border-radius: 14px; padding: 17px 19px; }
+  .rule::before {
+    counter-increment: r; content: counter(r);
+    width: 28px; height: 28px; border-radius: 50%; background: var(--accent-bg); color: var(--accent-ink);
+    display: grid; place-items: center; font-size: 12.5px; font-weight: 800;
+  }
+  .rule p { font-size: 16px; color: var(--ink-2); }
+  .rule p b { color: var(--ink); font-weight: 700; }
+
+  /* ---------- protocol: messages ---------- */
+  .msg { background: var(--paper-3); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+  .msg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 15px 18px; border-bottom: 1px solid var(--line); background: var(--paper-2); }
+  .msg-head h3 { font-family: var(--mono); font-size: 15px; font-weight: 700; letter-spacing: 0; }
+  .dir { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; margin-left: auto; font-weight: 700; }
+  .dir.out { background: var(--accent-bg); color: var(--accent-ink); }
+  .dir.in { background: var(--warn-bg); color: var(--warn-line); }
+  .msg-body { display: grid; gap: 16px; padding: 18px; }
+  .msg-body > p { font-size: 15.5px; color: var(--ink-2); }
+  .msg pre {
+    margin: 0; padding: 16px; overflow-x: auto; background: var(--code-bg); border-radius: 12px;
+    font-family: var(--mono); font-size: 12.6px; line-height: 1.8; color: var(--code-fg);
+  }
+  .msg pre .k { color: var(--code-accent); }
+  .msg pre .s { color: var(--code-amber); }
+  .msg pre .c { color: var(--code-dim); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 9px; }
+  .chip { font-family: var(--mono); font-size: 13px; color: var(--ink-2); background: var(--paper-3); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; }
+
+  /* ---------- cta + footer ---------- */
+  .cta-box { background: var(--band); border-radius: 28px; padding: clamp(32px, 5vw, 56px) var(--pad); text-align: center; display: grid; gap: 18px; justify-items: center; }
+  .cta-box h2 { color: #f3f0ff; }
+  .cta-box p { color: #9b92bd; max-width: 48ch; }
+  .cta-box .btn-solid { background: #f3f0ff; color: #180f38; }
+  .cta-box .btn-ghost { background: transparent; border-color: #382c63; color: #f3f0ff; }
+
+  footer { border-top: 1px solid var(--line); padding-block: 30px; margin-top: clamp(40px, 6vw, 70px); }
+  .foot { display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: center; font-size: 14px; color: var(--ink-2); }
+  .foot a { text-decoration: none; color: inherit; }
+  .foot a:hover { color: var(--accent); }
+  .foot .right { margin-left: auto; }
+
+  /* ---------- reveal ---------- */
+  .rv { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+  .rv.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .rv { opacity: 1; transform: none; }
+    .diagram .wire-live { animation: none; }
+    * { transition: none !important; }
+  }
+  .sub-note { font-size: 15px; color: var(--ink-3); }
+  .stack h3 { margin-top: 6px; }
+
+  /* ---------- shared navigation: identical on every page ---------- */
+  .nav { position: sticky; top: 14px; z-index: 40; padding-inline: var(--pad); margin-top: 14px; }
+  .nav-inner {
+    width: min(1120px, 100%); margin-inline: auto;
+    display: flex; align-items: center; gap: 10px;
+    background: color-mix(in srgb, var(--paper) 85%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 8px 8px 18px; height: 56px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 9px; flex: none;
+    font-weight: 800; letter-spacing: -0.03em; font-size: 17px;
+    text-decoration: none; color: var(--ink);
+  }
+  .navlinks {
+    display: flex; align-items: center; gap: 22px;
+    margin-inline: auto; font-size: 15px; font-weight: 500;
+  }
+  .navlinks a { color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+  .navlinks a:hover { color: var(--ink); }
+  .navlinks a[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .nav .icon-btn {
+    width: 38px; height: 38px; flex: none; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--paper-3); color: var(--ink);
+    display: grid; place-items: center; cursor: pointer; padding: 0;
+  }
+  .nav .btn-sm { flex: none; padding: 10px 18px; font-size: 14px; }
+  .nav .menu-btn { display: none; }
+  @media (max-width: 900px) { .navlinks { gap: 15px; font-size: 14px; } }
+  @media (max-width: 680px) {
+    .navlinks { display: none; }
+    .nav-inner { justify-content: space-between; }
+    .nav .menu-btn { display: grid; }
+  }
+  /* The links hidden above reappear here, one tap away — a nav that only
+     works above 680px is a nav phones don't have. */
+  .nav-drop {
+    display: none;
+    width: min(1120px, 100%); margin: 8px auto 0;
+    background: color-mix(in srgb, var(--paper) 96%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 18px; padding: 8px;
+  }
+  .nav-drop a {
+    display: block; padding: 11px 14px; border-radius: 11px;
+    color: var(--ink-2); text-decoration: none; font-size: 15px; font-weight: 500;
+  }
+  .nav-drop a:hover { background: var(--paper-2); color: var(--ink); }
+  .nav-drop a[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .nav.open .nav-drop { display: block; }
+</style>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="/" aria-label="rootmode home">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <rect x="9" y="2" width="6" height="6" rx="1.4" />
+        <rect x="16" y="9" width="6" height="6" rx="1.4" />
+        <rect x="2" y="16" width="6" height="6" rx="1.4" />
+        <rect x="9" y="16" width="6" height="6" rx="1.4" />
+        <rect x="16" y="16" width="6" height="6" rx="1.4" />
+      </svg>
+      rootmode
+    </a>
+    <nav class="navlinks" aria-label="Pages">
+      <a href="/">Home</a>
+      <a href="/manifesto">Manifesto</a>
+      <a href="/explorer">Explorer</a>
+      <a href="/worker" aria-current="page">Run a worker</a>
+      <a href="/discovery">Discovery</a>
+      <a href="/protocol">Protocol</a>
+      <a href="/brand">Brand</a>
+    </nav>
+    <button class="icon-btn menu-btn" id="nav-menu" type="button" aria-label="Open menu" aria-expanded="false">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <button class="icon-btn" id="theme" type="button" aria-label="Switch to dark theme" title="Switch theme">
+      <svg class="sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+    <a class="btn btn-solid btn-sm" href="/download">Download</a>
+  </div>
+  <nav class="nav-drop" aria-label="Pages, expanded">
+      <a href="/">Home</a>
+      <a href="/manifesto">Manifesto</a>
+      <a href="/explorer">Explorer</a>
+      <a href="/worker" aria-current="page">Run a worker</a>
+      <a href="/discovery">Discovery</a>
+      <a href="/protocol">Protocol</a>
+      <a href="/brand">Brand</a>
+    </nav>
+</header>
+<script>
+  // Mobile nav: the pill collapses the links at 680px, this is what gets them
+  // back. Closes itself on a link tap so it never sits open over the page you
+  // just asked to go to.
+  (function () {
+    var nav = document.querySelector(".nav");
+    var btn = document.getElementById("nav-menu");
+    if (!nav || !btn) return;
+    btn.addEventListener("click", function () {
+      var open = nav.classList.toggle("open");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    });
+    nav.querySelectorAll(".nav-drop a").forEach(function (a) {
+      a.addEventListener("click", function () {
+        nav.classList.remove("open");
+        btn.setAttribute("aria-expanded", "false");
+      });
+    });
+  })();
+</script>
+
+
+<main>
+  <section class="top dots">
+    <div class="wrap inner rv">
+      <p class="eyebrow">For operators</p>
+      <h1>Run a worker.</h1>
+      <p class="lede">
+        A worker is what turns a machine with GPUs into a peer on the network. One
+        compose file, pointed at the vLLM or ComfyUI you already run. It needs no GPU
+        access of its own, and there's no application or approval queue — start it
+        and you're serving.
+      </p>
+      <div class="actions">
+        <a class="btn btn-solid" href="#quickstart">Start here</a>
+        <a class="btn btn-ghost" href="https://github.com/rootmodeai/rootmode/blob/main/docs/WORKER.md">Full documentation</a>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">Before you start</p>
+        <h2>What you need on the box.</h2>
+        <p>
+          The worker doesn't hold models and doesn't touch your GPUs. It speaks to an
+          inference server you already run, over HTTP.
+        </p>
+      </div>
+      <div class="reqs">
+        <div class="req">
+          <h3>Docker</h3>
+          <p>And a clone of the repo. <code>docker compose up</code> is the whole start. Or a Rust toolchain, if you'd rather build from source.</p>
+        </div>
+        <div class="req">
+          <h3>vLLM, for text</h3>
+          <p>Any OpenAI-compatible endpoint. Typically <code>127.0.0.1:8000</code>. Comment it out in <code>.env</code> if this box only serves images.</p>
+        </div>
+        <div class="req">
+          <h3>ComfyUI, for images and video</h3>
+          <p>Uncomment it in <code>.env</code> and every checkpoint installed is served — still images, and video models such as MiniMax if they're on the box. Export a workflow instead when your pipeline has a shape of its own.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart" class="band">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">Quickstart</p>
+        <h2>Serving in about ten minutes.</h2>
+      </div>
+      <div class="flow">
+
+        <div class="stepblk">
+          <h3>Clone it and name the endpoints</h3>
+          <p>
+            The compose file is the same on every box — Spark, A100, H100, or a
+            machine whose cards sit behind a remote URL. <code>.env</code> is the
+            only thing that changes. Uncomment vLLM, ComfyUI, or both; at least one
+            is required. A price is one more line; leave it out and you advertise
+            as free.
+          </p>
+          <div class="term">
+            <div class="term-bar"><i></i><i></i><i></i><b>setup</b></div>
+            <pre>$ git clone https://github.com/rootmodeai/rootmode
+$ cd rootmode
+$ cp .env.example .env</pre>
+          </div>
+          <div class="term">
+            <div class="term-bar"><i></i><i></i><i></i><b>.env</b></div>
+            <pre><span class="c"># OpenAI-compatible server. Comment out if this box only serves images.</span>
+ROOTMODE_VLLM=http://127.0.0.1:8000
+<span class="c"># ROOTMODE_VLLM_PRICE=0.15          # per million tokens, every model</span>
+
+<span class="c"># ComfyUI. Uncomment to serve images too, or instead of vLLM.</span>
+<span class="c"># ROOTMODE_COMFYUI=http://127.0.0.1:8188</span>
+<span class="c"># ROOTMODE_COMFYUI_PRICE=0.02       # per image, every checkpoint</span>
+<span class="c"># ROOTMODE_COMFYUI_PRICES=sdxl=0.02,krea2-turbo=0.08</span></pre>
+          </div>
+        </div>
+
+        <div class="stepblk">
+          <h3>Start the worker</h3>
+          <p>
+            The container talks to your inference server over HTTP, so it needs no
+            GPU access itself. Host networking is the simplest thing that works on
+            Linux.
+          </p>
+          <div class="term">
+            <div class="term-bar"><i></i><i></i><i></i><b>run</b></div>
+            <pre>$ docker compose up -d --build</pre>
+          </div>
+          <div class="note">
+            <b>Keep the volume.</b>
+            <p>
+              <code>/var/lib/rootmode</code> holds the node's key, and that key
+              <em>is</em> its identity. Lose it and your peer id changes — every
+              client that pinned you stops recognising the node.
+            </p>
+          </div>
+        </div>
+
+        <div class="stepblk">
+          <h3>Check what it says</h3>
+          <p>
+            On each start it writes a <code>worker.toml</code> from the environment
+            and prints it, then advertises exactly what the box actually serves.
+            A price changed in <code>.env</code> takes effect on restart.
+          </p>
+          <div class="term">
+            <div class="term-bar"><i></i><i></i><i></i><b>docker compose logs -f</b></div>
+            <pre><span class="c">INFO</span> rootmode worker v0.1.0
+<span class="c">INFO</span> peer_id=ef9084b8a01c18be4b75fb7e0b72b7b4d57b5be9…
+<span class="c">INFO</span> listening on ws://0.0.0.0:9944
+<span class="c">INFO</span> caps: [llm]  max_concurrent: 2
+<span class="c">INFO</span>   <span class="g">meta-llama/Llama-3.1-8B-Instruct (llm)</span>
+<span class="c">INFO</span> this node is its own entry point — give a client one of:
+<span class="c">INFO</span>   /ip4/192.168.1.50/tcp/4101/p2p/12D3KooWR3Tjk…</pre>
+          </div>
+        </div>
+
+        <div class="stepblk">
+          <h3>Connect a client to it</h3>
+          <p>
+            On the same network, the desktop app finds it on its own — it appears on
+            the peers screen marked <code>discovered</code>. From elsewhere, add
+            <code>ws://&lt;host&gt;:9944</code> by hand, and paste the peer id into the
+            public key field to pin it.
+          </p>
+          <p>
+            To check a node without the desktop app at all:
+          </p>
+          <div class="term">
+            <div class="term-bar"><i></i><i></i><i></i><b>smoke test</b></div>
+            <pre>$ cargo run -p rootmode-worker --example submit -- \
+    ws://127.0.0.1:9944 <span class="g">"what is a peer?"</span></pre>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Configuration</p>
+        <h2>The settings worth knowing.</h2>
+        <p>
+          Set them in <code>.env</code> next to the compose file. Mount your own
+          <code>worker.toml</code> and set <code>ROOTMODE_CONFIG</code> to its path —
+          then none of these apply.
+        </p>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Variable</th><th>Default</th><th>What it does</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>ROOTMODE_VLLM</code></td><td>—</td><td>OpenAI-compatible endpoint for text. Comma-separate if this box has more than one.</td></tr>
+            <tr><td><code>ROOTMODE_VLLM_PRICE</code></td><td>—</td><td>What you charge per million tokens, for every model that server reports. Unset is advertised as free.</td></tr>
+            <tr><td><code>ROOTMODE_VLLM_PRICES</code></td><td>—</td><td>Optional per-model overrides: <code>id=0.40,id=0.10</code></td></tr>
+            <tr><td><code>ROOTMODE_COMFYUI</code></td><td>—</td><td>ComfyUI endpoint for images and video. Pointing at it is enough — every installed checkpoint is advertised.</td></tr>
+            <tr><td><code>ROOTMODE_COMFYUI_PRICE</code></td><td>—</td><td>What you charge per image, for every checkpoint. Unset is advertised as free.</td></tr>
+            <tr><td><code>ROOTMODE_COMFYUI_PRICES</code></td><td>—</td><td>Optional per-checkpoint overrides: <code>sdxl=0.02,krea2-turbo=0.08</code></td></tr>
+            <tr><td><code>ROOTMODE_CURRENCY</code></td><td>USD</td><td>Currency for the prices above</td></tr>
+            <tr><td><code>ROOTMODE_PAYOUT</code></td><td>—</td><td>Address that receives your 90% when a job settles.</td></tr>
+            <tr><td><code>ROOTMODE_POT</code></td><td>—</td><td>RootmodePot contract. Empty means this node is not charging on-chain.</td></tr>
+            <tr><td><code>ROOTMODE_CHAIN_ID</code></td><td>8453</td><td>Settlement chain. Base is 8453.</td></tr>
+            <tr><td><code>ROOTMODE_RPC</code></td><td>—</td><td>JSON-RPC URL used to check the lock and to submit spend tickets.</td></tr>
+            <tr><td><code>ROOTMODE_PAY_KEY</code></td><td>—</td><td>Ethereum private key (secp256k1, 32-byte hex) this node signs <code>settle</code> with. Leave it in <code>.env</code>, not in a config file you share. Needs a little ETH for gas. Does not have to be the payout address.</td></tr>
+            <tr><td><code>ROOTMODE_PAY_SENDER</code></td><td>—</td><td>Address that posts <code>settle</code>. Derived from the key if you set one.</td></tr>
+            <tr><td><code>ROOTMODE_BOOTSTRAP</code></td><td>—</td><td>Entry points to join, comma-separated</td></tr>
+            <tr><td><code>ROOTMODE_P2P_EXTERNAL</code></td><td>—</td><td>Address to advertise, if not what it binds</td></tr>
+            <tr><td><code>ROOTMODE_LABEL</code></td><td>hostname</td><td>The name clients see</td></tr>
+            <tr><td><code>ROOTMODE_LISTEN</code></td><td>0.0.0.0:9944</td><td>WebSocket address</td></tr>
+            <tr><td><code>ROOTMODE_MAX_CONCURRENT</code></td><td>2</td><td>Jobs to run at once</td></tr>
+            <tr><td><code>ROOTMODE_REQUIRE_SIGNATURE</code></td><td>false</td><td>Refuse unsigned submissions</td></tr>
+            <tr><td><code>ROOTMODE_ALLOW_PEERS</code></td><td>—</td><td>Only these client peer ids may submit</td></tr>
+            <tr><td><code>ROOTMODE_RELAY</code></td><td>true</td><td>Ask for a relay slot — needed behind NAT</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="sub-note">
+        A price without a pot is only a sticker. To get paid, set
+        <code>ROOTMODE_POT</code>, <code>ROOTMODE_RPC</code>,
+        <code>ROOTMODE_PAYOUT</code> and <code>ROOTMODE_PAY_KEY</code>.
+        The client locks funds before the GPU runs; this node signs and
+        submits the spend ticket afterwards. 90% to your payout address,
+        10% to the network.
+      </p>
+      <p class="sub-note">
+        Behind NAT, or publishing ports instead of using host networking? Set
+        <code>ROOTMODE_P2P_EXTERNAL</code> to the address other peers should dial —
+        otherwise they discover the node and then can't reach it.
+      </p>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Your machine, your rules</p>
+        <h2>What a client can and can't do to your box.</h2>
+      </div>
+      <div class="checklist">
+        <div class="ck">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>Nothing a client sends is executed</strong>
+          <span>A job picks a workflow you declared and fills parameters you declared. That is the entire surface — no job field reaches a process spawn.</span>
+        </div>
+        <div class="ck">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>You choose the models on offer</strong>
+          <span>The worker holds none of its own. It advertises what your inference server actually serves, and nothing else can be requested.</span>
+        </div>
+        <div class="ck">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>You can restrict who submits at all</strong>
+          <span>Require signed submissions, or list the exact client peer ids allowed. Everything else is refused before it runs.</span>
+        </div>
+        <div class="ck">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>For images, a prompt and a checkpoint — nothing else</strong>
+          <span>A client picks one of the checkpoints you have installed and sends words. It can't send a graph, add a node, or reach a setting you didn't offer. Export a workflow and even the checkpoint is fixed.</span>
+        </div>
+        <div class="ck">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>Stop means stop</strong>
+          <span><code>docker compose down</code> and the node is off the network. There's no notice period and nothing to cancel.</span>
+        </div>
+      </div>
+      <div class="note">
+        <b>You're responsible for what your node serves.</b>
+        <p>
+          Workers run models the operator chose, on hardware the operator owns. Local
+          law and acceptable use are yours to observe.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Going further</p>
+        <h2>When one node becomes several.</h2>
+        <p>
+          A lone worker is its own entry point — a client pointed at it discovers what
+          it serves. Once several nodes need to find each other, run a bootstrap node
+          and point them all at it. It's an entry point and a relay for NAT'd nodes,
+          never a registry, never an authority, and never in the path of a job.
+        </p>
+      </div>
+      <div class="term">
+        <div class="term-bar"><i></i><i></i><i></i><b>bootstrap node</b></div>
+        <pre>$ docker build -f docker/Dockerfile.bootstrap -t <span class="p">rootmode-bootstrap</span> .
+$ docker run -d -p 4001:4001 -v rootmode-bootstrap:/var/lib/rootmode \
+    <span class="p">rootmode-bootstrap</span> --announce /ip4/&lt;this host&gt;/tcp/4001</pre>
+      </div>
+      <p class="sub-note">
+        Run several. Any node can be one. A worker joins through
+        <code>ROOTMODE_BOOTSTRAP</code> in <code>.env</code>, or through the entry
+        points compiled into the binary.
+      </p>
+      <div class="actions">
+        <a class="btn btn-solid" href="/discovery">Discovery &amp; bootstrap</a>
+        <a class="btn btn-ghost" href="/protocol">The protocol</a>
+        <a class="btn btn-ghost" href="https://github.com/rootmodeai/rootmode/blob/main/docs/WORKER.md">Full worker docs</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wide foot">
+    <span>rootmode v0.1.0</span>
+    <span>·</span>
+    <span>your keys · your peers</span>
+    <span class="right"><a href="/brand">Brand</a> · <a href="/">← Back to rootmode</a></span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement, btn = document.getElementById("theme"), saved = null;
+    try { saved = localStorage.getItem("rootmode.theme"); } catch (e) {}
+    if (saved === "dark") root.setAttribute("data-theme", "dark");
+    function label() {
+      btn.setAttribute("aria-label",
+        root.getAttribute("data-theme") === "dark" ? "Switch to light theme" : "Switch to dark theme");
+    }
+    label();
+    btn.addEventListener("click", function () {
+      var dark = root.getAttribute("data-theme") === "dark";
+      if (dark) root.removeAttribute("data-theme"); else root.setAttribute("data-theme", "dark");
+      try { localStorage.setItem("rootmode.theme", dark ? "light" : "dark"); } catch (e) {}
+      label();
+    });
+  })();
+  (function () {
+    var els = document.querySelectorAll(".rv");
+    if (!("IntersectionObserver" in window) || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      els.forEach(function (el) { el.classList.add("in"); }); return;
+    }
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, { rootMargin: "0px 0px -12% 0px" });
+    els.forEach(function (el) { io.observe(el); });
+  })();
+</script>

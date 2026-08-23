@@ -1,0 +1,81 @@
+# rootmode-worker — run this next to your GPUs.
+#
+# The container does not use the GPU. Point it at the vLLM and/or ComfyUI
+# you already run; they keep the cards, this joins the network.
+#
+#   cp .env.example .env    # uncomment the endpoints this box has
+#   docker compose up -d --build
+#
+# Same file on a Spark, an A100, an H100, or a box with no GPU that
+# talks to an inference server over the network. vLLM, ComfyUI, or both.
+
+name: rootmode-worker
+
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    image: rootmode-worker
+    container_name: rootmode-worker
+    restart: unless-stopped
+    # Host networking: reach inference on 127.0.0.1, advertise the host's
+    # own address. Linux GPU boxes are this. On Docker Desktop, drop this
+    # and set ROOTMODE_P2P_EXTERNAL instead — see docs/WORKER.md.
+    network_mode: host
+    volumes:
+      # The node's identity. Recreating without this volume mints a new
+      # peer id and every client that pinned the old one stops recognising
+      # the box.
+      - worker-data:/var/lib/rootmode
+      # Mount your own ComfyUI workflow (API format) if you serve images
+      # with a graph that is not the built-in one:
+      # - ./my_workflow.json:/etc/rootmode/workflows/my_workflow.json:ro
+    environment:
+      ROOTMODE_LABEL: ${ROOTMODE_LABEL:-}
+      ROOTMODE_LISTEN: ${ROOTMODE_LISTEN:-0.0.0.0:9944}
+      ROOTMODE_P2P_LISTEN: ${ROOTMODE_P2P_LISTEN:-/ip4/0.0.0.0/tcp/4101}
+      ROOTMODE_MAX_CONCURRENT: ${ROOTMODE_MAX_CONCURRENT:-2}
+
+      # OpenAI-compatible server(s). Comma-separated if this box has more
+      # than one. Empty if this box only serves images.
+      ROOTMODE_VLLM: ${ROOTMODE_VLLM:-}
+      ROOTMODE_VLLM_API_KEY: ${ROOTMODE_VLLM_API_KEY:-}
+      ROOTMODE_VLLM_MODELS: ${ROOTMODE_VLLM_MODELS:-}
+      # Per million tokens, every model this server reports. Unset = free.
+      ROOTMODE_VLLM_PRICE: ${ROOTMODE_VLLM_PRICE:-}
+      # Optional per-id overrides: model=0.40,other=0.10
+      ROOTMODE_VLLM_PRICES: ${ROOTMODE_VLLM_PRICES:-}
+
+      # ComfyUI. Empty if this box only serves text.
+      ROOTMODE_COMFYUI: ${ROOTMODE_COMFYUI:-}
+      ROOTMODE_COMFYUI_CHECKPOINT: ${ROOTMODE_COMFYUI_CHECKPOINT:-}
+      ROOTMODE_COMFYUI_WORKFLOW: ${ROOTMODE_COMFYUI_WORKFLOW:-}
+      ROOTMODE_COMFYUI_WORKFLOWS: ${ROOTMODE_COMFYUI_WORKFLOWS:-}
+      ROOTMODE_COMFYUI_SLOTS: ${ROOTMODE_COMFYUI_SLOTS:-}
+      # Per image, every checkpoint. Unset = free.
+      ROOTMODE_COMFYUI_PRICE: ${ROOTMODE_COMFYUI_PRICE:-}
+      # Optional per-id overrides: sdxl=0.02,krea2-turbo=0.08
+      ROOTMODE_COMFYUI_PRICES: ${ROOTMODE_COMFYUI_PRICES:-}
+      ROOTMODE_CURRENCY: ${ROOTMODE_CURRENCY:-USD}
+      ROOTMODE_PAYOUT: ${ROOTMODE_PAYOUT:-}
+      ROOTMODE_POT: ${ROOTMODE_POT:-}
+      ROOTMODE_CHAIN_ID: ${ROOTMODE_CHAIN_ID:-8453}
+      ROOTMODE_RPC: ${ROOTMODE_RPC:-}
+      ROOTMODE_PAY_SENDER: ${ROOTMODE_PAY_SENDER:-}
+      # Ethereum private key this process signs settle with. Not written into
+      # the generated toml (that file is printed on start).
+      ROOTMODE_PAY_KEY: ${ROOTMODE_PAY_KEY:-}
+
+      ROOTMODE_BOOTSTRAP: ${ROOTMODE_BOOTSTRAP:-}
+      ROOTMODE_P2P_EXTERNAL: ${ROOTMODE_P2P_EXTERNAL:-}
+      ROOTMODE_COUNTRY: ${ROOTMODE_COUNTRY:-}
+      ROOTMODE_REFRESH_SECS: ${ROOTMODE_REFRESH_SECS:-60}
+      ROOTMODE_STATS_URL: ${ROOTMODE_STATS_URL:-https://rootmode.ai/report}
+      ROOTMODE_REQUIRE_SIGNATURE: ${ROOTMODE_REQUIRE_SIGNATURE:-}
+      ROOTMODE_ALLOW_PEERS: ${ROOTMODE_ALLOW_PEERS:-}
+      RUST_LOG: ${RUST_LOG:-info}
+
+volumes:
+  worker-data:
+    name: ${ROOTMODE_VOLUME:-rootmode-worker-data}

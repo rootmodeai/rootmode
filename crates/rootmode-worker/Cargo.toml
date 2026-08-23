@@ -1,0 +1,44 @@
+[package]
+name = "rootmode-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "rootmode worker — advertise a node's models and run jobs on local inference backends"
+
+[[bin]]
+name = "rootmode-worker"
+path = "src/main.rs"
+
+[lib]
+name = "rootmode_worker"
+path = "src/lib.rs"
+
+[features]
+# Test scaffolding (stub HTTP server, stub backend) for downstream crates.
+testutil = []
+
+[dependencies]
+rootmode-core = { path = "../rootmode-core" }
+rootmode-p2p = { path = "../rootmode-p2p" }
+
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+
+async-trait = "0.1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["multipart", "json", "rustls-tls", "stream"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal", "io-util"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+k256 = { version = "0.13", features = ["ecdsa"] }
+rand.workspace = true
+
+[dev-dependencies]

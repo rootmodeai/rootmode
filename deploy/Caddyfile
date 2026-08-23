@@ -1,0 +1,50 @@
+# rootmode.ai — the site, and the collector behind the same domain.
+#
+# Caddy gets and renews the TLS certificate on its own: on first request for a
+# hostname it solves an ACME challenge with Let's Encrypt and keeps the result
+# in /data, which is why that volume matters more than any other here — losing
+# it means re-issuing, and Let's Encrypt rate-limits that to 5 per week per
+# hostname.
+
+{
+	# Where expiry warnings go. Optional, and worth setting.
+	email {$ACME_EMAIL}
+}
+
+{$ROOTMODE_DOMAIN} {
+	encode zstd gzip
+
+	# The collector serves the pages *and* the API, so there is one upstream
+	# and no routing to get wrong. It is not published on the host at all —
+	# only Caddy can reach it, over the compose network.
+	reverse_proxy stats:8080
+
+	header {
+		# The pages are self-contained: no external scripts, fonts or images.
+		# Saying so means an injected <script> from anywhere else is refused
+		# by the browser rather than run.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 20mb
+			roll_keep 5
+		}
+		# A worker's address is what the collector turns into a country and
+		# drops; writing it into an access log undoes that, so it is left out.
+		format filter {
+			request>remote_ip delete
+			request>client_ip delete
+		}
+	}
+}
+
+# www to the apex, for the people who type it.
+www.{$ROOTMODE_DOMAIN} {
+	redir https://{$ROOTMODE_DOMAIN}{uri} permanent
+}

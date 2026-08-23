@@ -1,0 +1,61 @@
+[package]
+name = "rootmode-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "rootmode desktop client"
+default-run = "rootmode-desktop"
+
+[lib]
+name = "rootmode_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+rootmode-core = { path = "../../../crates/rootmode-core" }
+rootmode-p2p = { path = "../../../crates/rootmode-p2p" }
+
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+rand.workspace = true
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+k256 = { version = "0.13", features = ["ecdsa"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+base64 = "0.22"
+chrono = "0.4"
+url = "2"
+png = "0.17"
+log = "0.4"
+# A desktop app you cannot get logs out of is a desktop app you cannot debug.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+# The local endpoint other tools connect to.
+axum = "0.7"
+# Reading dropped documents. PDFs are the format people actually have.
+pdf-extract = "0.7"
+
+[features]
+# Tauri's default "custom-protocol" feature is enabled by the CLI on release builds.
+custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+# The websocket tests stand up a throwaway worker on localhost.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+# The end-to-end test runs a real worker against a stub inference server.
+rootmode-worker = { path = "../../../crates/rootmode-worker", features = ["testutil"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+k256 = { version = "0.13", features = ["ecdsa"] }

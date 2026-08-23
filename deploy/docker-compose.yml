@@ -1,0 +1,66 @@
+# rootmode.ai on one box: the site, the collector, and TLS.
+#
+#   cd deploy && ./deploy.sh
+#
+# Two containers. Caddy holds 80 and 443 and gets the certificate; the
+# collector serves everything behind it and is not reachable from outside the
+# compose network — there is no published port on it at all, so the only way in
+# is through Caddy.
+
+name: rootmode
+
+services:
+  stats:
+    build:
+      # The repository root, because the image carries apps/web as well.
+      context: ..
+      dockerfile: services/stats/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8080"
+    volumes:
+      # stats.db lives here. It is the only copy of the explorer's history and
+      # nothing can re-derive it, so back this up.
+      - stats-data:/var/lib/rootmode
+    environment:
+      # Without a salt no address hash is written at all — which is a fine way
+      # to run it. With one, repeat reports can be recognised as one machine
+      # without keeping the address. Rotate it to forget.
+      ROOTMODE_IP_SALT: ${ROOTMODE_IP_SALT:-}
+      # Caddy is in front, so X-Forwarded-For is ours and can be trusted. Left
+      # false, every worker would appear to be in the same place as the proxy.
+      ROOTMODE_TRUST_PROXY: "true"
+      # Off means anyone could invent a worker and move the charts.
+      ROOTMODE_REQUIRE_SIG: "true"
+      ROOTMODE_CORS: ${ROOTMODE_CORS:-https://${ROOTMODE_DOMAIN:-rootmode.ai}}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - stats
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The certificates. Losing this volume means re-issuing, and Let's
+      # Encrypt allows that five times a week per hostname.
+      - caddy-data:/data
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy
+    environment:
+      ROOTMODE_DOMAIN: ${ROOTMODE_DOMAIN:-rootmode.ai}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+
+volumes:
+  stats-data:
+  caddy-data:
+  caddy-config:
+  caddy-logs:

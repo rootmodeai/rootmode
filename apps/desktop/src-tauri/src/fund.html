@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#7433f7" />
+  <title>rootmode pot</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230d0f11'/%3E%3Cg fill='%23e8eaed'%3E%3Crect x='13' y='5.5' width='6' height='6' rx='1.2'/%3E%3Crect x='20.5' y='13' width='6' height='6' rx='1.2'/%3E%3Crect x='5.5' y='20.5' width='6' height='6' rx='1.2'/%3E%3Crect x='13' y='20.5' width='6' height='6' rx='1.2'/%3E%3Crect x='20.5' y='20.5' width='6' height='6' rx='1.2'/%3E%3C/g%3E%3C/svg%3E" type="image/svg+xml" />
+  <style>
+    :root {
+      --paper: #ffffff;
+      --paper-2: #f5f1ff;
+      --paper-3: #ffffff;
+      --line: #e4dbf7;
+      --ink: #180f38;
+      --ink-2: #5f5680;
+      --ink-3: #8b82ab;
+      --accent: #7433f7;
+      --accent-bg: #f0e7ff;
+      --btn: #7433f7;
+      --void: #0d0f11;
+      --cell: #e8eaed;
+      --sans: "Avenir Next", "Helvetica Neue", ui-sans-serif, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      --dot: rgba(116, 51, 247, .13);
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: #0d0f11;
+        --paper-2: #150f2c;
+        --paper-3: #1a1338;
+        --line: #2e2454;
+        --ink: #f3f0ff;
+        --ink-2: #a79ecb;
+        --ink-3: #7d74a3;
+        --accent: #a78bfa;
+        --accent-bg: #241a4d;
+        --btn: #7433f7;
+        --dot: rgba(167, 139, 250, .11);
+        color-scheme: dark;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      background: var(--paper);
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+    }
+    body::before {
+      content: "";
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image: radial-gradient(var(--dot) 1.5px, transparent 1.6px);
+      background-size: 15px 15px;
+      -webkit-mask-image: radial-gradient(ellipse 75% 60% at 50% 8%, #000 10%, transparent 70%);
+      mask-image: radial-gradient(ellipse 75% 60% at 50% 8%, #000 10%, transparent 70%);
+    }
+    main {
+      position: relative; z-index: 1;
+      max-width: 440px; margin: 0 auto; padding: 28px 20px 28px;
+      min-height: 100%; display: flex; flex-direction: column;
+    }
+    .lockup {
+      display: flex; align-items: center; gap: 9px;
+      font-weight: 800; letter-spacing: -0.03em; font-size: 17px;
+      margin: 0 0 22px; color: var(--ink);
+    }
+    .lockup svg { width: 18px; height: 18px; flex: none; }
+    h1 { font-size: 28px; letter-spacing: -0.04em; margin: 0 0 8px; font-weight: 800; }
+    p { color: var(--ink-2); line-height: 1.5; }
+    .card {
+      background: var(--paper-3);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 20px;
+      margin: 18px 0;
+    }
+    label { display: block; font-size: 13px; color: var(--ink-2); margin: 12px 0 6px; }
+    input {
+      width: 100%; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid var(--line); background: var(--paper-2); color: var(--ink); font-size: 15px;
+      font-family: inherit;
+    }
+    input:focus { outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent); }
+    button {
+      width: 100%; margin-top: 12px; padding: 12px; border: 0; border-radius: 999px;
+      background: var(--btn); color: #fff; font-weight: 650; font-size: 15px;
+      cursor: pointer; font-family: inherit;
+    }
+    button.ghost { background: var(--paper-3); border: 1px solid var(--line); color: var(--ink); }
+    button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    .mono { font-family: var(--mono); font-size: 12px; word-break: break-all; color: var(--ink-3); }
+    .ok { color: var(--accent); }
+    .bad { color: #c8392f; }
+    .help { font-size: 13.5px; color: var(--ink-2); line-height: 1.6; }
+    [hidden] { display: none !important; }
+    #home { flex: 1; }
+    .wizard {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+      margin: 0;
+      min-height: calc(100vh - 96px);
+    }
+    .track {
+      position: relative;
+      height: 48px;
+      border-radius: 999px;
+      background: var(--paper-2);
+      border: 1px solid var(--line);
+      overflow: hidden;
+      flex: none;
+    }
+    .fill {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 50%;
+      background: var(--btn);
+      border-radius: 999px;
+      transition: width 0.35s ease;
+    }
+    .track.one .fill { width: 100%; }
+    .track.s2 .fill { width: 100%; }
+    .labels {
+      position: relative;
+      z-index: 1;
+      height: 100%;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      place-items: center;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .track.one .labels { grid-template-columns: 1fr; }
+    .labels span { color: var(--ink-2); }
+    .track.one .labels span,
+    .track.s1 #lab1,
+    .track.s2 .labels span { color: #fff; }
+    .track.s1 #lab2 { color: var(--ink-2); }
+    .body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 28px 12px 20px;
+      gap: 10px;
+    }
+    .body h2 { margin: 0; font-size: 28px; letter-spacing: -0.04em; color: var(--ink); }
+    .body p { margin: 0; max-width: 300px; }
+    .check {
+      width: 88px; height: 88px; border-radius: 999px;
+      background: var(--btn);
+      color: #fff;
+      display: grid; place-items: center;
+      margin-bottom: 8px;
+    }
+    .check svg { width: 36px; height: 36px; }
+    .actions { width: 100%; max-width: 280px; margin-top: 20px; }
+    .spin {
+      width: 36px; height: 36px; border-radius: 999px; margin-top: 18px;
+      border: 3px solid var(--line); border-top-color: var(--accent);
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #log { margin-top: 14px; }
+    #confetti {
+      position: fixed; inset: 0; z-index: 50;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <div class="lockup">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="9" y="2" width="6" height="6" rx="1.4"/>
+      <rect x="16" y="9" width="6" height="6" rx="1.4"/>
+      <rect x="2" y="16" width="6" height="6" rx="1.4"/>
+      <rect x="9" y="16" width="6" height="6" rx="1.4"/>
+      <rect x="16" y="16" width="6" height="6" rx="1.4"/>
+    </svg>
+    rootmode
+  </div>
+  <div id="home">
+    <h1>Your pot</h1>
+    <p>The wallet deposits, sets caps, and withdraws unlocked funds. Work is paid from an on-chain lock the app key signs — not from this page.</p>
+
+    <div class="card help" id="help" hidden></div>
+
+    <div class="card" id="form">
+      <div class="mono" id="status">Looking for a wallet…</div>
+      <div id="bal" style="font-size:28px;font-weight:750;letter-spacing:-0.03em;margin:10px 0 4px">—</div>
+      <div class="mono" id="balhint">This number is from the chain.</div>
+      <button id="connect">Connect</button>
+      <label>Amount (rUSD)</label>
+      <input id="amount" value="100" />
+      <label>Max per job (rUSD)</label>
+      <input id="maxJob" value="0.50" />
+      <label>Max per day (rUSD)</label>
+      <input id="maxDay" value="20" />
+      <button id="deposit">Deposit</button>
+      <button class="ghost" id="limits">Save limits</button>
+      <button class="ghost" id="withdraw">Withdraw unlocked</button>
+    </div>
+  </div>
+
+  <div class="card wizard" id="stage" hidden>
+    <div class="track s1" id="track">
+      <div class="fill" id="fill"></div>
+      <div class="labels">
+        <span id="lab1">Step 1</span>
+        <span id="lab2">Step 2</span>
+      </div>
+    </div>
+    <div class="body">
+      <h2 id="stageTitle">Deposit</h2>
+      <p id="stageBody">Confirm in your wallet.</p>
+      <div class="spin"></div>
+    </div>
+  </div>
+
+  <div class="card wizard" id="done" hidden>
+    <div class="body">
+      <div class="check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12.5l4.5 4.5L19 7"/>
+        </svg>
+      </div>
+      <h2>Deposited</h2>
+      <p id="doneHint">Your pot is funded.</p>
+      <div class="actions">
+        <button id="again">Deposit again</button>
+        <button class="ghost" id="closeTab">Close</button>
+      </div>
+    </div>
+  </div>
+  <p class="mono" id="log"></p>
+</main>
+<canvas id="confetti"></canvas>
+<script src="https://unpkg.com/@base-org/account/dist/base-account.min.js"></script>
+<script>
+const q = new URLSearchParams(location.search);
+const rpc = q.get("rpc") || "http://127.0.0.1:8545";
+const pot = q.get("pot");
+const usdc = q.get("usdc");
+const appKey = q.get("appKey");
+const chainId = q.get("chainId") || "8453";
+const worker = q.get("worker");
+const wantId = Number(chainId);
+const $ = (id) => document.getElementById(id);
+const log = (m, cls) => { $("log").textContent = m; $("log").className = "mono " + (cls || ""); };
+let connected = false;
+let walletKind = "injected";
+
+function onBase() {
+  return wantId === 8453 || wantId === 84532;
+}
+
+function connectLabel() {
+  return "Connect";
+}
+
+function disconnectLabel() {
+  return "Disconnect";
+}
+
+function chainLabel() {
+  if (wantId === 8453) return "Base";
+  if (wantId === 84532) return "Base Sepolia";
+  return "the local chain";
+}
+
+function chainParams() {
+  if (wantId === 8453) {
+    return {
+      chainId: "0x2105",
+      chainName: "Base",
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+      rpcUrls: ["https://mainnet.base.org"],
+      blockExplorerUrls: ["https://basescan.org"],
+    };
+  }
+  if (wantId === 84532) {
+    return {
+      chainId: "0x14a34",
+      chainName: "Base Sepolia",
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+      rpcUrls: ["https://sepolia.base.org"],
+      blockExplorerUrls: ["https://sepolia.basescan.org"],
+    };
+  }
+  return {
+    chainId: "0x" + wantId.toString(16),
+    chainName: "rootmode local",
+    nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+    rpcUrls: [rpc],
+  };
+}
+
+function setConnected(on, account) {
+  connected = on;
+  const btn = $("connect");
+  if (on) {
+    btn.textContent = disconnectLabel();
+    btn.classList.add("ghost");
+    if (account) $("status").textContent = "Connected " + account;
+  } else {
+    btn.textContent = connectLabel();
+    btn.classList.remove("ghost");
+    $("bal").textContent = "—";
+    $("balhint").textContent = "This number is from the chain.";
+    $("status").textContent = "Connect your wallet to continue.";
+  }
+}
+
+function word(n) {
+  return BigInt(n).toString(16).padStart(64, "0");
+}
+function addr(a) {
+  return a.replace(/^0x/i, "").toLowerCase().padStart(64, "0");
+}
+function toMicros(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) throw new Error("enter a number");
+  return BigInt(Math.round(n * 1e6));
+}
+
+function baseProvider() {
+  if (typeof window.createBaseAccountSDK !== "function") return null;
+  return window.createBaseAccountSDK({
+    appName: "rootmode",
+    appLogoUrl: "https://rootmode.ai/assets/favicon.svg",
+  }).getProvider();
+}
+
+function provider() {
+  if (walletKind === "base") {
+    const p = baseProvider();
+    if (p) return p;
+  }
+  if (window.ethereum) return window.ethereum;
+  throw new Error("No wallet in this tab. Allow it on this page and try Connect again.");
+}
+
+async function eth(method, params) {
+  const payload = params === undefined ? { method } : { method, params };
+  return provider().request(payload);
+}
+
+async function currentChainId() {
+  return Number(await eth("eth_chainId"));
+}
+
+async function ensureChain() {
+  const on = await currentChainId();
+  if (on === wantId) return;
+  const params = chainParams();
+  try {
+    await eth("wallet_switchEthereumChain", [{ chainId: params.chainId }]);
+  } catch (e) {
+    if (e && (e.code === 4902 || e.code === -32603)) {
+      await eth("wallet_addEthereumChain", [params]);
+      await eth("wallet_switchEthereumChain", [{ chainId: params.chainId }]);
+    } else if (e && e.code === 4001) {
+      throw new Error("Switch your wallet to " + chainLabel() + " to continue.");
+    } else {
+      throw e;
+    }
+  }
+  const after = await currentChainId();
+  if (after !== wantId) {
+    throw new Error("Your wallet is not on " + chainLabel() + ". Switch networks and try again.");
+  }
+}
+
+async function switchIfNeeded() {
+  const on = await currentChainId();
+  if (on === wantId) return;
+  showStage(1, [{
+    title: "Switch to " + chainLabel(),
+    body: "This pot is on " + chainLabel() + ". Confirm the network switch in your wallet.",
+  }]);
+  await ensureChain();
+}
+
+async function send(to, data) {
+  const [from] = await eth("eth_requestAccounts");
+  const hash = await eth("eth_sendTransaction", [{ from, to, data }]);
+  await waitMined(hash);
+  return hash;
+}
+
+async function allowanceOf(owner) {
+  const raw = await eth("eth_call", [{
+    to: usdc,
+    data: "0xdd62ed3e" + addr(owner) + addr(pot),
+  }, "latest"]);
+  return BigInt(raw || "0x0");
+}
+
+function hexChainId() {
+  return "0x" + Number(wantId).toString(16);
+}
+
+async function sendSequential(approveData, depositData) {
+  await send(usdc, approveData);
+  return send(pot, depositData);
+}
+
+async function sendApproveAndDeposit(approveData, depositData) {
+  // Atomic batch needs EIP-7702. Wallets refuse that on localhost (31337).
+  if (!onBase()) return sendSequential(approveData, depositData);
+  try {
+    const [from] = await eth("eth_requestAccounts");
+    const result = await eth("wallet_sendCalls", [{
+      version: "2.0.0",
+      from,
+      chainId: hexChainId(),
+      atomicRequired: true,
+      calls: [
+        { to: usdc, data: approveData, value: "0x0" },
+        { to: pot, data: depositData, value: "0x0" },
+      ],
+    }]);
+    const id = typeof result === "string" ? result : result && (result.id || result.callsId);
+    if (!id) throw new Error("wallet returned no batch id");
+    return waitCalls(id);
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    if (e && e.code === 4001) throw e;
+    if (e && (e.code === 5710 || /7702/i.test(msg))) {
+      return sendSequential(approveData, depositData);
+    }
+    throw e;
+  }
+}
+
+async function waitCalls(id) {
+  for (let i = 0; i < 80; i++) {
+    let st;
+    try {
+      st = await eth("wallet_getCallsStatus", [id]);
+    } catch (_) {
+      await new Promise((r) => setTimeout(r, 250));
+      continue;
+    }
+    const status = st && st.status;
+    const receipts = !st.receipts ? [] : Array.isArray(st.receipts) ? st.receipts : [st.receipts];
+    const failed =
+      status === 400 || status === 500 || status === 600 || status === 700 ||
+      status === "FAILED" || status === "REVERTED";
+    if (failed) throw new Error("batch failed");
+    const confirmed =
+      status === 200 || status === "200" || status === "CONFIRMED" ||
+      receipts.some((r) => r && (r.status === "0x1" || r.status === 1));
+    if (confirmed) {
+      const last = receipts[receipts.length - 1] || {};
+      const hash = last.transactionHash || last.transaction_hash;
+      if (hash) {
+        try { await waitMined(hash); } catch (_) {}
+        return hash;
+      }
+      if (status === 200 || status === "200") return id;
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error("batch not mined");
+}
+
+async function waitMined(hash) {
+  if (!hash) return;
+  for (let i = 0; i < 40; i++) {
+    const rec = await eth("eth_getTransactionReceipt", [hash]);
+    if (rec) {
+      if (rec.status === "0x1") return;
+      throw new Error("transaction reverted");
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error("transaction not mined");
+}
+
+function showForm() {
+  $("home").hidden = false;
+  $("stage").hidden = true;
+  $("done").hidden = true;
+}
+
+function showStage(active, steps) {
+  $("home").hidden = true;
+  $("done").hidden = true;
+  $("stage").hidden = false;
+  const step = steps[active - 1] || steps[0];
+  $("stageTitle").textContent = step.title;
+  $("stageBody").textContent = step.body;
+  const one = steps.length < 2;
+  $("lab2").hidden = one;
+  $("track").className = "track " + (one ? "one" : active >= 2 ? "s2" : "s1");
+}
+
+function showDone() {
+  $("home").hidden = true;
+  $("stage").hidden = true;
+  $("done").hidden = false;
+  log("");
+  burstConfetti();
+}
+
+function burstConfetti() {
+  const canvas = $("confetti");
+  const ctx = canvas.getContext("2d");
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.display = "block";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const colors = ["#7433f7", "#a78bfa", "#e8eaed", "#cabaff", "#5a1fe0", "#f0e7ff"];
+  const n = 90;
+  const bits = [];
+  for (let i = 0; i < n; i++) {
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.4;
+    const speed = 7 + Math.random() * 11;
+    bits.push({
+      x: w / 2 + (Math.random() - 0.5) * 40,
+      y: h * 0.38,
+      vx: Math.cos(angle) * speed + (Math.random() - 0.5) * 6,
+      vy: Math.sin(angle) * speed - 4,
+      s: 6 + Math.random() * 8,
+      r: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 0.3,
+      color: colors[i % colors.length],
+      life: 1,
+    });
+  }
+  const t0 = performance.now();
+  function frame(now) {
+    const dt = Math.min(32, now - (frame.t || now)) / 16.67;
+    frame.t = now;
+    ctx.clearRect(0, 0, w, h);
+    let alive = false;
+    for (const b of bits) {
+      b.vy += 0.28 * dt;
+      b.vx *= 0.992;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.r += b.vr * dt;
+      const age = (now - t0) / 1800;
+      b.life = Math.max(0, 1 - age);
+      if (b.life <= 0 || b.y > h + 20) continue;
+      alive = true;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.r);
+      ctx.globalAlpha = b.life;
+      ctx.fillStyle = b.color;
+      const rad = Math.max(1.4, b.s * 0.22);
+      ctx.beginPath();
+      ctx.roundRect(-b.s / 2, -b.s / 2, b.s, b.s, rad);
+      ctx.fill();
+      ctx.restore();
+    }
+    if (alive && now - t0 < 2200) {
+      requestAnimationFrame(frame);
+    } else {
+      ctx.clearRect(0, 0, w, h);
+      canvas.style.display = "none";
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+async function refreshBal() {
+  const [from] = await eth("eth_requestAccounts");
+  if (!usdc) throw new Error("missing rUSD address — reopen this page from the app");
+  const data = "0x70a08231" + addr(from);
+  const raw = await eth("eth_call", [{ to: usdc, data }, "latest"]);
+  const n = Number(BigInt(raw || "0x0")) / 1e6;
+  $("bal").textContent = n.toLocaleString(undefined, { maximumFractionDigits: 2 }) + " rUSD";
+  setConnected(true, from);
+  if (pot && worker) {
+    const acc = await eth("eth_call", [{ to: pot, data: "0x5e5c06e2" + addr(from) }, "latest"]);
+    const lock = await eth("eth_call", [{ to: pot, data: "0xdb20266f" + addr(from) + addr(worker) }, "latest"]);
+    const free = Number(BigInt("0x" + String(acc || "0x0").replace(/^0x/, "").slice(0, 64) || "0")) / 1e6;
+    const locked = Number(BigInt(lock || "0x0")) / 1e6;
+    $("balhint").textContent = `wallet ${n.toFixed(2)} · pot free ${free.toFixed(2)} · locked ${locked.toFixed(2)}`;
+  }
+}
+
+const depositStep = [
+  { title: "Deposit", body: "Confirm in your wallet." },
+];
+
+$("connect").onclick = async () => {
+  try {
+    if (connected) {
+      try {
+        await eth("wallet_revokePermissions", [{ eth_accounts: {} }]);
+      } catch (_) {
+        // Older MetaMask: permissions stay; we still drop this page's session.
+      }
+      setConnected(false);
+      log("Disconnected.");
+      return;
+    }
+    walletKind = onBase() && baseProvider() ? "base" : "injected";
+    showStage(1, [{ title: "Connect", body: "Confirm in your wallet." }]);
+    log("");
+    const accounts = await eth("eth_requestAccounts", []);
+    if (!accounts || !accounts.length) throw new Error("No account returned. Unlock the wallet and try again.");
+    if (walletKind !== "base") await switchIfNeeded();
+    await refreshBal();
+    log("Connected.", "ok");
+  } catch (e) {
+    log(e.message || String(e), "bad");
+  } finally {
+    showForm();
+  }
+};
+
+$("deposit").onclick = async () => {
+  try {
+    await switchIfNeeded();
+    const amount = toMicros($("amount").value);
+    const maxJob = toMicros($("maxJob").value);
+    const maxDay = toMicros($("maxDay").value);
+    if (!pot || !usdc || !appKey) throw new Error("missing contract addresses — reopen this page from the app");
+    log("");
+    const [from] = await eth("eth_requestAccounts");
+    const depositData = "0xfad3cc4b" + word(amount) + word(maxJob) + word(maxDay) + addr(appKey);
+    const approveData = "0x095ea7b3" + addr(pot) + word(amount);
+    const allowed = await allowanceOf(from);
+    let hash;
+    showStage(1, depositStep);
+    if (allowed >= amount) {
+      hash = await send(pot, depositData);
+    } else {
+      hash = await sendApproveAndDeposit(approveData, depositData);
+    }
+    await refreshBal();
+    try {
+      const rec = await eth("eth_getTransactionReceipt", [hash]);
+      const [from] = await eth("eth_requestAccounts");
+      await fetch("/deposit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tx_hash: hash,
+          amount_micros: Number(amount),
+          max_per_job_micros: Number(maxJob),
+          max_per_day_micros: Number(maxDay),
+          block: rec && rec.blockNumber ? Number(rec.blockNumber) : 0,
+          chain_id: wantId,
+          client: from || "",
+        }),
+      });
+    } catch (_) {
+      // The chain already has the money. Missing a local receipt is a blank
+      // history row, not a failed deposit.
+    }
+    $("doneHint").textContent = Number(amount) / 1e6 + " rUSD is in the pot.";
+    showDone();
+  } catch (e) {
+    log(e.message || String(e), "bad");
+    showForm();
+  }
+};
+
+$("again").onclick = () => {
+  log("");
+  showForm();
+};
+
+$("closeTab").onclick = () => {
+  window.open("", "_self");
+  window.close();
+};
+
+$("limits").onclick = async () => {
+  try {
+    await switchIfNeeded();
+    const maxJob = toMicros($("maxJob").value);
+    const maxDay = toMicros($("maxDay").value);
+    log("");
+    showStage(1, [{ title: "Save limits", body: "Confirm in your wallet." }]);
+    await send(pot, "0x5247c1ca" + word(maxJob) + word(maxDay) + addr(appKey));
+    log("Limits saved.", "ok");
+  } catch (e) {
+    log(e.message || String(e), "bad");
+  } finally {
+    showForm();
+  }
+};
+
+$("withdraw").onclick = async () => {
+  try {
+    await switchIfNeeded();
+    log("");
+    showStage(1, [{ title: "Withdraw", body: "Confirm in your wallet. Only unlocked funds come back." }]);
+    await send(pot, "0x853828b6");
+    await refreshBal();
+    log("Unlocked funds withdrawn. Reserved funds stay locked until the worker settles or the channel is closed.", "ok");
+  } catch (e) {
+    log(e.message || String(e), "bad");
+  } finally {
+    showForm();
+  }
+};
+
+$("connect").textContent = connectLabel();
+$("status").textContent = "Connect your wallet to continue.";
+if (!onBase() && window.ethereum) {
+  window.ethereum.on("accountsChanged", (accounts) => {
+    if (!accounts || !accounts.length) {
+      setConnected(false);
+      log("Disconnected.");
+      return;
+    }
+    if (connected) {
+      void switchIfNeeded()
+        .then(() => refreshBal())
+        .catch((e) => log(e.message || String(e), "bad"))
+        .finally(showForm);
+    }
+  });
+  window.ethereum.on("chainChanged", () => {
+    if (!connected) return;
+    void switchIfNeeded()
+      .then(() => refreshBal())
+      .catch((e) => log(e.message || String(e), "bad"))
+      .finally(showForm);
+  });
+  eth("eth_accounts", [])
+    .then(async (accounts) => {
+      if (!accounts || !accounts.length) return;
+      await switchIfNeeded();
+      await refreshBal();
+    })
+    .catch(() => undefined);
+} else if (!onBase()) {
+  $("status").textContent = "Connect your wallet to continue.";
+}
+</script>
+</body>
+</html>

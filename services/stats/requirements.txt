@@ -1,0 +1,7 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pynacl>=1.5
+# Optional: only needed to turn addresses into countries locally. Without it
+# the collector still runs and simply shows what operators declared.
+geoip2>=4.8

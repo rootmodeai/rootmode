@@ -1,0 +1,50 @@
+# rust
+/target
+**/target
+
+# node
+node_modules
+apps/desktop/dist
+
+# tauri generated
+apps/desktop/src-tauri/gen
+
+# foundry
+contracts/cache
+contracts/out
+contracts/broadcast
+contracts/deployments/local.json
+
+# python
+**/__pycache__/
+*.py[cod]
+
+# app data, secrets, local billing state
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.key
+*.db
+.env
+**/.env
+channels.json
+pot-pending.json
+pot-app.key
+
+# landing waitlist (local preview)
+apps/web/data/waitlist.json
+
+# never commit key material
+*.asc
+*.p12
+*.pem
+
+# private ops — seed fleet, spark boxes, not the site
+deploy/seed/
+deploy/spark/
+
+# os / editor
+.DS_Store
+.idea
+.vscode
+.claude

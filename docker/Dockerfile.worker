@@ -1,0 +1,60 @@
+# rootmode-worker
+#
+# Build from the repository root:
+#   docker build -f docker/Dockerfile.worker -t rootmode-worker .
+#
+# This container needs no GPU. It talks to your vLLM or ComfyUI over HTTP —
+# they keep the GPUs, this keeps the network.
+
+FROM rust:1.90-bookworm AS build
+WORKDIR /src
+
+# The whole workspace, because rootmode-worker depends on rootmode-core and
+# rootmode-p2p by path.
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# The worker needs nothing from the desktop app.
+RUN sed -i '/apps\/desktop/d' Cargo.toml
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --profile fast -p rootmode-worker --bin rootmode-worker \
+ && cp target/fast/rootmode-worker /usr/local/bin/rootmode-worker
+
+# ---------------------------------------------------------------------------
+
+FROM debian:bookworm-slim
+
+# ca-certificates so an https:// backend or a /dns4/ bootstrap address resolves.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Unprivileged: the worker needs nothing but a socket and its key.
+RUN useradd --system --uid 10001 --create-home --home-dir /var/lib/rootmode rootmode
+
+COPY --from=build /usr/local/bin/rootmode-worker /usr/local/bin/rootmode-worker
+COPY docker/worker-entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY crates/rootmode-worker/workflows /etc/rootmode/workflows
+RUN chmod +x /usr/local/bin/entrypoint.sh \
+ && mkdir -p /etc/rootmode \
+ && chown -R rootmode:rootmode /etc/rootmode /var/lib/rootmode
+
+USER rootmode
+WORKDIR /var/lib/rootmode
+
+# The node's identity lives here. Mount a volume or the peer id changes on
+# every recreate, and every client that pinned it stops recognising this node.
+VOLUME ["/var/lib/rootmode"]
+
+# 9944 direct websocket, 4101 peer-to-peer.
+EXPOSE 9944 4101
+
+# Reports unhealthy when the inference backend is unreachable, which is the
+# thing that actually goes wrong.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD ["/usr/local/bin/entrypoint.sh", "check"]
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["run"]

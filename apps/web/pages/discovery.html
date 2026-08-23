@@ -1,0 +1,797 @@
+<title>Discovery &amp; bootstrap</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="How rootmode peers find each other without being told an address by hand, and how to run a bootstrap node. Introductions there, jobs direct." />
+<meta name="theme-color" content="#7433f7" />
+<link rel="canonical" href="https://rootmode.ai/discovery" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="rootmode" />
+<meta property="og:title" content="Discovery & bootstrap — rootmode" />
+<meta property="og:description" content="How rootmode peers find each other without being told an address by hand, and how to run a bootstrap node. Introductions there, jobs direct." />
+<meta property="og:url" content="https://rootmode.ai/discovery" />
+<meta property="og:image" content="https://rootmode.ai/assets/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Discovery & bootstrap — rootmode" />
+<meta name="twitter:description" content="How rootmode peers find each other without being told an address by hand, and how to run a bootstrap node. Introductions there, jobs direct." />
+<meta name="twitter:image" content="https://rootmode.ai/assets/og.png" />
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+<style>
+  /* ---------- tokens: light is the default, always ---------- */
+  :root {
+    --paper:      #ffffff;
+    --paper-2:    #f5f1ff;
+    --paper-3:    #ffffff;
+    --line:       #e4dbf7;
+    --ink:        #180f38;
+    --ink-2:      #5f5680;
+    --ink-3:      #8b82ab;
+    --accent:     #7433f7;
+    --accent-ink: #5a1fe0;
+    --accent-bg:  #f0e7ff;
+    --band:       #180f38;
+    --dot:        rgba(116, 51, 247, .13);
+    --code-bg:    #180f38;
+    --code-fg:    #e9e4fa;
+    --code-dim:   #7c73a0;
+    --code-accent: #b9a5ff;
+    --code-amber: #e0a879;
+    --warn-bg:    #fdf5ef;
+    --warn-line:  #d9843f;
+    --card-shadow: 0 30px 60px -40px rgba(18, 16, 28, .45);
+    --btn-ink:    #180f38;
+    --btn-on:     #ffffff;
+
+    --sans: "Avenir Next", "Helvetica Neue", ui-sans-serif, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --pad: clamp(18px, 4vw, 40px);
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #0d0f11;
+    --paper-2:    #150f2c;
+    --paper-3:    #1a1338;
+    --line:       #2e2454;
+    --ink:        #f3f0ff;
+    --ink-2:      #a79ecb;
+    --ink-3:      #7d74a3;
+    --accent:     #a78bfa;
+    --accent-ink: #cabaff;
+    --accent-bg:  #241a4d;
+    --band:       #150f2c;
+    --dot:        rgba(167, 139, 250, .11);
+    --code-bg:    #0c0722;
+    --code-fg:    #e9e4fa;
+    --code-dim:   #786f9c;
+    --code-accent: #b9a5ff;
+    --code-amber: #e0a879;
+    --warn-bg:    #1d1611;
+    --warn-line:  #c07c3c;
+    --card-shadow: 0 30px 60px -40px rgba(0, 0, 0, .9);
+    --btn-ink:    #f3f0ff;
+    --btn-on:     #0d0f11;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 17px; line-height: 1.62;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+
+  .wrap { width: min(900px, 100%); margin-inline: auto; padding-inline: var(--pad); }
+  .wide { width: min(1120px, 100%); margin-inline: auto; padding-inline: var(--pad); }
+
+  h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -0.035em; text-wrap: balance; line-height: 1.05; }
+  h1 { font-size: clamp(38px, 6vw, 68px); }
+  h2 { font-size: clamp(27px, 3.6vw, 40px); }
+  h3 { font-size: 19px; letter-spacing: -0.02em; line-height: 1.25; }
+  p { margin: 0; }
+  a { color: var(--accent-ink); }
+  .accentword { color: var(--accent); }
+
+  code {
+    font-family: var(--mono); font-size: 0.88em;
+    background: var(--paper-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 5px; color: var(--ink);
+  }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent);
+    display: flex; align-items: center; gap: 9px;
+  }
+  .eyebrow::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 0 4px var(--accent-bg);
+  }
+
+  /* ---------- nav ---------- */
+  .nav { position: sticky; top: 14px; z-index: 40; padding-inline: var(--pad); margin-top: 14px; }
+  .nav-inner {
+    width: min(1120px, 100%); margin-inline: auto;
+    display: flex; align-items: center; gap: 10px;
+    background: color-mix(in srgb, var(--paper) 85%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 8px 8px 18px;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; letter-spacing: -0.03em; font-size: 17px; text-decoration: none; color: var(--ink); }
+  .doclinks { display: flex; gap: 22px; margin-inline: auto; font-size: 15px; font-weight: 500; }
+  .doclinks a { color: var(--ink-2); text-decoration: none; }
+  .doclinks a:hover { color: var(--ink); }
+  .doclinks a[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  @media (max-width: 860px) { .doclinks { gap: 14px; font-size: 14px; margin-inline: 0 auto; } }
+  @media (max-width: 620px) { .doclinks { display: none; } .nav-inner { justify-content: space-between; } }
+
+  .icon-btn {
+    width: 38px; height: 38px; flex: none; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--paper-3); color: var(--ink);
+    display: grid; place-items: center; cursor: pointer; padding: 0;
+    transition: border-color .15s ease, color .15s ease;
+  }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .icon-btn .moon { display: none; }
+  :root[data-theme="dark"] .icon-btn .sun { display: none; }
+  :root[data-theme="dark"] .icon-btn .moon { display: block; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    padding: 13px 24px; border-radius: 999px; border: 1px solid transparent;
+    font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer; font-family: inherit;
+    transition: transform .15s ease, background .15s ease, border-color .15s ease, color .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-solid { background: var(--btn-ink); color: var(--btn-on); }
+  .btn-solid:hover { background: var(--accent); color: #fff; }
+  .btn-accent { background: var(--accent); color: #fff; }
+  .btn-ghost { border-color: var(--line); background: var(--paper-3); color: var(--ink); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { padding: 10px 18px; font-size: 14px; }
+  a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  /* ---------- dotted ground ---------- */
+  .dots { position: relative; }
+  .dots::before {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background-image: radial-gradient(var(--dot) 1.5px, transparent 1.6px);
+    background-size: 15px 15px;
+    -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 40%, #000 20%, transparent 78%);
+    mask-image: radial-gradient(ellipse 75% 65% at 50% 40%, #000 20%, transparent 78%);
+  }
+  .dots > * { position: relative; z-index: 1; }
+
+  /* ---------- page header ---------- */
+  .top { padding-block: clamp(48px, 7vw, 88px) clamp(34px, 5vw, 56px); }
+  .top .inner { display: grid; gap: 20px; justify-items: start; }
+  .lede { font-size: clamp(17px, 1.9vw, 20px); color: var(--ink-2); max-width: 58ch; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+  section { padding-block: clamp(44px, 6vw, 76px); }
+  .band { background: var(--paper-2); border-block: 1px solid var(--line); }
+  .head { display: grid; gap: 14px; max-width: 60ch; margin-bottom: 30px; }
+  .head p { color: var(--ink-2); }
+  .stack { display: grid; gap: 22px; }
+  .stack > p { color: var(--ink-2); }
+
+  /* ---------- cards ---------- */
+  .reqs, .facts { display: grid; gap: 16px; grid-template-columns: repeat(3, minmax(0,1fr)); }
+  @media (max-width: 820px) { .reqs, .facts { grid-template-columns: 1fr; } }
+  .req, .fact {
+    background: var(--paper-3); border: 1px solid var(--line); border-radius: 18px;
+    padding: 24px; display: grid; gap: 9px; align-content: start;
+  }
+  .req p, .fact p { font-size: 15.5px; color: var(--ink-2); }
+  .fact .no { font-family: var(--mono); font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--warn-line); font-weight: 700; }
+
+  /* ---------- numbered flow ---------- */
+  .flow { display: grid; gap: 30px; counter-reset: s; }
+  .stepblk { display: grid; gap: 14px; padding-left: 54px; position: relative; }
+  .stepblk::before {
+    counter-increment: s; content: counter(s);
+    position: absolute; left: 0; top: 0;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--accent-bg); color: var(--accent-ink);
+    display: grid; place-items: center; font-size: 14px; font-weight: 800;
+  }
+  .stepblk p { color: var(--ink-2); }
+  @media (max-width: 560px) { .stepblk { padding-left: 0; padding-top: 46px; } }
+
+  /* ---------- terminal / code ---------- */
+  .term, .exchange { background: var(--code-bg); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .term-bar, .exchange-bar { display: flex; align-items: center; gap: 7px; padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .term-bar i, .exchange-bar i { width: 9px; height: 9px; border-radius: 50%; background: #443a6e; display: block; }
+  .term-bar b, .exchange-bar b { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--code-dim); margin-left: 8px; }
+  .term pre, .exchange pre { margin: 0; padding: 18px 16px; overflow-x: auto; font-family: var(--mono); font-size: 12.6px; line-height: 1.85; color: var(--code-fg); }
+  .term .c, .exchange .c { color: var(--code-dim); }
+  .term .g, .exchange .to { color: var(--code-accent); }
+  .term .p, .exchange .from { color: var(--code-amber); }
+
+  /* ---------- tables ---------- */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--paper-3); }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; background: var(--paper-2); }
+  tr:last-child td { border-bottom: 0; }
+  td code { background: none; border: 0; padding: 0; color: var(--accent-ink); white-space: nowrap; }
+  td:last-child { color: var(--ink-2); }
+
+  /* ---------- callout ---------- */
+  .note { border-left: 3px solid var(--warn-line); background: var(--warn-bg); border-radius: 0 14px 14px 0; padding: 17px 20px; display: grid; gap: 6px; }
+  .note b { font-size: 15px; }
+  .note p { font-size: 15px; color: var(--ink-2); }
+
+  /* ---------- checklists ---------- */
+  .checklist, .bullets { display: grid; gap: 16px; }
+  .ck, .bl { display: grid; grid-template-columns: 22px 1fr; gap: 3px 12px; align-items: start; }
+  .ck svg, .bl svg { grid-row: span 2; margin-top: 3px; color: var(--accent); }
+  .ck strong, .bl strong { font-weight: 700; font-size: 16px; letter-spacing: -0.01em; }
+  .ck span, .bl span { color: var(--ink-2); font-size: 15px; }
+
+  /* ---------- accordions ---------- */
+  .trouble { display: grid; gap: 10px; }
+  details { border: 1px solid var(--line); border-radius: 16px; background: var(--paper-3); padding: 16px 20px; }
+  summary { cursor: pointer; list-style: none; font-weight: 700; letter-spacing: -0.02em; font-size: 17px; display: flex; justify-content: space-between; gap: 18px; align-items: center; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; color: var(--accent); font-weight: 700; }
+  details[open] summary::after { content: "3"; }
+  details p { margin-top: 10px; color: var(--ink-2); font-size: 15.5px; max-width: 66ch; }
+  details p + p { margin-top: 9px; }
+
+  /* ---------- diagram ---------- */
+  .diagram { background: var(--paper-3); border: 1px solid var(--line); border-radius: 20px; padding: clamp(18px, 3vw, 30px); overflow-x: auto; }
+  .diagram svg { display: block; min-width: 560px; width: 100%; height: auto; }
+  .diagram .box { fill: var(--paper-3); stroke: var(--line); }
+  .diagram .box-dark { fill: var(--band); stroke: var(--line); }
+  .diagram .lbl { font-family: var(--sans); font-size: 13px; font-weight: 700; fill: var(--ink); }
+  .diagram .lbl-inv { font-family: var(--sans); font-size: 13px; font-weight: 700; fill: #f3f0ff; }
+  .diagram .sub { font-family: var(--sans); font-size: 11.5px; fill: var(--ink-2); }
+  .diagram .sub-inv { font-family: var(--sans); font-size: 11.5px; fill: #918ab3; }
+  .diagram .wire { stroke: var(--line); stroke-width: 1.5; fill: none; }
+  .diagram .wire-live { stroke: var(--accent); stroke-width: 2; fill: none; stroke-dasharray: 5 6; animation: dash 1.4s linear infinite; }
+  @keyframes dash { to { stroke-dashoffset: -22; } }
+  .diagram .edge { font-family: var(--mono); font-size: 11px; fill: var(--ink-3); }
+  .diagram .edge-live { font-family: var(--mono); font-size: 11px; fill: var(--accent); }
+
+  /* ---------- key pair block ---------- */
+  .keys { display: grid; gap: 10px; background: var(--paper-3); border: 1px solid var(--line); border-radius: 16px; padding: 20px; overflow-x: auto; }
+  .keys div { display: grid; grid-template-columns: 84px 1fr; gap: 14px; align-items: baseline; font-family: var(--mono); font-size: 12.5px; }
+  .keys span:first-child { color: var(--ink-3); }
+  .keys span:last-child { color: var(--ink); word-break: break-all; }
+
+  /* ---------- protocol: rules ---------- */
+  .rules { display: grid; gap: 12px; counter-reset: r; }
+  .rule { display: grid; grid-template-columns: 30px 1fr; gap: 14px; align-items: start; background: var(--paper-3); border: 1px solid var(--line); border-radius: 14px; padding: 17px 19px; }
+  .rule::before {
+    counter-increment: r; content: counter(r);
+    width: 28px; height: 28px; border-radius: 50%; background: var(--accent-bg); color: var(--accent-ink);
+    display: grid; place-items: center; font-size: 12.5px; font-weight: 800;
+  }
+  .rule p { font-size: 16px; color: var(--ink-2); }
+  .rule p b { color: var(--ink); font-weight: 700; }
+
+  /* ---------- protocol: messages ---------- */
+  .msg { background: var(--paper-3); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+  .msg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 15px 18px; border-bottom: 1px solid var(--line); background: var(--paper-2); }
+  .msg-head h3 { font-family: var(--mono); font-size: 15px; font-weight: 700; letter-spacing: 0; }
+  .dir { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; margin-left: auto; font-weight: 700; }
+  .dir.out { background: var(--accent-bg); color: var(--accent-ink); }
+  .dir.in { background: var(--warn-bg); color: var(--warn-line); }
+  .msg-body { display: grid; gap: 16px; padding: 18px; }
+  .msg-body > p { font-size: 15.5px; color: var(--ink-2); }
+  .msg pre {
+    margin: 0; padding: 16px; overflow-x: auto; background: var(--code-bg); border-radius: 12px;
+    font-family: var(--mono); font-size: 12.6px; line-height: 1.8; color: var(--code-fg);
+  }
+  .msg pre .k { color: var(--code-accent); }
+  .msg pre .s { color: var(--code-amber); }
+  .msg pre .c { color: var(--code-dim); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 9px; }
+  .chip { font-family: var(--mono); font-size: 13px; color: var(--ink-2); background: var(--paper-3); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; }
+
+  /* ---------- cta + footer ---------- */
+  .cta-box { background: var(--band); border-radius: 28px; padding: clamp(32px, 5vw, 56px) var(--pad); text-align: center; display: grid; gap: 18px; justify-items: center; }
+  .cta-box h2 { color: #f3f0ff; }
+  .cta-box p { color: #9b92bd; max-width: 48ch; }
+  .cta-box .btn-solid { background: #f3f0ff; color: #180f38; }
+  .cta-box .btn-ghost { background: transparent; border-color: #382c63; color: #f3f0ff; }
+
+  footer { border-top: 1px solid var(--line); padding-block: 30px; margin-top: clamp(40px, 6vw, 70px); }
+  .foot { display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: center; font-size: 14px; color: var(--ink-2); }
+  .foot a { text-decoration: none; color: inherit; }
+  .foot a:hover { color: var(--accent); }
+  .foot .right { margin-left: auto; }
+
+  /* ---------- reveal ---------- */
+  .rv { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+  .rv.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .rv { opacity: 1; transform: none; }
+    .diagram .wire-live { animation: none; }
+    * { transition: none !important; }
+  }
+  .sub-note { font-size: 15px; color: var(--ink-3); }
+  .stack h3 { margin-top: 6px; }
+
+  /* ---------- shared navigation: identical on every page ---------- */
+  .nav { position: sticky; top: 14px; z-index: 40; padding-inline: var(--pad); margin-top: 14px; }
+  .nav-inner {
+    width: min(1120px, 100%); margin-inline: auto;
+    display: flex; align-items: center; gap: 10px;
+    background: color-mix(in srgb, var(--paper) 85%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 8px 8px 18px; height: 56px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 9px; flex: none;
+    font-weight: 800; letter-spacing: -0.03em; font-size: 17px;
+    text-decoration: none; color: var(--ink);
+  }
+  .navlinks {
+    display: flex; align-items: center; gap: 22px;
+    margin-inline: auto; font-size: 15px; font-weight: 500;
+  }
+  .navlinks a { color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+  .navlinks a:hover { color: var(--ink); }
+  .navlinks a[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .nav .icon-btn {
+    width: 38px; height: 38px; flex: none; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--paper-3); color: var(--ink);
+    display: grid; place-items: center; cursor: pointer; padding: 0;
+  }
+  .nav .btn-sm { flex: none; padding: 10px 18px; font-size: 14px; }
+  .nav .menu-btn { display: none; }
+  @media (max-width: 900px) { .navlinks { gap: 15px; font-size: 14px; } }
+  @media (max-width: 680px) {
+    .navlinks { display: none; }
+    .nav-inner { justify-content: space-between; }
+    .nav .menu-btn { display: grid; }
+  }
+  /* The links hidden above reappear here, one tap away — a nav that only
+     works above 680px is a nav phones don't have. */
+  .nav-drop {
+    display: none;
+    width: min(1120px, 100%); margin: 8px auto 0;
+    background: color-mix(in srgb, var(--paper) 96%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 18px; padding: 8px;
+  }
+  .nav-drop a {
+    display: block; padding: 11px 14px; border-radius: 11px;
+    color: var(--ink-2); text-decoration: none; font-size: 15px; font-weight: 500;
+  }
+  .nav-drop a:hover { background: var(--paper-2); color: var(--ink); }
+  .nav-drop a[aria-current="page"] { color: var(--accent); font-weight: 700; }
+  .nav.open .nav-drop { display: block; }
+</style>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="/" aria-label="rootmode home">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <rect x="9" y="2" width="6" height="6" rx="1.4" />
+        <rect x="16" y="9" width="6" height="6" rx="1.4" />
+        <rect x="2" y="16" width="6" height="6" rx="1.4" />
+        <rect x="9" y="16" width="6" height="6" rx="1.4" />
+        <rect x="16" y="16" width="6" height="6" rx="1.4" />
+      </svg>
+      rootmode
+    </a>
+    <nav class="navlinks" aria-label="Pages">
+      <a href="/">Home</a>
+      <a href="/manifesto">Manifesto</a>
+      <a href="/explorer">Explorer</a>
+      <a href="/worker">Run a worker</a>
+      <a href="/discovery" aria-current="page">Discovery</a>
+      <a href="/protocol">Protocol</a>
+      <a href="/brand">Brand</a>
+    </nav>
+    <button class="icon-btn menu-btn" id="nav-menu" type="button" aria-label="Open menu" aria-expanded="false">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <button class="icon-btn" id="theme" type="button" aria-label="Switch to dark theme" title="Switch theme">
+      <svg class="sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+    <a class="btn btn-solid btn-sm" href="/download">Download</a>
+  </div>
+  <nav class="nav-drop" aria-label="Pages, expanded">
+      <a href="/">Home</a>
+      <a href="/manifesto">Manifesto</a>
+      <a href="/explorer">Explorer</a>
+      <a href="/worker">Run a worker</a>
+      <a href="/discovery" aria-current="page">Discovery</a>
+      <a href="/protocol">Protocol</a>
+      <a href="/brand">Brand</a>
+    </nav>
+</header>
+<script>
+  // Mobile nav: the pill collapses the links at 680px, this is what gets them
+  // back. Closes itself on a link tap so it never sits open over the page you
+  // just asked to go to.
+  (function () {
+    var nav = document.querySelector(".nav");
+    var btn = document.getElementById("nav-menu");
+    if (!nav || !btn) return;
+    btn.addEventListener("click", function () {
+      var open = nav.classList.toggle("open");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    });
+    nav.querySelectorAll(".nav-drop a").forEach(function (a) {
+      a.addEventListener("click", function () {
+        nav.classList.remove("open");
+        btn.setAttribute("aria-expanded", "false");
+      });
+    });
+  })();
+</script>
+
+
+<main>
+  <section class="top dots">
+    <div class="wrap inner rv">
+      <p class="eyebrow">The network</p>
+      <h1>Discovery &amp; bootstrap.</h1>
+      <p class="lede">
+        How a client and a worker find each other without either of them being told
+        an address by hand — and why the node that introduces them is a door, not a
+        gatekeeper.
+      </p>
+      <div class="actions">
+        <a class="btn btn-solid" href="#running">Run a bootstrap node</a>
+        <a class="btn btn-ghost" href="https://github.com/rootmodeai/rootmode/blob/main/docs/NETWORK.md">Source document</a>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">The shape of it</p>
+        <h2>Introductions there, jobs direct.</h2>
+        <p>
+          A bootstrap node answers "who else is here" and relays for peers stuck
+          behind NAT. Once two peers have found each other they connect directly, and
+          the bootstrap node is not involved in the job at all.
+        </p>
+      </div>
+      <div class="diagram">
+        <svg viewBox="0 0 640 300" role="img" aria-label="A bootstrap node introduces a worker and a client, which then connect directly to each other.">
+          <rect class="box box-dark" x="160" y="16" width="320" height="62" rx="12" />
+          <text class="lbl-inv" x="182" y="43">rootmode-bootstrap</text>
+          <text class="sub-inv" x="182" y="62">entry point + relay · no directory, sees no jobs</text>
+
+          <path class="wire" d="M250 78 L150 150" />
+          <path class="wire" d="M390 78 L490 150" />
+          <text class="edge" x="150" y="118">join / publish</text>
+          <text class="edge" x="405" y="118">join / look up</text>
+
+          <rect class="box" x="40" y="150" width="220" height="72" rx="12" />
+          <text class="lbl" x="60" y="180">rootmode-worker</text>
+          <text class="sub" x="60" y="200">"I do llm, and here are my models"</text>
+
+          <rect class="box" x="380" y="150" width="220" height="72" rx="12" />
+          <text class="lbl" x="400" y="180">desktop client</text>
+          <text class="sub" x="400" y="200">"who does llm?"</text>
+
+          <path class="wire-live" d="M150 222 L150 258 L490 258 L490 222" />
+          <text class="edge-live" x="320" y="282" text-anchor="middle">direct connection — jobs never touch the bootstrap node</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">On your own network</p>
+        <h2>Nothing is configured. At all.</h2>
+        <p>
+          Start a worker. Open the client. The worker appears. That's the whole
+          procedure — no addresses, no bootstrap node, nothing pasted.
+        </p>
+        <p>
+          Both announce themselves over <b>mDNS</b>, the same mechanism that makes
+          printers and Chromecasts show up. The client reacts to the announcement the
+          moment it arrives rather than polling, so a worker started while the app is
+          open appears within a second. For one person and their own machines, this
+          covers the case completely.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Beyond the LAN</p>
+        <h2>To find a peer you need a peer.</h2>
+        <p>
+          Every peer-to-peer network has the same chicken-and-egg problem, and the
+          universal answer is to ship entry points in the binary — IPFS does it,
+          Ethereum does it, BitTorrent does it. rootmode does it in
+          <code>DEFAULT_BOOTSTRAP</code>.
+        </p>
+      </div>
+      <div class="term">
+        <div class="term-bar"><i></i><i></i><i></i><b>crates/rootmode-p2p/src/lib.rs</b></div>
+        <pre><span class="p">pub const</span> DEFAULT_BOOTSTRAP: &amp;[&amp;str] = &amp;[
+    <span class="g">"/dns4/bootstrap.rootmode.ai/tcp/4001"</span>,
+];</pre>
+      </div>
+      <p>
+        With that filled in, <code>docker compose up</code> joins the
+        network and starts receiving jobs, and opening the client lists what people
+        are serving. Neither needs configuring.
+        <code>ROOTMODE_BOOTSTRAP</code> overrides the list at runtime for both
+        binaries — which is how you test a private network without touching the
+        source.
+      </p>
+      <div class="note">
+        <b>The list is empty until you run bootstrap nodes and add their addresses.</b>
+        <p>
+          Until then there's no open network to join, only the local-network discovery
+          above. That's an operational step, not a code one: stand up one or more
+          nodes on stable public addresses, then paste what they print into the
+          constant and rebuild.
+        </p>
+      </div>
+      <p>
+        The <code>/p2p/12D3Koo…</code> suffix is optional. Including it means libp2p
+        refuses to talk to anything else at that address, which is stronger. Leaving
+        it out means the address is a DNS name you can re-key without reissuing
+        builds — at the cost that a hostile node in that position could show you a
+        biased view of who's on the network. It still couldn't read your jobs, forge a
+        worker, or defeat a pinned peer: every peer authenticates with its own key and
+        every result is checked against its hash.
+      </p>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">What it is, and isn't</p>
+        <h2>An ordinary peer with a stable address.</h2>
+        <p>
+          You dial it once to join; it tells you about peers near you, and from then
+          on lookups are peer-to-peer. Three things it is not:
+        </p>
+      </div>
+      <div class="facts">
+        <div class="fact">
+          <p class="no">Not a registry</p>
+          <p>
+            Advertisements are stored across the DHT by key, not handed to it for
+            safekeeping. It holds the ones that happen to land near its node id, like
+            any other participant.
+          </p>
+        </div>
+        <div class="fact">
+          <p class="no">Not an authority</p>
+          <p>It cannot approve, deny, or evict anyone.</p>
+        </div>
+        <div class="fact">
+          <p class="no">Not in the data path</p>
+          <p>
+            Once two peers have found each other they connect directly, and it takes
+            no part in the job.
+          </p>
+        </div>
+      </div>
+      <p>
+        It does one extra job: it runs a <b>relay</b>, so a worker that can't accept an
+        inbound connection is still reachable. Even then it only brokers the
+        connection — the two peers attempt a direct upgrade and the traffic moves off
+        the relay. Run more than one; any node can be one. If every bootstrap node
+        vanishes, running peers keep working and only <em>new</em> joins are affected.
+      </p>
+    </div>
+  </section>
+
+  <section id="running">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Running one</p>
+        <h2>One container, one open port.</h2>
+      </div>
+      <div class="term">
+        <div class="term-bar"><i></i><i></i><i></i><b>bootstrap node</b></div>
+        <pre>$ docker build -f docker/Dockerfile.bootstrap -t <span class="p">rootmode-bootstrap</span> .
+
+$ docker run -d --name rootmode-bootstrap \
+    -p 4001:4001 \
+    -v rootmode-bootstrap:/var/lib/rootmode \
+    <span class="p">rootmode-bootstrap</span> \
+      --listen /ip4/0.0.0.0/tcp/4001 \
+      --key /var/lib/rootmode/bootstrap.key \
+      --announce /dns4/bootstrap.example.com/tcp/4001
+
+$ docker logs rootmode-bootstrap
+peer id   12D3KooWEYBDUKv5KLXV2oL3TgLjU4HypJ9KVv7DPjUo5u5gHCCV
+give this to workers and clients:
+  <span class="g">/dns4/bootstrap.example.com/tcp/4001/p2p/12D3KooWEYBDUKv5…</span></pre>
+      </div>
+      <div class="note">
+        <b>Mount the volume.</b>
+        <p>
+          It holds <code>bootstrap.key</code>, and the peer id is derived from it.
+          Lose the key and the address everyone is configured with stops working.
+        </p>
+      </div>
+      <p>
+        <code>--announce</code> is what gets printed for others to use. Without it the
+        node prints the addresses it bound to, which inside a container are the
+        container's own and no use to anybody outside. Open the port — TCP, whatever
+        you passed to <code>--listen</code>.
+      </p>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Pointing nodes at it</p>
+        <h2>Two sides, four lines of config.</h2>
+      </div>
+      <h3>A worker</h3>
+      <div class="term">
+        <div class="term-bar"><i></i><i></i><i></i><b>worker.toml</b></div>
+        <pre>[p2p]
+enabled   = <span class="g">true</span>
+bootstrap = [<span class="g">"/dns4/bootstrap.example.com/tcp/4001/p2p/12D3Koo…"</span>]
+listen    = [<span class="g">"/ip4/0.0.0.0/tcp/4101"</span>]
+relay      = <span class="g">true</span>    <span class="c"># leave on if this box is behind NAT</span>
+dht_server = <span class="g">false</span>   <span class="c"># turn on only with a public address</span></pre>
+      </div>
+      <p>
+        On start it joins, then publishes two kinds of record — <code>rootmode/cap/llm</code>
+        and <code>rootmode/cap/image</code> for what it can do, and
+        <code>rootmode/model/&lt;id&gt;</code> for each model it actually serves. Those come
+        from the backends, so a worker advertises what its vLLM or ComfyUI really has,
+        not what the config wishes for. It republishes periodically, so a node that
+        stays up stays findable.
+      </p>
+      <h3>A client</h3>
+      <p>
+        Settings → discovery → paste the bootstrap address, one per line. The client
+        then asks the network who serves <code>llm</code> and <code>image</code> every
+        90 seconds, and any peer it finds appears on the peers screen marked
+        <b>discovered</b>, alongside peers added by hand. Discovery hands you a
+        <em>key</em>, never an address — the network resolves the key to a route. That's
+        why discovered endpoints look like <code>p2p://&lt;64 hex characters&gt;</code>.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Identity</p>
+        <h2>One key, two encodings.</h2>
+        <p>
+          A rootmode peer id is a hex ed25519 public key. A libp2p PeerId is a
+          multihash of the same key — and because ed25519 keys are short, libp2p
+          embeds the key rather than hashing it. Same identity, written two ways:
+        </p>
+      </div>
+      <div class="keys">
+        <div><span>peer_id</span><span>ef9084b8a01c18be4b75fb7e0b72b7b4d57b5be99dddf2c430e4db01a43ea8a7</span></div>
+        <div><span>libp2p</span><span>12D3KooWRwXRPuPux1G6SZaxcGobMHx4qbcZmXfjPGgcPQUbk8dC</span></div>
+      </div>
+      <p>
+        This is why <b>pinning still works over discovery</b>. Paste a peer id into a
+        peer's public key field and the connection is checked twice: the libp2p
+        connection is cryptographically bound to the key, and the announce it sends
+        must match. Either mismatch refuses the connection.
+      </p>
+      <div class="note">
+        <b>Discovery is not trust.</b>
+        <p>
+          Anyone can advertise anything. A DHT record is a claim, not a credential — a
+          node can announce <code>llama-3.1-405b</code> and serve nonsense. Discovery
+          gets you candidates, not trust. What helps today: pin the keys of peers you
+          actually trust, and use the worker's <code>allow_peers</code> on the other
+          side. What isn't built yet: signed result receipts, reputation, and any
+          notion of payment. Treat a discovered peer as a stranger, because it is one.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Troubleshooting</p>
+        <h2>When they can't see each other.</h2>
+      </div>
+      <div class="trouble">
+        <details open>
+          <summary>Client finds nothing</summary>
+          <p>
+            Check the worker logged <code>announcing [...] to the network</code>, and
+            that both sides point at the same bootstrap address — including the same
+            <code>/p2p/</code> suffix.
+          </p>
+          <p>
+            Publishing needs a moment after start: the worker waits for the bootstrap
+            connection before its first announce.
+          </p>
+        </details>
+        <details>
+          <summary>Discovered, but offline</summary>
+          <p>
+            The client found the advertisement but can't reach the node. If the worker
+            is behind NAT, set <code>relay = true</code> and make sure the bootstrap
+            node is reachable from both sides.
+          </p>
+          <p>
+            In Docker with published ports rather than <code>--network host</code>, the
+            worker advertises its container address. Set
+            <code>ROOTMODE_P2P_EXTERNAL</code> (or <code>[p2p] external</code>) to the
+            address others should actually dial.
+          </p>
+        </details>
+        <details>
+          <summary>Discovered, online, but the wrong peer</summary>
+          <p>
+            That's <code>mismatch</code>: the key you pinned is not the key that
+            answered. Do not send it a job.
+          </p>
+        </details>
+      </div>
+      <div class="actions">
+        <a class="btn btn-solid" href="/worker">Run a worker</a>
+        <a class="btn btn-ghost" href="/protocol">The protocol</a>
+        <a class="btn btn-ghost" href="https://github.com/rootmodeai/rootmode/blob/main/docs/NETWORK.md">Source document</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wide foot">
+    <span>rootmode v0.1.0</span>
+    <span>·</span>
+    <span>your keys · your peers</span>
+    <span class="right"><a href="/brand">Brand</a> · <a href="/">← Back to rootmode</a></span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement, btn = document.getElementById("theme"), saved = null;
+    try { saved = localStorage.getItem("rootmode.theme"); } catch (e) {}
+    if (saved === "dark") root.setAttribute("data-theme", "dark");
+    function label() {
+      btn.setAttribute("aria-label",
+        root.getAttribute("data-theme") === "dark" ? "Switch to light theme" : "Switch to dark theme");
+    }
+    label();
+    btn.addEventListener("click", function () {
+      var dark = root.getAttribute("data-theme") === "dark";
+      if (dark) root.removeAttribute("data-theme"); else root.setAttribute("data-theme", "dark");
+      try { localStorage.setItem("rootmode.theme", dark ? "light" : "dark"); } catch (e) {}
+      label();
+    });
+  })();
+  (function () {
+    var els = document.querySelectorAll(".rv");
+    if (!("IntersectionObserver" in window) || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      els.forEach(function (el) { el.classList.add("in"); }); return;
+    }
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, { rootMargin: "0px 0px -12% 0px" });
+    els.forEach(function (el) { io.observe(el); });
+  })();
+</script>

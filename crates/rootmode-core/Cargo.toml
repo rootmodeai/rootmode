@@ -1,0 +1,19 @@
+[package]
+name = "rootmode-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "rootmode protocol, job types, identity and hashing primitives"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+ed25519-dalek.workspace = true
+rand.workspace = true
+k256 = { version = "0.13", features = ["ecdsa"] }
+sha3 = "0.10"
+tiktoken-rs = "0.12.0"

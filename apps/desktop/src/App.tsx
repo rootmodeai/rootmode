@@ -1,0 +1,144 @@
+import { useEffect, useState } from "react";
+import { StoreProvider, useStore } from "./lib/store";
+import { api } from "./lib/api";
+import { Boot } from "./screens/Boot";
+import { Chat } from "./screens/Chat";
+import { Create } from "./screens/Create";
+import { Network } from "./screens/Network";
+import { Connect } from "./screens/Connect";
+import { Settings } from "./screens/Settings";
+import { Wallet } from "./screens/Wallet";
+import type { NetworkStatus } from "./lib/types";
+import { Glider } from "./components/Glider";
+import { ChatIcon, ImagesIcon, VideoIcon, ConnectIcon, WalletIcon, SettingsIcon } from "./components/NavIcons";
+
+export type Screen = "chat" | "image" | "video" | "network" | "connect" | "wallet" | "settings";
+
+// "Providers" has no tab of its own — it's an advanced, under-the-hood view,
+// and a dedicated nav entry for it reads as something everyone is meant to
+// visit. The "N providers online" chip at the bottom of the rail is how
+// someone who wants it gets there; everyone else never needs to know it
+// exists.
+const NAV: Array<{ key: Screen; label: string; icon: (props: { size?: number }) => JSX.Element }> = [
+  { key: "chat", label: "Chat", icon: ChatIcon },
+  { key: "image", label: "Images", icon: ImagesIcon },
+  { key: "video", label: "Videos", icon: VideoIcon },
+  { key: "connect", label: "Use it elsewhere", icon: ConnectIcon },
+  { key: "wallet", label: "Wallet", icon: WalletIcon },
+  { key: "settings", label: "Settings", icon: SettingsIcon },
+];
+
+export default function App() {
+  return (
+    <StoreProvider>
+      <Gate />
+    </StoreProvider>
+  );
+}
+
+/** Nothing is shown until the app knows whether it can do anything. */
+function Gate() {
+  const { ready } = useStore();
+  const [entered, setEntered] = useState(false);
+
+  if (!ready || !entered) {
+    return <Boot onReady={() => setEntered(true)} />;
+  }
+  return <Shell />;
+}
+
+function Shell() {
+  const [screen, setScreen] = useState<Screen>("chat");
+  const { peers, bootError } = useStore();
+  const [status, setStatus] = useState<NetworkStatus | null>(null);
+
+  // Cheap and steady: the rail's status is the one thing on screen at all
+  // times, so it should never be stale by more than a few seconds.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const s = await api.networkStatus();
+        if (!cancelled) setStatus(s);
+      } catch {
+        // Nothing to say; try again shortly.
+      }
+      if (!cancelled) setTimeout(tick, 5000);
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+    };
+  }, [peers.length]);
+
+  const online = status?.online ?? 0;
+
+  return (
+    <div className="app">
+      <aside className="rail">
+        <div className="brand">
+          <span className="brand-mark">
+            <Glider size={18} />
+          </span>
+          rootmode
+        </div>
+
+        <nav className="nav">
+          {NAV.map((item) => (
+            <button
+              key={item.key}
+              aria-current={screen === item.key}
+              onClick={() => setScreen(item.key)}
+            >
+              <span className="icon">
+                <item.icon />
+              </span>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="rail-foot">
+          <button className="status-chip" onClick={() => setScreen("network")}>
+            <span className={`dot ${online > 0 ? "ok" : status?.searching ? "busy" : "off"}`} />
+            <span>
+              {online > 0
+                ? `${online} provider${online === 1 ? "" : "s"} online`
+                : status?.searching
+                  ? "Looking for providers…"
+                  : "Nobody online"}
+            </span>
+          </button>
+        </div>
+      </aside>
+
+      <main className="main">
+        {bootError && (
+          <div className="page">
+            <div className="note bad">Could not start: {bootError}</div>
+          </div>
+        )}
+        {/* Hidden, not unmounted. A tab you look away from is still a place
+            you were: the chat you had open, how far you had scrolled, the
+            half-typed message and the answer arriving as you read it all
+            belong to the screen, and throwing them away because somebody
+            glanced at another tab is the app forgetting on your behalf.
+            Only the heavy screens are kept alive — the settings pages have
+            nothing worth preserving. */}
+        <div className="screen" hidden={screen !== "chat"}>
+          <Chat />
+        </div>
+        <div className="screen" hidden={screen !== "image"}>
+          <Create kind="image" />
+        </div>
+        <div className="screen" hidden={screen !== "video"}>
+          <Create kind="video" />
+        </div>
+        {screen === "network" && <Network />}
+        {screen === "connect" && <Connect />}
+        {screen === "wallet" && <Wallet />}
+        {screen === "settings" && <Settings />}
+      </main>
+    </div>
+  );
+}
