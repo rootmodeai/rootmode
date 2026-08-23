@@ -115,19 +115,16 @@ contract ForkE2E is Test {
         assertEq(USDC.balanceOf(client), 96e6);
         assertEq(USDC.balanceOf(address(channels)), 0, "the contract holds nothing of theirs");
 
-        // --- buyback, once the epoch has elapsed ---------------------------
+        // --- buyback, once the token is live and the epoch has elapsed -----
         // No project-token pool exists yet, so the router is a mock. The USDC
         // it spends is the real token the vault was paid in.
+        vault.setBuyToken(true);
         vm.warp(block.timestamp + EPOCH);
         uint256 fees = 400_000;
-        uint256 reward = (fees * 25) / 10_000;
-        uint256 spent = fees - reward;
-        uint256 callerBefore = USDC.balanceOf(address(this));
 
         uint256 received = vault.buyback(0);
-        assertEq(received, spent * 2, "mock router pays 2:1");
-        assertEq(project.balanceOf(sink), spent * 2, "bought tokens went to the sink");
-        assertEq(USDC.balanceOf(address(this)) - callerBefore, reward, "the caller is paid for the gas");
+        assertEq(received, fees * 2, "mock router pays 2:1");
+        assertEq(project.balanceOf(sink), fees * 2, "bought tokens went to the sink");
         assertEq(vault.pending(), 0, "the epoch is empty");
 
         vm.expectRevert("TooSoon");

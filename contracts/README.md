@@ -16,6 +16,10 @@ deposit → reserve (lock) → stream against prepaid slices → capture actual
 90% worker payout / 10% FeeVault
 ```
 
+**`FeeVault`** is admin-only. Until the project token is live, withdraw
+collected USDC. `setBuyToken(true)` turns on epoch buybacks of that token.
+The deployer is admin.
+
 Nothing about a job reaches the chain: no prompt, no answer, no model name.
 
 **`RootmodePot`** is what the desktop uses. Spend tickets are cumulative.

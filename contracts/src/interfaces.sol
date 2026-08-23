@@ -40,15 +40,20 @@ interface ISwapRouter {
 
 interface IFeeVault {
     function usdc() external view returns (address);
+    function admin() external view returns (address);
     function projectToken() external view returns (address);
     function router() external view returns (address);
     function poolFee() external view returns (uint24);
     function sink() external view returns (address);
     function epoch() external view returns (uint64);
     function lastBuyback() external view returns (uint64);
-    function CALLER_REWARD_BPS() external view returns (uint16);
+    function buyToken() external view returns (bool);
     function pending() external view returns (uint256);
     function nextBuyback() external view returns (uint64);
+    function setAdmin(address newAdmin) external;
+    function setSwap(address projectToken, address router, uint24 poolFee, address sink, uint64 epoch) external;
+    function setBuyToken(bool enabled) external;
+    function withdraw(address to, uint256 amount) external returns (uint256);
     function buyback(uint256 minOut) external returns (uint256);
 }
 

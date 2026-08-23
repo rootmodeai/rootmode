@@ -82,7 +82,7 @@ contract RootmodeChannelsTest is Test {
         channels.redeem(channelId, 2_730_000, keccak256("job"), _spendSig(clientKey, 2_730_000, keccak256("job")));
 
         assertEq(usdc.balanceOf(workerPayout), 2_457_000, "90% to the worker");
-        assertEq(usdc.balanceOf(vault), 273_000, "10% to the buyback");
+        assertEq(usdc.balanceOf(vault), 273_000, "10% to the vault");
         assertEq(usdc.balanceOf(workerPayout) + usdc.balanceOf(vault), 2_730_000, "nothing stuck");
     }
 

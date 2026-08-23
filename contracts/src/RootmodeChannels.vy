@@ -16,7 +16,7 @@ Three moves, and that is the whole protocol:
 
 Redeeming is the only place value moves to a worker, and it moves only on the
 client's own signature. The network's cut is taken here, once, at FEE_BPS, and
-sent to the fee vault that buys the token back.
+sent to the fee vault.
 """
 
 from ethereum.ercs import IERC20

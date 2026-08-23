@@ -30,6 +30,8 @@ contract FeeVaultTest is Test {
     IFeeVault internal vault;
 
     address internal sink = address(0xDEAD);
+    address internal stranger = address(0xBEEF);
+    address internal ops = address(0xA11);
     uint64 internal constant EPOCH = 7 days;
 
     function setUp() public {
@@ -45,19 +47,65 @@ contract FeeVaultTest is Test {
         usdc.mint(address(vault), 1_000e6); // a week of fees
     }
 
-    function test_a_buyback_spends_the_epochs_fees_and_sends_the_token_to_the_sink() public {
+    function _enableBuyToken() internal {
+        vault.setBuyToken(true);
         vm.warp(block.timestamp + EPOCH);
-        uint256 caller = 1_000e6 * 25 / 10_000;
+    }
+
+    function test_the_deployer_is_admin_and_buybacks_start_off() public view {
+        assertEq(vault.admin(), address(this));
+        assertFalse(vault.buyToken());
+    }
+
+    function test_admin_can_withdraw_collected_usdc() public {
+        uint256 pulled = vault.withdraw(ops, 0);
+        assertEq(pulled, 1_000e6);
+        assertEq(usdc.balanceOf(ops), 1_000e6);
+        assertEq(vault.pending(), 0);
+    }
+
+    function test_admin_can_withdraw_a_partial_amount() public {
+        vault.withdraw(ops, 250e6);
+        assertEq(usdc.balanceOf(ops), 250e6);
+        assertEq(vault.pending(), 750e6);
+    }
+
+    function test_a_stranger_cannot_withdraw() public {
+        vm.prank(stranger);
+        vm.expectRevert("OnlyAdmin");
+        vault.withdraw(stranger, 0);
+    }
+
+    function test_buyback_is_off_until_the_switch() public {
+        vm.expectRevert("BuyTokenOff");
+        vault.buyback(0);
+    }
+
+    function test_a_stranger_cannot_flip_the_switch() public {
+        vm.prank(stranger);
+        vm.expectRevert("OnlyAdmin");
+        vault.setBuyToken(true);
+    }
+
+    function test_a_buyback_spends_the_epochs_fees_and_sends_the_token_to_the_sink() public {
+        _enableBuyToken();
 
         vault.buyback(0);
 
-        assertEq(project.balanceOf(sink), (1_000e6 - caller) * 2, "bought and forwarded");
-        assertEq(usdc.balanceOf(address(this)), caller, "whoever paid the gas is paid for it");
+        assertEq(project.balanceOf(sink), 1_000e6 * 2, "bought and forwarded");
+        assertEq(usdc.balanceOf(address(this)), 0, "no caller skim");
         assertEq(vault.pending(), 0, "nothing left sitting");
     }
 
+    function test_a_stranger_cannot_buyback() public {
+        _enableBuyToken();
+        vm.prank(stranger);
+        vm.expectRevert("OnlyAdmin");
+        vault.buyback(0);
+    }
+
     function test_it_cannot_be_called_twice_in_one_epoch() public {
-        vm.warp(block.timestamp + EPOCH);
+        _enableBuyToken();
         vault.buyback(0);
 
         // Batching is the point: a buyback per payment would be a sandwich
@@ -67,12 +115,39 @@ contract FeeVaultTest is Test {
     }
 
     function test_a_caller_can_refuse_a_bad_fill() public {
-        vm.warp(block.timestamp + EPOCH);
+        _enableBuyToken();
         vm.expectRevert("slippage");
         vault.buyback(type(uint256).max);
 
         // And the epoch is not consumed by an attempt that failed.
         vault.buyback(0);
         assertGt(project.balanceOf(sink), 0);
+    }
+
+    function test_admin_can_hand_the_keys_to_someone_else() public {
+        vault.setAdmin(ops);
+        assertEq(vault.admin(), ops);
+
+        vm.expectRevert("OnlyAdmin");
+        vault.withdraw(address(this), 0);
+
+        vm.prank(ops);
+        vault.withdraw(ops, 0);
+        assertEq(usdc.balanceOf(ops), 1_000e6);
+    }
+
+    function test_turning_buyToken_on_needs_a_swap_path() public {
+        IFeeVault blank = IFeeVault(
+            deployCode(
+                "src/FeeVault.vy",
+                abi.encode(address(usdc), address(0), address(0), uint24(0), address(0), uint64(0))
+            )
+        );
+        vm.expectRevert("SwapUnset");
+        blank.setBuyToken(true);
+
+        blank.setSwap(address(project), address(router), 3000, sink, EPOCH);
+        blank.setBuyToken(true);
+        assertTrue(blank.buyToken());
     }
 }
