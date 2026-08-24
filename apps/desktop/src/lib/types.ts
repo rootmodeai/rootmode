@@ -268,6 +268,13 @@ export interface ToolStatus {
   config_path: string;
 }
 
+export interface UpdateInfo {
+  current: string;
+  latest: string | null;
+  available: boolean;
+  url: string;
+}
+
 export interface PotStatus {
   configured: boolean;
   reachable: boolean;

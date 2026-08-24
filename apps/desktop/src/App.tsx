@@ -8,7 +8,7 @@ import { Network } from "./screens/Network";
 import { Connect } from "./screens/Connect";
 import { Settings } from "./screens/Settings";
 import { Wallet } from "./screens/Wallet";
-import type { NetworkStatus } from "./lib/types";
+import type { NetworkStatus, UpdateInfo } from "./lib/types";
 import { Glider } from "./components/Glider";
 import { ChatIcon, ImagesIcon, VideoIcon, ConnectIcon, WalletIcon, SettingsIcon } from "./components/NavIcons";
 
@@ -51,6 +51,7 @@ function Shell() {
   const [screen, setScreen] = useState<Screen>("chat");
   const { peers, bootError } = useStore();
   const [status, setStatus] = useState<NetworkStatus | null>(null);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
 
   // Cheap and steady: the rail's status is the one thing on screen at all
   // times, so it should never be stale by more than a few seconds.
@@ -70,6 +71,15 @@ function Shell() {
       cancelled = true;
     };
   }, [peers.length]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void api.checkUpdate().then((u) => {
+        if (u.available) setUpdate(u);
+      }).catch(() => undefined);
+    }, 2500);
+    return () => clearTimeout(t);
+  }, []);
 
   const online = status?.online ?? 0;
 
@@ -113,6 +123,28 @@ function Shell() {
       </aside>
 
       <main className="main">
+        {update?.available && update.latest && (
+          <div className="note update-bar">
+            <span>
+              {update.latest} is out. You have {update.current}.
+            </span>
+            <button
+              className="btn primary sm"
+              onClick={() => void api.openUpdate(update.url)}
+            >
+              Download
+            </button>
+            <button
+              className="btn sm"
+              onClick={() => {
+                if (update.latest) void api.skipUpdate(update.latest);
+                setUpdate(null);
+              }}
+            >
+              Later
+            </button>
+          </div>
+        )}
         {bootError && (
           <div className="page">
             <div className="note bad">Could not start: {bootError}</div>

@@ -13,6 +13,8 @@ export function Settings() {
   const [secret, setSecret] = useState<string | null>(null);
   const [importValue, setImportValue] = useState("");
   const [downloadDir, setDownloadDir] = useState<string | null>(null);
+  const [updateLine, setUpdateLine] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
 
   if (!settings) return null;
   const dir = downloadDir ?? settings.download_dir;
@@ -36,6 +38,44 @@ export function Settings() {
 
       {error && <div className="note bad" style={{ marginBottom: 14 }}>{error}</div>}
       {note && <div className="note ok" style={{ marginBottom: 14 }}>{note}</div>}
+
+      <div className="card">
+        <h2>Updates</h2>
+        <p style={{ color: "var(--text-2)", fontSize: 13.5, margin: "0 0 12px" }}>
+          {updateLine ?? "The app checks for a new release when it starts."}
+        </p>
+        <div className="row">
+          <button
+            className="btn"
+            disabled={checking}
+            onClick={() => {
+              setChecking(true);
+              setError(null);
+              void api
+                .checkUpdate()
+                .then((u) => {
+                  if (u.available && u.latest) {
+                    setUpdateLine(`${u.latest} is out (you have ${u.current}).`);
+                    setNote(`${u.latest} is available.`);
+                  } else {
+                    setUpdateLine(`You have ${u.current}, the latest.`);
+                    setNote("You're up to date.");
+                  }
+                })
+                .catch((e) => setError(errorText(e)))
+                .finally(() => setChecking(false));
+            }}
+          >
+            {checking ? "Checking…" : "Check for update"}
+          </button>
+          <button
+            className="btn primary"
+            onClick={() => void api.openUpdate().catch((e) => setError(errorText(e)))}
+          >
+            Download latest
+          </button>
+        </div>
+      </div>
 
       <div className="card">
         <h2>Appearance</h2>

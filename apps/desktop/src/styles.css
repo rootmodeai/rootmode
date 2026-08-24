@@ -674,6 +674,16 @@ button.btn.sm { padding: 4px 9px; font-size: 12.5px; }
 .note.bad { background: var(--red-soft); color: var(--red); }
 .note.ok { background: var(--accent-soft); color: var(--accent); }
 
+.update-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 16px 0;
+  padding: 10px 14px;
+}
+.update-bar span { flex: 1; min-width: 12em; }
+
 .funding-card {
   border-radius: var(--r);
   padding: 14px 16px;

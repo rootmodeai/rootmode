@@ -25,6 +25,7 @@ import type {
   PotCheck,
   Deposit,
   ModelUsage,
+  UpdateInfo,
 } from "./types";
 
 /** Backend errors arrive as strings; keep them intact for the UI to show. */
@@ -130,6 +131,9 @@ export const api = {
   potOpenFund: () => invoke<string>("pot_open_fund"),
   potDeposits: () => invoke<Deposit[]>("pot_deposits"),
   tokenUsage: () => invoke<ModelUsage[]>("token_usage"),
+  checkUpdate: () => invoke<UpdateInfo>("check_update"),
+  skipUpdate: (version: string) => invoke<void>("skip_update", { version }),
+  openUpdate: (url?: string) => invoke<void>("open_update", { url: url ?? null }),
 };
 
 export const events = {

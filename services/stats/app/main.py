@@ -36,7 +36,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .canonical import verify
-from .download import download_url, named_url
+from .download import download_url, latest_version, named_url
 from .geo import client_ip, country_of, fingerprint
 from .models import MAX_BODY_BYTES, Report
 from .store import Store
@@ -168,6 +168,16 @@ def download(request: Request):
     repo = os.environ.get("ROOTMODE_GITHUB_REPO") or None
     ua = request.headers.get("user-agent", "")
     return RedirectResponse(download_url(ua, repo), status_code=302)
+
+
+@app.get("/version")
+def version():
+    """What the desktop compares itself against. None if GitHub is silent."""
+    repo = os.environ.get("ROOTMODE_GITHUB_REPO") or None
+    body = latest_version(repo)
+    if body is None:
+        return JSONResponse({"version": None, "tag": None, "url": "https://rootmode.ai/download"})
+    return body
 
 
 @app.get("/download/{os_name}")

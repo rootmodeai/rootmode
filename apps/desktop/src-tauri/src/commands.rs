@@ -713,3 +713,38 @@ pub fn dashboard_stats(state: St<'_>) -> Result<DashboardStats> {
         discovery: state.discovery_enabled(),
     })
 }
+
+#[tauri::command]
+pub async fn check_update(state: St<'_>) -> Result<crate::update::UpdateInfo> {
+    let mut info = crate::update::lookup().await?;
+    if info.available {
+        if let (Ok(Some(skipped)), Some(latest)) = (
+            state.db.get_setting(crate::update::SETTING_SKIPPED),
+            info.latest.as_deref(),
+        ) {
+            if skipped == latest {
+                info.available = false;
+            }
+        }
+    }
+    Ok(info)
+}
+
+#[tauri::command]
+pub fn skip_update(state: St<'_>, version: String) -> Result<()> {
+    state
+        .db
+        .set_setting(crate::update::SETTING_SKIPPED, version.trim())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_update(app: AppHandle, url: Option<String>) -> Result<()> {
+    let url = url
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| "https://rootmode.ai/download".into());
+    tauri_plugin_opener::OpenerExt::opener(&app)
+        .open_url(&url, None::<&str>)
+        .map_err(|e| AppError::Invalid(e.to_string()))?;
+    Ok(())
+}

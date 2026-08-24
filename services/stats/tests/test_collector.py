@@ -173,6 +173,17 @@ def test_named_download_paths():
     assert client.get("/download/beos", follow_redirects=False).status_code == 404
 
 
+def test_version_tells_the_desktop_the_latest_tag(monkeypatch):
+    monkeypatch.setattr(
+        "app.main.latest_version",
+        lambda repo=None: {"version": "0.1.9", "tag": "v0.1.9", "url": "https://rootmode.ai/download"},
+    )
+    r = client.get("/version")
+    assert r.status_code == 200
+    assert r.json()["version"] == "0.1.9"
+    assert r.json()["tag"] == "v0.1.9"
+
+
 def test_both_url_spellings_reach_the_same_handler():
     # Workers are configured with the short one on the site's own domain; the
     # versioned one exists for the day two shapes have to be live at once.

@@ -13,7 +13,10 @@
         { "url": "http://127.0.0.1:17331/*" },
         { "url": "http://localhost:17331/*" },
         { "url": "https://basescan.org/*" },
-        { "url": "https://sepolia.basescan.org/*" }
+        { "url": "https://sepolia.basescan.org/*" },
+        { "url": "https://rootmode.ai/download" },
+        { "url": "https://rootmode.ai/download/*" },
+        { "url": "https://github.com/rootmodeai/rootmode/releases/*" }
       ]
     }
   ]

@@ -6,6 +6,8 @@ module only decides which name to send someone to.
 
 from __future__ import annotations
 
+import os
+
 GITHUB_REPO = "rootmodeai/rootmode"
 
 ASSETS = {
@@ -68,3 +70,43 @@ def named_url(os_name: str, repo: str | None = None) -> str | None:
     if key is None:
         return None
     return latest_url(ASSETS[key], repo)
+
+
+_VERSION_TTL = 300
+_version_cache: tuple[float, dict] | None = None
+
+
+def latest_version(repo: str | None = None) -> dict | None:
+    """Tag of the newest GitHub Release, or None if GitHub will not say."""
+    global _version_cache
+    import json
+    import time
+    import urllib.error
+    import urllib.request
+
+    now = time.time()
+    if _version_cache and now - _version_cache[0] < _VERSION_TTL:
+        return _version_cache[1]
+    name = _repo(repo)
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{name}/releases/latest",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "rootmode",
+        },
+    )
+    token = os.environ.get("ROOTMODE_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.load(resp)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        return None
+    tag = str(data.get("tag_name") or "").strip()
+    if not tag:
+        return None
+    ver = tag[1:] if tag.startswith("v") else tag
+    body = {"version": ver, "tag": tag, "url": "https://rootmode.ai/download"}
+    _version_cache = (now, body)
+    return body

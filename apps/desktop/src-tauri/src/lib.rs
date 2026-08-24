@@ -16,6 +16,7 @@ pub mod results;
 pub mod routing;
 pub mod state;
 pub mod store;
+pub mod update;
 
 use std::sync::Arc;
 
@@ -202,6 +203,9 @@ pub fn run() {
             commands::pot_open_fund,
             commands::pot_deposits,
             commands::token_usage,
+            commands::check_update,
+            commands::skip_update,
+            commands::open_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running rootmode");
