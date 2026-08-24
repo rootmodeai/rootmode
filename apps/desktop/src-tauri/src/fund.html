@@ -93,6 +93,8 @@
     button.ghost { background: var(--paper-3); border: 1px solid var(--line); color: var(--ink); }
     button.ghost:hover { border-color: var(--accent); color: var(--accent); }
     button:disabled { opacity: 0.5; cursor: wait; }
+    .wallets { display: grid; gap: 8px; margin-top: 12px; }
+    .wallets button { margin-top: 0; }
     .mono { font-family: var(--mono); font-size: 12px; word-break: break-all; color: var(--ink-3); }
     .ok { color: var(--accent); }
     .bad { color: #c8392f; }
@@ -200,7 +202,11 @@
       <div class="mono" id="status">Looking for a wallet…</div>
       <div id="bal" style="font-size:28px;font-weight:750;letter-spacing:-0.03em;margin:10px 0 4px">—</div>
       <div class="mono" id="balhint">This number is from the chain.</div>
-      <button id="connect">Connect</button>
+      <div class="wallets" id="connectRow">
+        <button type="button" id="connectMm">MetaMask</button>
+        <button type="button" class="ghost" id="connectCb">Coinbase</button>
+      </div>
+      <button type="button" id="disconnect" hidden>Disconnect</button>
       <label>Amount (USDC)</label>
       <input id="amount" value="100" />
       <label>Max per job (USDC)</label>
@@ -265,14 +271,6 @@ function onBase() {
   return wantId === 8453 || wantId === 84532;
 }
 
-function connectLabel() {
-  return "Connect";
-}
-
-function disconnectLabel() {
-  return "Disconnect";
-}
-
 function chainLabel() {
   if (wantId === 8453) return "Base";
   if (wantId === 84532) return "Base Sepolia";
@@ -308,17 +306,14 @@ function chainParams() {
 
 function setConnected(on, account) {
   connected = on;
-  const btn = $("connect");
+  $("connectRow").hidden = on;
+  $("disconnect").hidden = !on;
   if (on) {
-    btn.textContent = disconnectLabel();
-    btn.classList.add("ghost");
     if (account) $("status").textContent = "Connected " + account;
   } else {
-    btn.textContent = connectLabel();
-    btn.classList.remove("ghost");
     $("bal").textContent = "—";
     $("balhint").textContent = "This number is from the chain.";
-    $("status").textContent = "Connect your wallet to continue.";
+    $("status").textContent = "Connect MetaMask or Coinbase to continue.";
   }
 }
 
@@ -334,6 +329,25 @@ function toMicros(v) {
   return BigInt(Math.round(n * 1e6));
 }
 
+const eip6963 = [];
+window.addEventListener("eip6963:announceProvider", (ev) => {
+  const d = ev.detail;
+  if (d && d.provider && d.info) eip6963.push(d);
+});
+try { window.dispatchEvent(new Event("eip6963:requestProvider")); } catch (_) {}
+
+function metamaskProvider() {
+  const by6963 = eip6963.find((d) => d.info.rdns === "io.metamask" || /metamask/i.test(d.info.name || ""));
+  if (by6963) return by6963.provider;
+  const list = window.ethereum && window.ethereum.providers;
+  if (Array.isArray(list)) {
+    const mm = list.find((p) => p && p.isMetaMask && !p.isBraveWallet);
+    if (mm) return mm;
+  }
+  if (window.ethereum && window.ethereum.isMetaMask && !window.ethereum.isBraveWallet) return window.ethereum;
+  return null;
+}
+
 function baseProvider() {
   if (typeof window.createBaseAccountSDK !== "function") return null;
   return window.createBaseAccountSDK({
@@ -346,9 +360,15 @@ function provider() {
   if (walletKind === "base") {
     const p = baseProvider();
     if (p) return p;
+    throw new Error("Coinbase is not available in this tab.");
+  }
+  if (walletKind === "metamask") {
+    const p = metamaskProvider();
+    if (p) return p;
+    throw new Error("MetaMask is not in this browser. Open this page in Chrome with the MetaMask extension.");
   }
   if (window.ethereum) return window.ethereum;
-  throw new Error("No wallet in this tab. Allow it on this page and try Connect again.");
+  throw new Error("No wallet in this tab.");
 }
 
 async function eth(method, params) {
@@ -612,31 +632,35 @@ const depositStep = [
   { title: "Deposit", body: "Confirm in your wallet." },
 ];
 
-$("connect").onclick = async () => {
+async function connectWith(kind) {
+  walletKind = kind;
+  showStage(1, [{ title: "Connect", body: "Confirm in your wallet." }]);
+  log("");
+  const accounts = await eth("eth_requestAccounts", []);
+  if (!accounts || !accounts.length) throw new Error("No account returned. Unlock the wallet and try again.");
+  if (walletKind !== "base") await switchIfNeeded();
+  await refreshBal();
+  log("Connected.", "ok");
+}
+
+$("connectMm").onclick = async () => {
+  try { await connectWith("metamask"); }
+  catch (e) { log(e.message || String(e), "bad"); }
+  finally { showForm(); }
+};
+
+$("connectCb").onclick = async () => {
+  try { await connectWith("base"); }
+  catch (e) { log(e.message || String(e), "bad"); }
+  finally { showForm(); }
+};
+
+$("disconnect").onclick = async () => {
   try {
-    if (connected) {
-      try {
-        await eth("wallet_revokePermissions", [{ eth_accounts: {} }]);
-      } catch (_) {
-        // Older MetaMask: permissions stay; we still drop this page's session.
-      }
-      setConnected(false);
-      log("Disconnected.");
-      return;
-    }
-    walletKind = onBase() && baseProvider() ? "base" : "injected";
-    showStage(1, [{ title: "Connect", body: "Confirm in your wallet." }]);
-    log("");
-    const accounts = await eth("eth_requestAccounts", []);
-    if (!accounts || !accounts.length) throw new Error("No account returned. Unlock the wallet and try again.");
-    if (walletKind !== "base") await switchIfNeeded();
-    await refreshBal();
-    log("Connected.", "ok");
-  } catch (e) {
-    log(e.message || String(e), "bad");
-  } finally {
-    showForm();
-  }
+    await eth("wallet_revokePermissions", [{ eth_accounts: {} }]);
+  } catch (_) {}
+  setConnected(false);
+  log("Disconnected.");
 };
 
 $("deposit").onclick = async () => {
@@ -728,8 +752,7 @@ $("withdraw").onclick = async () => {
   }
 };
 
-$("connect").textContent = connectLabel();
-$("status").textContent = "Connect your wallet to continue.";
+$("status").textContent = "Connect MetaMask or Coinbase to continue.";
 if (!onBase() && window.ethereum) {
   window.ethereum.on("accountsChanged", (accounts) => {
     if (!accounts || !accounts.length) {
