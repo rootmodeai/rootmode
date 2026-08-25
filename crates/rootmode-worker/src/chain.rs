@@ -22,6 +22,9 @@ pub struct ChannelState {
     /// Highest spend ticket the chain has already recognised. A settle whose
     /// cumulative is at or below this reverts `NotMonotonic` — it was paid.
     pub earned: u64,
+    /// Per-job cap the contract snapshotted into this channel at its first
+    /// reserve. A settle whose delta exceeds it reverts `OverCap`. 0 = unknown.
+    pub max_per_job: u64,
     pub app_key: String,
 }
 
@@ -58,6 +61,7 @@ pub async fn channel_state(
             remaining: 0,
             reserved: 0,
             earned: 0,
+            max_per_job: 0,
             app_key: String::new(),
         }));
     }
@@ -66,6 +70,7 @@ pub async fn channel_state(
     // The address is the low 20 bytes (last 40 hex chars) of word 4.
     let app_key = format!("0x{}", &hex[64 * 4 + 24..64 * 5]);
     let earned = read_u64(&hex[64 * 5..64 * 6]);
+    let max_per_job = if hex.len() >= 64 * 7 { read_u64(&hex[64 * 6..64 * 7]) } else { 0 };
     if close_at != 0 {
         return Err(WorkerError::Rejected(
             "this client is closing the channel; unused lock is returning".into(),
@@ -75,6 +80,7 @@ pub async fn channel_state(
         remaining: reserved.saturating_sub(earned),
         reserved,
         earned,
+        max_per_job,
         app_key,
     }))
 }

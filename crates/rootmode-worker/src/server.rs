@@ -188,6 +188,7 @@ impl Worker {
                 remaining,
                 reserved: remaining,
                 earned: 0,
+                max_per_job: 0,
                 app_key: app_key.to_string(),
             });
     }
@@ -1318,8 +1319,7 @@ impl Worker {
             let (Some(ticket), Some(sig)) = (ch.spend.clone(), ch.spend_sig.clone()) else {
                 continue;
             };
-            let due_soon = ticket.deadline.saturating_sub(now_secs()) < SETTLE_BEFORE_DEADLINE_SECS;
-            if ch.owed() >= SETTLE_MIN_MICROS || due_soon {
+            if self.worth_settling(Uuid::nil(), &ticket).await {
                 let pay = JobPay {
                     v: PROTOCOL_VERSION,
                     job_id: Uuid::nil(),
@@ -1346,13 +1346,40 @@ impl Worker {
             &pay.ticket.worker_payout,
             "pot",
         );
-        let owed = self.channels.owed_for(&id);
-        let due_soon = pay.ticket.deadline.saturating_sub(now_secs()) < SETTLE_BEFORE_DEADLINE_SECS;
-        if owed < SETTLE_MIN_MICROS && !due_soon {
-            tracing::info!(%job_id, owed_micros = owed, "settle deferred until worth a transaction");
-            return;
+        if self.worth_settling(job_id, &pay.ticket).await {
+            self.settle_ticket(job_id, &id, pay).await;
         }
-        self.settle_ticket(job_id, &id, pay).await;
+    }
+
+    /// Whether to spend a transaction on this ticket now.
+    ///
+    /// Measured against the chain, not this node's ledger: on a payout
+    /// channel shared by a fleet, the delta a settle actually claims is the
+    /// ticket's rise over what the chain has recognised — every sibling's
+    /// unsettled bills included. Wait too long and that delta passes the
+    /// channel's per-job cap, the settle reverts `OverCap`, and the tickets
+    /// expire unpaid. So settle once the chain delta is worth the gas, well
+    /// before it nears the cap, and always before the deadline. If the chain
+    /// cannot be read, settle: an unnecessary transaction costs a cent, an
+    /// expired ticket costs the job.
+    async fn worth_settling(&self, job_id: Uuid, ticket: &rootmode_core::payments::SpendTicket) -> bool {
+        let due_soon = ticket.deadline.saturating_sub(now_secs()) < SETTLE_BEFORE_DEADLINE_SECS;
+        if due_soon {
+            return true;
+        }
+        let Ok(Some(state)) = self.read_channel(&ticket.client, &ticket.worker_payout).await else {
+            return true;
+        };
+        let delta = ticket.cumulative.saturating_sub(state.earned);
+        if delta == 0 {
+            return false;
+        }
+        let near_cap = state.max_per_job > 0 && delta >= state.max_per_job / 2;
+        if delta >= SETTLE_MIN_MICROS || near_cap {
+            return true;
+        }
+        tracing::info!(%job_id, delta_micros = delta, "settle deferred until worth a transaction");
+        false
     }
 
     async fn settle_ticket(&self, job_id: Uuid, channel_id: &str, pay: &JobPay) {

@@ -799,11 +799,23 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
                 (pending.price.amount * 1_000_000.0).round() as u64
             }
         };
-        if invoice.amount > fair {
+        // The advertised rate is the worker's list price; its real upstream
+        // cost can run above it, and it bills at least cost plus margin.
+        // Refusing such a bill does not save the client money — the worker
+        // then keeps the whole prepaid chunk instead. Tolerate a modest
+        // premium over the rate; anything past that is a mispriced listing.
+        let tolerated = fair.saturating_mul(3) / 2;
+        if invoice.amount > tolerated {
             return Err(AppError::Invalid(format!(
                 "worker billed {} µUSDC; advertised price only covers {fair}",
                 invoice.amount
             )));
+        }
+        if invoice.amount > fair {
+            log::info!(
+                "job {job_id}: billed {} µUSDC against an advertised {fair} (upstream cost floor)",
+                invoice.amount
+            );
         }
         if invoice.amount > pending.ceiling {
             return Err(AppError::Invalid(
