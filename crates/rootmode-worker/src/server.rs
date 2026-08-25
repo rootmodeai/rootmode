@@ -63,6 +63,13 @@ fn payout_of(raw: &str) -> Option<String> {
 /// descriptors before any admission gate.
 const MAX_CONNECTIONS: usize = 512;
 const MAX_INFLIGHT_JOBS: usize = 256;
+/// Settle only once a channel has this much unsettled, or a ticket is about
+/// to expire. A settle on Base costs ~$0.0014 in gas; a job that earned
+/// $0.00002 must not spend seventy times its revenue collecting it. Tickets
+/// are cumulative, so waiting loses nothing as long as the newest is settled
+/// before its deadline — [`Worker::settle_due`] sweeps for exactly that.
+const SETTLE_MIN_MICROS: u64 = 50_000;
+const SETTLE_BEFORE_DEADLINE_SECS: u64 = 20 * 60;
 
 pub struct Worker {
     config: Config,
@@ -1261,26 +1268,85 @@ impl Worker {
             }
         };
 
-        let chosen = match paid {
-            Some(pay) if self.bank_pay(submit, &pay, amount, &app_key).is_ok() => pay,
+        let (chosen, billed) = match paid {
+            Some(pay) if self.bank_pay(submit, &pay, amount, &app_key).is_ok() => (pay, amount),
             _ => {
                 if let Err(e) = self.bank_pay(submit, &bond.pay, bond.delta, &app_key) {
                     tracing::warn!(%job_id, "could not bank prepaid chunk: {e}");
                     return;
                 }
-                bond.pay
+                (bond.pay, bond.delta)
             }
         };
+        // One line per paid job that an operator can reconcile against the
+        // upstream provider's statement: what the client was billed, and
+        // what the work cost, in the same units.
+        tracing::info!(
+            %job_id,
+            model = result.meta.get("model").and_then(|m| m.as_str()).unwrap_or(""),
+            billed_micros = billed,
+            upstream_cost_usd = result
+                .meta
+                .get("upstream_cost")
+                .and_then(|c| c.as_f64())
+                .unwrap_or(0.0),
+            prompt = usage.prompt,
+            cached = usage.cached,
+            completion = usage.completion,
+            reasoning = usage.reasoning,
+            "billed"
+        );
         self.settle_if_configured(job_id, &chosen).await;
     }
 
-    async fn settle_if_configured(&self, job_id: Uuid, pay: &JobPay) {
-        if self.config.payments.rpc.trim().is_empty()
-            || (self.config.payments.sender.trim().is_empty()
-                && self.config.payments.key.trim().is_empty())
-        {
+    /// Settle every channel that is worth a transaction or whose newest
+    /// ticket is close to expiring. Run periodically; see `SETTLE_MIN_MICROS`.
+    pub async fn settle_due(&self) {
+        if !self.can_settle() {
             return;
         }
+        for ch in self.channels.redeemable() {
+            let (Some(ticket), Some(sig)) = (ch.spend.clone(), ch.spend_sig.clone()) else {
+                continue;
+            };
+            let due_soon = ticket.deadline.saturating_sub(now_secs()) < SETTLE_BEFORE_DEADLINE_SECS;
+            if ch.owed() >= SETTLE_MIN_MICROS || due_soon {
+                let pay = JobPay {
+                    v: PROTOCOL_VERSION,
+                    job_id: Uuid::nil(),
+                    ticket,
+                    sig,
+                };
+                self.settle_ticket(Uuid::nil(), &ch.channel_id, &pay).await;
+            }
+        }
+    }
+
+    fn can_settle(&self) -> bool {
+        !self.config.payments.rpc.trim().is_empty()
+            && !(self.config.payments.sender.trim().is_empty()
+                && self.config.payments.key.trim().is_empty())
+    }
+
+    async fn settle_if_configured(&self, job_id: Uuid, pay: &JobPay) {
+        if !self.can_settle() {
+            return;
+        }
+        let id = rootmode_core::payments::channel_id(
+            &pay.ticket.client,
+            &pay.ticket.worker_payout,
+            "pot",
+        );
+        let owed = self.channels.owed_for(&id);
+        let due_soon = pay.ticket.deadline.saturating_sub(now_secs()) < SETTLE_BEFORE_DEADLINE_SECS;
+        if owed < SETTLE_MIN_MICROS && !due_soon {
+            tracing::info!(%job_id, owed_micros = owed, "settle deferred until worth a transaction");
+            return;
+        }
+        self.settle_ticket(job_id, &id, pay).await;
+    }
+
+    async fn settle_ticket(&self, job_id: Uuid, channel_id: &str, pay: &JobPay) {
         let Ok(sig) = hex::decode(pay.sig.trim_start_matches("0x")) else {
             tracing::warn!(%job_id, "pay signature is not hex");
             return;
@@ -1290,8 +1356,17 @@ impl Worker {
             return;
         }
         match crate::chain::settle(&self.config.payments, &pay.ticket, &sig).await {
-            Ok(Some(hash)) => tracing::info!(%job_id, %hash, "settled"),
-            Ok(None) => tracing::info!(%job_id, "already settled on-chain; nothing new to pay"),
+            Ok(Some(hash)) => {
+                tracing::info!(%job_id, %hash, cumulative = pay.ticket.cumulative, "settled");
+                self.channels.settled(channel_id, pay.ticket.cumulative);
+            }
+            // The chain already recognises this cumulative — another node on
+            // the same payout channel settled past it. The treasury has the
+            // money; there is nothing left for this ticket to collect.
+            Ok(None) => {
+                tracing::info!(%job_id, "already settled on-chain; nothing new to pay");
+                self.channels.settled(channel_id, pay.ticket.cumulative);
+            }
             Err(e) => tracing::warn!(%job_id, "settle later: {e}"),
         }
     }
@@ -2002,8 +2077,12 @@ mod tests {
         );
     }
 
+    /// A ticket that rises by more than the invoice is not a bad ticket: on
+    /// a payout channel shared by several nodes, the rise includes what the
+    /// others settled meanwhile. The bill is the invoice — never the excess,
+    /// and never the whole prepaid chunk, which is what refusing it cost.
     #[tokio::test]
-    async fn an_overcharge_falls_back_to_the_prepaid_chunk() {
+    async fn an_overpaying_ticket_is_credited_at_the_invoice() {
         let worker = Arc::new(priced_worker());
         let job_id = Uuid::new_v4();
         let chunk = rootmode_core::Price::new(20.0).chunk_micros();
@@ -2027,10 +2106,13 @@ mod tests {
             &dummy,
         );
         running.await.unwrap();
-        assert_eq!(
-            worker.channels.owed(),
-            chunk,
-            "a bad actual ticket must not raise the bill; the chunk stands"
+        // The channel carries what the client signed — the invoice plus the
+        // one micro it over-signed, which is its own doing and bounded by its
+        // own signature. What it must never carry is the prepaid chunk.
+        assert_eq!(worker.channels.owed(), inv.amount + 1);
+        assert!(
+            worker.channels.owed() < chunk,
+            "refusing the ticket and keeping the chunk was the old, worse outcome"
         );
     }
 }

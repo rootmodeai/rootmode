@@ -172,12 +172,15 @@ impl Channels {
                 ticket.cumulative
             ));
         }
-        let earned = ticket.cumulative - already;
-        if earned != expected_delta {
-            return Err(format!(
-                "ticket pays {earned}, invoice was {expected_delta}"
-            ));
-        }
+        // The rise above what this node last banked may exceed the invoice:
+        // several nodes can share one payout channel (a fleet with one
+        // treasury), and every settle any of them lands moves the client's
+        // cumulative on without passing through this ledger. That excess is
+        // not this job's earning — it is money already recognised on-chain —
+        // so credit only the invoice. Refusing it was worse than either
+        // error: nothing got banked, nothing settled, and the upstream bill
+        // for the work was paid by nobody.
+        let earned = expected_delta;
 
         let latest = existing
             .map(|c| c.latest.clone())
@@ -227,6 +230,16 @@ impl Channels {
             .filter(|c| c.owed() > 0)
             .cloned()
             .collect()
+    }
+
+    /// What one channel has banked beyond what it has settled, in micros.
+    pub fn owed_for(&self, channel_id: &str) -> Micros {
+        self.open
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(channel_id)
+            .map(|c| c.owed())
+            .unwrap_or(0)
     }
 
     /// Total owed across every channel, in micros.

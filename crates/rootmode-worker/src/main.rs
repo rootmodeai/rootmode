@@ -224,6 +224,18 @@ async fn run(cli: Cli) -> rootmode_worker::Result<()> {
                 );
             }
 
+            // Settlement sweeper: collects channels once they are worth a
+            // transaction, and any ticket before it expires.
+            {
+                let worker = worker.clone();
+                tokio::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                        worker.settle_due().await;
+                    }
+                });
+            }
+
             let result = worker
                 .serve(listener, rootmode_p2p::shutdown::signal())
                 .await;
