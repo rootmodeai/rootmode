@@ -291,7 +291,7 @@ impl Backend for VllmBackend {
         let model = self.model_for(params);
         let messages = prepare_messages(&params.messages);
         let mut body = serde_json::json!({
-            "messages": messages.iter().map(openai_message).collect::<Vec<_>>(),
+            "messages": openai_messages(&messages),
             "max_tokens": params.max_tokens,
             "temperature": params.temperature,
             "stream": true,
@@ -658,6 +658,33 @@ fn fold_late_system_messages(messages: &mut Vec<ChatMessage>) {
             i += 1;
         }
     }
+}
+
+/// The whole conversation on the wire, with every `tool` message naming the
+/// tool it answers. The protocol correlates results to calls by id alone;
+/// some providers (Kimi K3 among them) also want the tool's `name` on the
+/// result, or fall back to matching results to calls by position — which
+/// breaks the moment a client runs two tools in parallel. The name is
+/// recoverable from the assistant turn that made the call, so send it.
+fn openai_messages(messages: &[ChatMessage]) -> Vec<serde_json::Value> {
+    let mut names: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    for m in messages {
+        for c in &m.tool_calls {
+            names.insert(c.id.as_str(), c.name.as_str());
+        }
+    }
+    messages
+        .iter()
+        .map(|m| {
+            let mut out = openai_message(m);
+            if m.role == "tool" {
+                if let Some(name) = m.tool_call_id.as_deref().and_then(|id| names.get(id)) {
+                    out["name"] = serde_json::Value::String((*name).to_string());
+                }
+            }
+            out
+        })
+        .collect()
 }
 
 fn openai_message(m: &ChatMessage) -> serde_json::Value {
@@ -1032,6 +1059,38 @@ async fn check_status(resp: reqwest::Response) -> Result<reqwest::Response> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tool_result_names_the_tool_it_answers() {
+        use rootmode_core::{ChatMessage, ToolCall};
+        let call = |id: &str, name: &str| ChatMessage {
+            role: "assistant".into(),
+            content: String::new(),
+            tool_calls: vec![ToolCall { id: id.into(), name: name.into(), arguments: "{}".into() }],
+            tool_call_id: None,
+            images: Vec::new(),
+        };
+        let result = |id: &str| ChatMessage {
+            role: "tool".into(),
+            content: "ok".into(),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(id.into()),
+            images: Vec::new(),
+        };
+        // Two parallel calls answered out of order: position would mislead,
+        // the id does not.
+        let wire = super::openai_messages(&[
+            ChatMessage::new("user", "go"),
+            call("c1", "read_file"),
+            call("c2", "exec_command"),
+            result("c2"),
+            result("c1"),
+        ]);
+        assert_eq!(wire[3]["name"], "exec_command");
+        assert_eq!(wire[3]["tool_call_id"], "c2");
+        assert_eq!(wire[4]["name"], "read_file");
+        assert!(wire[0].get("name").is_none(), "only tool messages carry a name");
+    }
+
     use super::*;
     use crate::testutil::StubHttp;
     use rootmode_core::ChatMessage;
