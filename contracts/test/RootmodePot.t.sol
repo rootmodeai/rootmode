@@ -273,6 +273,77 @@ contract RootmodePotTest is Test {
         assertEq(usdc.balanceOf(vault), 25_000);
     }
 
+    /// Raising the account's limits reaches an existing channel on its next
+    /// reserve — a client should not need a new wallet to spend more per job.
+    function test_raising_maxPerJob_applies_on_the_next_reserve() public {
+        uint64 deadline = uint64(block.timestamp + 1 hours);
+        pot.reserve(client, worker, MAX_JOB, deadline, _reserve(worker, MAX_JOB, deadline));
+
+        // A settle above the $0.50 snapshot is over the cap...
+        bytes memory big = _spend(worker, 800_000, deadline);
+        vm.expectRevert("OverCap");
+        pot.settle(client, worker, 800_000, deadline, big);
+
+        // ...until the client raises its limit and reserves again.
+        vm.prank(client);
+        pot.setLimits(10e6, MAX_DAY, address(0));
+        pot.reserve(client, worker, 2e6, deadline, _reserve(worker, 2e6, deadline));
+        (,,,,,, uint256 capJob,) = pot.channels(client, worker);
+        assertEq(capJob, 10e6, "the channel took the higher cap");
+
+        pot.settle(client, worker, 800_000, deadline, _spend(worker, 800_000, deadline));
+        assertEq(usdc.balanceOf(worker), 720_000);
+    }
+
+    /// Lowering never reaches a live channel — that is the grief the snapshot
+    /// exists to stop — but it does reach a closed one, after the grace period.
+    function test_lowering_maxPerJob_waits_for_a_close() public {
+        uint64 deadline = uint64(block.timestamp + 1 hours);
+        pot.reserve(client, worker, MAX_JOB, deadline, _reserve(worker, MAX_JOB, deadline));
+
+        vm.prank(client);
+        pot.setLimits(100_000, MAX_DAY, address(0));
+        // Still the old cap while the lock is live: a reserve cannot lower it.
+        pot.reserve(client, worker, MAX_JOB + 1, deadline, _reserve(worker, MAX_JOB + 1, deadline));
+        (,,,,,, uint256 capJob,) = pot.channels(client, worker);
+        assertEq(capJob, MAX_JOB, "a live channel keeps its cap");
+        pot.settle(client, worker, 250_000, deadline, _spend(worker, 250_000, deadline));
+
+        vm.prank(client);
+        pot.requestClose(worker);
+        vm.warp(block.timestamp + GRACE);
+        pot.close(client, worker);
+        (,,,,,, capJob,) = pot.channels(client, worker);
+        assertEq(capJob, 0, "closed: takes the account's limits afresh");
+
+        // Reopen: the lower cap now applies, and settlement respects it.
+        uint64 later = uint64(block.timestamp + 1 hours);
+        pot.reserve(client, worker, 250_000 + 200_000, later, _reserve(worker, 450_000, later));
+        (,,,,,, capJob,) = pot.channels(client, worker);
+        assertEq(capJob, 100_000);
+        bytes memory tooMuch = _spend(worker, 450_000, later);
+        vm.expectRevert("OverCap");
+        pot.settle(client, worker, 450_000, later, tooMuch);
+        pot.settle(client, worker, 340_000, later, _spend(worker, 340_000, later));
+        assertEq(usdc.balanceOf(worker), 225_000 + 81_000);
+    }
+
+    /// What is billed but uncollected at close is not gated by the caps, so
+    /// resetting them cannot strand a worker's earnings.
+    function test_uncollected_earnings_survive_a_close_that_resets_caps() public {
+        uint64 deadline = uint64(block.timestamp + 1 hours);
+        pot.reserve(client, worker, MAX_JOB, deadline, _reserve(worker, MAX_JOB, deadline));
+        pot.commit(client, worker, 300_000, deadline, _spend(worker, 300_000, deadline));
+
+        vm.prank(client);
+        pot.requestClose(worker);
+        vm.warp(block.timestamp + GRACE);
+        pot.close(client, worker);
+
+        pot.collect(client, worker);
+        assertEq(usdc.balanceOf(worker), 270_000);
+    }
+
     function _reserve(address payout, uint256 maxAmount, uint64 deadline) internal view returns (bytes memory) {
         return _signReserve(appKey, payout, maxAmount, deadline);
     }

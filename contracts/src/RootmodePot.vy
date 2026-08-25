@@ -217,11 +217,21 @@ def reserve(
 
     if self.channels[client][workerPayout].appKey == empty(address):
         self.channels[client][workerPayout].appKey = self.accounts[client].appKey
-        # Freeze the caps for the life of this channel.
-        self.channels[client][workerPayout].maxPerJob = self.accounts[client].maxPerJob
-        self.channels[client][workerPayout].maxPerDay = self.accounts[client].maxPerDay
     elif self.channels[client][workerPayout].appKey != self.accounts[client].appKey:
         raise "BadSignature"
+
+    # The caps a settle is checked against live on the channel, not on the
+    # account, so a client cannot lower them after work is delivered to block
+    # settlement and reclaim the lock. They still follow the client's wishes
+    # in the two directions that are safe: they rise whenever the client
+    # reserves with a higher account limit — raising can only help the worker
+    # — and they start fresh from the account after a close, once the grace
+    # period has given every worker its chance to settle. Between those, a
+    # lowered account limit waits for the close.
+    if self.channels[client][workerPayout].maxPerJob == 0 or self.accounts[client].maxPerJob > self.channels[client][workerPayout].maxPerJob:
+        self.channels[client][workerPayout].maxPerJob = self.accounts[client].maxPerJob
+    if self.channels[client][workerPayout].maxPerDay == 0 or self.accounts[client].maxPerDay > self.channels[client][workerPayout].maxPerDay:
+        self.channels[client][workerPayout].maxPerDay = self.accounts[client].maxPerDay
 
     reserved: uint256 = self.channels[client][workerPayout].reserved
     if maxAmount <= reserved:
@@ -294,6 +304,13 @@ def close(client: address, workerPayout: address):
     unspent: uint256 = self.channels[client][workerPayout].reserved - self.channels[client][workerPayout].earned
     self.channels[client][workerPayout].reserved = self.channels[client][workerPayout].earned
     self.channels[client][workerPayout].closeAt = 0
+    # A closed channel takes the account's limits afresh on its next reserve,
+    # lower ones included: the grace period (or the deadline) has passed, so
+    # every worker has had its chance to settle what was billed under the old
+    # caps. Anything still uncollected settles against `earned`, which the
+    # caps do not gate.
+    self.channels[client][workerPayout].maxPerJob = 0
+    self.channels[client][workerPayout].maxPerDay = 0
     if unspent > 0:
         self.accounts[client].balance += unspent
     log Closed(client=client, worker=workerPayout, returned=unspent)
