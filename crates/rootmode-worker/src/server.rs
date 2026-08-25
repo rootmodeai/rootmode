@@ -475,6 +475,18 @@ impl Worker {
                     Err(e) => return Err(e),
                 };
                 if let Err(e) = posted {
+                    // Concurrent jobs at the margin all post the same raise;
+                    // one lands and the rest revert NotMonotonic. Give the
+                    // winner's transaction a few seconds to be mined before
+                    // deciding the lock really is short.
+                    let mut waited = 0;
+                    while state.remaining < need && waited < 8 {
+                        tokio::time::sleep(Duration::from_millis(750)).await;
+                        waited += 1;
+                        if let Ok(Some(s)) = self.read_channel(payer, &payout).await {
+                            state = s;
+                        }
+                    }
                     if state.remaining < need {
                         return Err(WorkerError::Rejected(format!(
                             "could not post reserve: {e}"
