@@ -533,9 +533,41 @@ ROOTMODE_VLLM=http://127.0.0.1:8000
             <p>
               <code>/var/lib/rootmode</code> holds the node's key, and that key
               <em>is</em> its identity. Lose it and your peer id changes — every
-              client that pinned you stops recognising the node.
+              client that pinned you stops recognising the node. Once you charge,
+              it also holds <code>pay.key</code> — an Ethereum key with your gas
+              ETH on it — and the bills you have not collected yet. Losing it
+              then loses money, not just a name.
             </p>
           </div>
+        </div>
+
+        <div class="stepblk">
+          <h3>Before you charge, fund the gas key</h3>
+          <p>
+            Serving is free to run. Charging is not: every paid job ends with this
+            node posting a transaction on Base — the client's lock, and its own
+            settle — and each one costs gas, about a tenth of a cent. So a
+            charging node needs an Ethereum key with a little ETH on it, and it
+            needs it <em>before the first paid job</em>. Set
+            <code>ROOTMODE_POT</code>, <code>ROOTMODE_RPC</code> and
+            <code>ROOTMODE_PAYOUT</code>, start it, and read the address it prints:
+          </p>
+          <div class="term">
+            <div class="term-bar"><i></i><i></i><i></i><b>docker compose logs -f</b></div>
+            <pre><span class="c">INFO</span> settle signer <span class="g">0x1fdc1df454aa7ef9433ec00e6798a3b1e5cf0ba2</span>
+<span class="c">ERROR</span> pay key 0x1fdc…0ba2 has no ETH on chain 8453: it cannot post
+      reserves or settles, so paid work would never be collected.
+      Send it a little ETH for gas (0.002 ETH is roughly 3,500
+      transactions), or unset ROOTMODE_POT to serve without charging</pre>
+          </div>
+          <p>
+            Send that address <code>0.002 ETH</code> on Base — a few dollars,
+            roughly 3,500 transactions — and start it again. It is a hot key for
+            gas only; your revenue goes to <code>ROOTMODE_PAYOUT</code>, which can
+            be a cold wallet. The node refuses to start charging while the key is
+            empty and warns when it runs low. Let it run dry and paid work still
+            gets done, but its tickets expire uncollected an hour later.
+          </p>
         </div>
 
         <div class="stepblk">
@@ -606,9 +638,9 @@ ROOTMODE_VLLM=http://127.0.0.1:8000
             <tr><td><code>ROOTMODE_PAYOUT</code></td><td>—</td><td>Address that receives your 90% when a job settles.</td></tr>
             <tr><td><code>ROOTMODE_POT</code></td><td>—</td><td>RootmodePot contract. Empty means this node is not charging on-chain.</td></tr>
             <tr><td><code>ROOTMODE_CHAIN_ID</code></td><td>8453</td><td>Settlement chain. Base is 8453.</td></tr>
-            <tr><td><code>ROOTMODE_RPC</code></td><td>—</td><td>JSON-RPC URL used to check the lock and to submit spend tickets.</td></tr>
-            <tr><td><code>ROOTMODE_PAY_KEY</code></td><td>—</td><td>Ethereum private key (secp256k1, 32-byte hex) this node signs <code>settle</code> with. Leave it in <code>.env</code>, not in a config file you share. Needs a little ETH for gas. Does not have to be the payout address.</td></tr>
-            <tr><td><code>ROOTMODE_PAY_SENDER</code></td><td>—</td><td>Address that posts <code>settle</code>. Derived from the key if you set one.</td></tr>
+            <tr><td><code>ROOTMODE_RPC</code></td><td>—</td><td>JSON-RPC URL for lock checks and transactions. On <code>mainnet.base.org</code> the node fails over to other public Base endpoints when it is rate-limited.</td></tr>
+            <tr><td><code>ROOTMODE_PAY_KEY</code></td><td>—</td><td>Ethereum private key (secp256k1, 32-byte hex) this node signs <code>reserve</code> and <code>settle</code> with. Leave it unset and one is minted on the volume (<code>pay.key</code>). <b>Needs ETH on Base for gas</b> — see <i>Before you charge</i>. Does not have to be the payout address.</td></tr>
+            <tr><td><code>ROOTMODE_PAY_SENDER</code></td><td>—</td><td>Only for a node whose RPC holds an unlocked account. On a public RPC this fails with <code>unknown account</code> and nothing ever settles — use a key.</td></tr>
             <tr><td><code>ROOTMODE_BOOTSTRAP</code></td><td>—</td><td>Entry points to join, comma-separated</td></tr>
             <tr><td><code>ROOTMODE_P2P_EXTERNAL</code></td><td>—</td><td>Address to advertise, if not what it binds</td></tr>
             <tr><td><code>ROOTMODE_LABEL</code></td><td>hostname</td><td>The name clients see</td></tr>
@@ -617,16 +649,21 @@ ROOTMODE_VLLM=http://127.0.0.1:8000
             <tr><td><code>ROOTMODE_REQUIRE_SIGNATURE</code></td><td>false</td><td>Refuse unsigned submissions</td></tr>
             <tr><td><code>ROOTMODE_ALLOW_PEERS</code></td><td>—</td><td>Only these client peer ids may submit</td></tr>
             <tr><td><code>ROOTMODE_RELAY</code></td><td>true</td><td>Ask for a relay slot — needed behind NAT</td></tr>
+            <tr><td><code>ROOTMODE_DHT_SERVER</code></td><td>false</td><td>Answer DHT queries for others. Set <code>true</code> on a publicly reachable node, or its records live only in the bootstrap's memory.</td></tr>
           </tbody>
         </table>
       </div>
       <p class="sub-note">
         A price without a pot is only a sticker. To get paid, set
-        <code>ROOTMODE_POT</code>, <code>ROOTMODE_RPC</code>,
-        <code>ROOTMODE_PAYOUT</code> and <code>ROOTMODE_PAY_KEY</code>.
-        The client locks funds before the GPU runs; this node signs and
-        submits the spend ticket afterwards. 90% to your payout address,
-        10% to the network.
+        <code>ROOTMODE_POT</code>, <code>ROOTMODE_RPC</code> and
+        <code>ROOTMODE_PAYOUT</code>, and fund the gas key. The client locks
+        funds before the GPU runs; this node posts that lock when it is short,
+        bills the tokens actually used — never less than what the work cost
+        upstream plus your markup — and settles in batches from its own key,
+        so gas stays at a few percent of what you collect. 90% to your payout
+        address, 10% to the network. Every paid job logs one
+        <code>billed</code> line with what the client paid and what the job
+        cost, to reconcile against your provider's statement.
       </p>
       <p class="sub-note">
         Behind NAT, or publishing ports instead of using host networking? Set
