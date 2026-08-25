@@ -341,14 +341,29 @@ impl Worker {
             return Ok(payload);
         };
         let prompt = TokenUsage::measure(&params, None, None, &[]).prompt;
-        let budget = price.tokens_for_micros(bond_micros);
-        if prompt >= budget {
+        // Price the prompt at the input rate and the answer at the output
+        // rate — the way the bill is computed — rather than everything at
+        // the dearest rate. On a model whose output costs ten times its
+        // input, the old arithmetic refused prompts that cost a few cents
+        // as if they cost the whole lock. Cache hits are unknown here and
+        // billed as fresh, which only ever leaves more room than expected.
+        let (input, output, _cache, cache_write) = price.llm_rates();
+        let fresh = input.max(cache_write);
+        let prompt_micros = (prompt as f64 * fresh).ceil() as u64;
+        if prompt_micros >= bond_micros {
             return Err(WorkerError::Rejected(format!(
-                "this prompt is {prompt} tokens, more than your limit for a single job ({budget} tokens)"
+                "this prompt is {prompt} tokens (about ${:.2} at this model's input rate), more than \
+                 your ${:.2} limit for a single job",
+                prompt_micros as f64 / 1_000_000.0,
+                bond_micros as f64 / 1_000_000.0
             )));
         }
-        let room = budget.saturating_sub(prompt).max(1);
-        params.max_tokens = params.max_tokens.min(room as u32);
+        let room = if output > 0.0 {
+            ((bond_micros - prompt_micros) as f64 / output).floor() as u64
+        } else {
+            u64::MAX
+        };
+        params.max_tokens = params.max_tokens.min(room.max(1).min(u32::MAX as u64) as u32);
         Ok(JobPayload::Llm(params))
     }
 
@@ -1524,6 +1539,47 @@ fn send_delta(tx: &mpsc::UnboundedSender<WorkerMessage>, job_id: Uuid, delta: To
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_long_prompt_is_priced_at_the_input_rate_not_the_output_rate() {
+        use rootmode_core::{ChatMessage, JobPayload, LlmParams, ModelDescriptor, Price};
+        // Input $1/M, output $20/M — a 30k-token prompt costs $0.03, and the
+        // $0.50 lock must leave room for ~23k output tokens, not refuse it.
+        let price = Price {
+            amount: 20.0,
+            currency: "USD".into(),
+            input: Some(1.0),
+            output: Some(20.0),
+            cache: None,
+            cache_write: None,
+        };
+        let worker = Worker::new(
+            priced_config(),
+            Identity::generate(),
+            crate::backends::testing::registry_with(
+                vec![ModelDescriptor {
+                    id: "pricey".into(),
+                    sha256: None,
+                    kind: rootmode_core::JobKind::Llm,
+                    price: Some(price),
+                }],
+                rootmode_core::JobKind::Llm,
+            ),
+        );
+        let payload = JobPayload::Llm(LlmParams {
+            model_hash: None,
+            model_id: Some("pricey".into()),
+            messages: vec![ChatMessage::new("user", &"word ".repeat(30_000))],
+            tools: Vec::new(),
+            max_tokens: 100_000,
+            temperature: 0.0,
+        });
+        let JobPayload::Llm(clamped) = worker.clamp_to_chunk(payload, 500_000).unwrap() else {
+            panic!("llm payload")
+        };
+        assert!(clamped.max_tokens > 15_000, "room left for the answer: {}", clamped.max_tokens);
+        assert!(clamped.max_tokens < 25_000, "but bounded by what the lock buys: {}", clamped.max_tokens);
+    }
+
     use super::*;
     use crate::backends::testing::registry_with;
     use crate::config::{BackendConfig, VllmConfig, WorkerConfig};
