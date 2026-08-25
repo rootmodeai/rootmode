@@ -419,12 +419,19 @@ async function send(to, data) {
   return hash;
 }
 
+// A contract read on a chain where the contract does not exist returns "0x",
+// which is not a number. Treat it as zero here; the chain check says why.
+function toBig(raw) {
+  const hex = String(raw || "").replace(/^0x/, "");
+  return hex ? BigInt("0x" + hex) : 0n;
+}
+
 async function allowanceOf(owner) {
   const raw = await eth("eth_call", [{
     to: usdc,
     data: "0xdd62ed3e" + addr(owner) + addr(pot),
   }, "latest"]);
-  return BigInt(raw || "0x0");
+  return toBig(raw);
 }
 
 function hexChainId() {
@@ -615,15 +622,19 @@ async function refreshBal() {
   const [from] = await eth("eth_requestAccounts");
   if (!usdc) throw new Error("missing USDC address — reopen this page from the app");
   const data = "0x70a08231" + addr(from);
+  const on = await currentChainId();
+  if (on !== wantId) {
+    throw new Error("Your wallet is on chain " + on + "; switch it to " + chainLabel() + " to continue.");
+  }
   const raw = await eth("eth_call", [{ to: usdc, data }, "latest"]);
-  const n = Number(BigInt(raw || "0x0")) / 1e6;
+  const n = Number(toBig(raw)) / 1e6;
   $("bal").textContent = n.toLocaleString(undefined, { maximumFractionDigits: 2 }) + " USDC";
   setConnected(true, from);
   if (pot && worker) {
     const acc = await eth("eth_call", [{ to: pot, data: "0x5e5c06e2" + addr(from) }, "latest"]);
     const lock = await eth("eth_call", [{ to: pot, data: "0xdb20266f" + addr(from) + addr(worker) }, "latest"]);
-    const free = Number(BigInt("0x" + String(acc || "0x0").replace(/^0x/, "").slice(0, 64) || "0")) / 1e6;
-    const locked = Number(BigInt(lock || "0x0")) / 1e6;
+    const free = Number(toBig(String(acc || "").replace(/^0x/, "").slice(0, 64))) / 1e6;
+    const locked = Number(toBig(lock)) / 1e6;
     $("balhint").textContent = `wallet ${n.toFixed(2)} · pot free ${free.toFixed(2)} · locked ${locked.toFixed(2)}`;
   }
 }
@@ -638,7 +649,7 @@ async function connectWith(kind) {
   log("");
   const accounts = await eth("eth_requestAccounts", []);
   if (!accounts || !accounts.length) throw new Error("No account returned. Unlock the wallet and try again.");
-  if (walletKind !== "base") await switchIfNeeded();
+  await switchIfNeeded();
   await refreshBal();
   log("Connected.", "ok");
 }
