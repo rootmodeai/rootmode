@@ -122,6 +122,11 @@ pub struct Message {
     pub peer: Option<String>,
     /// Tokens the provider reported for this answer, when it reported any.
     pub tokens: Option<u64>,
+    /// What this answer actually cost, in millionths of a USDC. `Some(0)` is a
+    /// priced job that billed nothing; `None` is a free provider or a reply
+    /// from before costs were recorded — unmeasured, not zero.
+    #[serde(default)]
+    pub cost_micros: Option<u64>,
     /// What the model said to itself before answering, when it said anything.
     #[serde(default)]
     pub thinking: Option<String>,
@@ -241,6 +246,20 @@ impl Db {
                 v TEXT NOT NULL
             );
 
+            -- One row per bill a priced provider charged the pot, written by
+            -- the payment pipeline itself. Chat replies and jobs from
+            -- connected tools (the local endpoint) both land here — this is
+            -- the ledger the user audits their spend against, so it cannot
+            -- depend on a conversation existing.
+            CREATE TABLE IF NOT EXISTS spends (
+                job_id      TEXT PRIMARY KEY,
+                model       TEXT NOT NULL,
+                peer        TEXT,
+                tokens      INTEGER,
+                cost_micros INTEGER NOT NULL,
+                at          INTEGER NOT NULL
+            );
+
             -- Written when MetaMask confirms a deposit, not by scanning the chain.
             CREATE TABLE IF NOT EXISTS deposits (
                 tx_hash              TEXT PRIMARY KEY,
@@ -264,6 +283,10 @@ impl Db {
         self.add_column(&conn, "peers", "payout", "TEXT")?;
         self.add_column(&conn, "messages", "tokens", "INTEGER")?;
         self.add_column(&conn, "messages", "thinking", "TEXT")?;
+        // What the job behind a reply was actually billed, in µUSDC. This is
+        // the user's money; a wallet page that shows tokens but not dollars
+        // is not auditable by the person paying.
+        self.add_column(&conn, "messages", "cost_micros", "INTEGER")?;
         // Which conversation, if any, a job belongs to. Without it a reply
         // can only be filed by whatever screen happened to be open when the
         // job finished — and if that screen was closed, the answer is lost.
@@ -750,6 +773,7 @@ impl Db {
         model: Option<&str>,
         peer: Option<&str>,
         tokens: Option<u64>,
+        cost_micros: Option<u64>,
         thinking: Option<&str>,
     ) -> Result<Message> {
         let ts = now();
@@ -758,8 +782,8 @@ impl Db {
             conn.execute(
                 r#"INSERT INTO messages
                    (conversation_id, role, content, job_id, sha256, model, peer, tokens,
-                    thinking, created_at)
-                   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
+                    cost_micros, thinking, created_at)
+                   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
                 params![
                     conversation_id,
                     role,
@@ -769,6 +793,7 @@ impl Db {
                     model,
                     peer,
                     tokens,
+                    cost_micros,
                     thinking,
                     ts
                 ],
@@ -792,16 +817,30 @@ impl Db {
             model: model.map(str::to_string),
             peer: peer.map(str::to_string),
             tokens,
+            cost_micros,
             thinking: thinking.map(str::to_string),
             created_at: ts,
         })
+    }
+
+    /// Record what a job was actually billed, on the reply it produced.
+    ///
+    /// Exists because for a provider that never invoices (the mock), the
+    /// charge is only computed after the reply is already filed.
+    pub fn set_job_cost(&self, job_id: &str, cost_micros: u64) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "UPDATE messages SET cost_micros = ?2 WHERE job_id = ?1 AND role = 'assistant'",
+            params![job_id, cost_micros],
+        )?;
+        Ok(())
     }
 
     pub fn conversation_messages(&self, conversation_id: &str) -> Result<Vec<Message>> {
         let conn = self.lock();
         let mut stmt = conn.prepare(
             r#"SELECT id, conversation_id, role, content, job_id, sha256, model, peer,
-                      tokens, thinking, created_at
+                      tokens, cost_micros, thinking, created_at
                FROM messages WHERE conversation_id = ?1 ORDER BY id ASC"#,
         )?;
         let rows = stmt.query_map(params![conversation_id], |row| {
@@ -815,8 +854,9 @@ impl Db {
                 model: row.get(6)?,
                 peer: row.get(7)?,
                 tokens: row.get(8)?,
-                thinking: row.get(9)?,
-                created_at: row.get(10)?,
+                cost_micros: row.get(9)?,
+                thinking: row.get(10)?,
+                created_at: row.get(11)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -856,16 +896,30 @@ impl Db {
     }
 
     /// Tokens the providers reported, grouped by the model that used them.
-    /// Replies that never reported a count are left out — zero would be a lie.
+    ///
+    /// Chat replies live in `messages`; jobs from connected tools only ever
+    /// touch the spend ledger. A model's row combines both — `MAX` rather
+    /// than `+`, because a priced chat reply appears in each and summing
+    /// would count it twice. Cost always comes from the ledger: it is the
+    /// one record of money actually deducted, whichever path spent it.
     pub fn token_usage(&self) -> Result<Vec<ModelUsage>> {
         let conn = self.lock();
         let mut stmt = conn.prepare(
-            r#"SELECT COALESCE(NULLIF(model, ''), 'unknown') AS model,
-                      SUM(tokens) AS tokens,
-                      COUNT(*) AS replies
-               FROM messages
-               WHERE role = 'assistant' AND tokens IS NOT NULL AND tokens > 0
-               GROUP BY 1
+            r#"SELECT model,
+                      MAX(SUM(mtokens), SUM(stokens)) AS tokens,
+                      MAX(SUM(mreplies), SUM(sreplies)) AS replies,
+                      SUM(cost) AS cost
+               FROM (
+                 SELECT COALESCE(NULLIF(model, ''), 'unknown') AS model,
+                        tokens AS mtokens, 0 AS stokens,
+                        1 AS mreplies, 0 AS sreplies, 0 AS cost
+                   FROM messages
+                  WHERE role = 'assistant' AND tokens IS NOT NULL AND tokens > 0
+                 UNION ALL
+                 SELECT model, 0, COALESCE(tokens, 0), 0, 1, cost_micros
+                   FROM spends
+               )
+               GROUP BY model
                ORDER BY tokens DESC"#,
         )?;
         let rows = stmt.query_map([], |row| {
@@ -873,6 +927,49 @@ impl Db {
                 model: row.get(0)?,
                 tokens: row.get::<_, i64>(1)? as u64,
                 replies: row.get(2)?,
+                cost_micros: row.get::<_, i64>(3)? as u64,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// Record one job's bill in the spend ledger. `INSERT OR REPLACE` because
+    /// a bill can be refined (a settle after an invoice) but a job is billed
+    /// once — two rows for one job would double what the user thinks they paid.
+    pub fn record_spend(&self, s: &SpendEntry) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            r#"INSERT OR REPLACE INTO spends (job_id, model, peer, tokens, cost_micros, at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6)"#,
+            params![
+                s.job_id,
+                s.model,
+                s.peer,
+                s.tokens,
+                s.cost_micros as i64,
+                s.at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Every bill a priced provider charged, newest first: the per-job audit
+    /// trail of money actually deducted from the pot. Free providers never
+    /// bill and do not appear — this is a ledger, not a chat history.
+    pub fn spend_history(&self, limit: u32) -> Result<Vec<SpendEntry>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare(
+            r#"SELECT job_id, model, peer, tokens, cost_micros, at
+               FROM spends ORDER BY at DESC, rowid DESC LIMIT ?1"#,
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok(SpendEntry {
+                job_id: row.get(0)?,
+                model: row.get(1)?,
+                peer: row.get(2)?,
+                tokens: row.get(3)?,
+                cost_micros: row.get::<_, i64>(4)? as u64,
+                at: row.get(5)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -960,6 +1057,23 @@ pub struct ModelUsage {
     pub model: String,
     pub tokens: u64,
     pub replies: u32,
+    /// Sum of the recorded bills for this model, in µUSDC. Replies from free
+    /// providers, or from before costs were recorded, contribute nothing.
+    #[serde(default)]
+    pub cost_micros: u64,
+}
+
+/// One priced job and what it was billed — a row in the spend ledger.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpendEntry {
+    pub job_id: String,
+    pub model: String,
+    /// The provider that answered, as labeled when the funds were locked.
+    pub peer: Option<String>,
+    /// Tokens the bill covered (prompt + completion), when the provider said.
+    pub tokens: Option<u64>,
+    pub cost_micros: u64,
+    pub at: i64,
 }
 
 // --------------------------------------------------------------- row mapping
@@ -1186,10 +1300,23 @@ mod tests {
         assert_eq!(messages[0].content, "said before the upgrade");
         assert_eq!(messages[0].tokens, None, "unmeasured, not zero");
 
-        // And the new column is usable.
-        db.add_message("c1", "assistant", "after", None, None, None, None, Some(42), None)
-            .unwrap();
-        assert_eq!(db.conversation_messages("c1").unwrap()[1].tokens, Some(42));
+        // And the new columns are usable.
+        db.add_message(
+            "c1",
+            "assistant",
+            "after",
+            None,
+            None,
+            None,
+            None,
+            Some(42),
+            Some(1300),
+            None,
+        )
+        .unwrap();
+        let after = &db.conversation_messages("c1").unwrap()[1];
+        assert_eq!(after.tokens, Some(42));
+        assert_eq!(after.cost_micros, Some(1300));
     }
 
     #[test]
@@ -1198,11 +1325,11 @@ mod tests {
         let keep = db.create_conversation("keep me", "llm").unwrap();
         let bin = db.create_conversation("delete me", "llm").unwrap();
 
-        db.add_message(&keep.id, "user", "still here", None, None, None, None, None, None)
+        db.add_message(&keep.id, "user", "still here", None, None, None, None, None, None, None)
             .unwrap();
-        db.add_message(&bin.id, "user", "question", None, None, None, None, None, None)
+        db.add_message(&bin.id, "user", "question", None, None, None, None, None, None, None)
             .unwrap();
-        db.add_message(&bin.id, "assistant", "answer", None, None, None, None, None, None)
+        db.add_message(&bin.id, "assistant", "answer", None, None, None, None, None, None, None)
             .unwrap();
 
         db.delete_conversation(&bin.id).unwrap();
@@ -1221,7 +1348,7 @@ mod tests {
     fn token_usage_groups_by_model_and_skips_unmeasured() {
         let db = db();
         let chat = db.create_conversation("talk", "llm").unwrap();
-        db.add_message(&chat.id, "user", "hi", None, None, None, None, None, None)
+        db.add_message(&chat.id, "user", "hi", None, None, None, None, None, None, None)
             .unwrap();
         db.add_message(
             &chat.id,
@@ -1232,8 +1359,18 @@ mod tests {
             Some("flash"),
             None,
             Some(120),
+            Some(2400),
             None,
         )
+        .unwrap();
+        db.record_spend(&SpendEntry {
+            job_id: "flash-a".into(),
+            model: "flash".into(),
+            peer: None,
+            tokens: Some(120),
+            cost_micros: 2400,
+            at: 100,
+        })
         .unwrap();
         db.add_message(
             &chat.id,
@@ -1244,8 +1381,18 @@ mod tests {
             Some("flash"),
             None,
             Some(80),
+            Some(1600),
             None,
         )
+        .unwrap();
+        db.record_spend(&SpendEntry {
+            job_id: "flash-b".into(),
+            model: "flash".into(),
+            peer: None,
+            tokens: Some(80),
+            cost_micros: 1600,
+            at: 101,
+        })
         .unwrap();
         db.add_message(
             &chat.id,
@@ -1256,6 +1403,7 @@ mod tests {
             Some("opus"),
             None,
             Some(50),
+            None,
             None,
         )
         .unwrap();
@@ -1269,6 +1417,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -1276,10 +1425,103 @@ mod tests {
         assert_eq!(usage.len(), 2);
         assert_eq!(usage[0].model, "flash");
         assert_eq!(usage[0].tokens, 200);
-        assert_eq!(usage[0].replies, 2);
+        assert_eq!(usage[0].replies, 2, "a billed chat reply is not counted twice");
+        assert_eq!(usage[0].cost_micros, 4000);
         assert_eq!(usage[1].model, "opus");
         assert_eq!(usage[1].tokens, 50);
         assert_eq!(usage[1].replies, 1);
+        assert_eq!(usage[1].cost_micros, 0, "an unrecorded bill sums as nothing, not a guess");
+
+        // A job from a connected tool bills the ledger but files no chat
+        // message — it still owes the user a row on the usage card.
+        db.record_spend(&SpendEntry {
+            job_id: "gw-1".into(),
+            model: "gateway-only".into(),
+            peer: Some("gpu box".into()),
+            tokens: Some(500),
+            cost_micros: 990,
+            at: 102,
+        })
+        .unwrap();
+        let usage = db.token_usage().unwrap();
+        let gw = usage.iter().find(|u| u.model == "gateway-only").unwrap();
+        assert_eq!(gw.tokens, 500);
+        assert_eq!(gw.replies, 1);
+        assert_eq!(gw.cost_micros, 990);
+    }
+
+    #[test]
+    fn the_spend_ledger_lists_bills_newest_first_and_never_doubles_a_job() {
+        let db = db();
+        db.record_spend(&SpendEntry {
+            job_id: "job-1".into(),
+            model: "deepseek-v4-flash-0731".into(),
+            peer: Some("gpu box".into()),
+            tokens: Some(1367),
+            cost_micros: 2734,
+            at: 100,
+        })
+        .unwrap();
+        db.record_spend(&SpendEntry {
+            job_id: "job-2".into(),
+            model: "deepseek-v4-flash-0731".into(),
+            peer: Some("gpu box".into()),
+            tokens: None,
+            cost_micros: 0,
+            at: 200,
+        })
+        .unwrap();
+
+        let ledger = db.spend_history(10).unwrap();
+        assert_eq!(ledger.len(), 2);
+        assert_eq!(ledger[0].job_id, "job-2");
+        assert_eq!(
+            ledger[0].cost_micros, 0,
+            "a priced job that billed nothing still shows"
+        );
+        assert_eq!(ledger[1].job_id, "job-1");
+        assert_eq!(ledger[1].peer.as_deref(), Some("gpu box"));
+        assert_eq!(ledger[1].tokens, Some(1367));
+        assert_eq!(ledger[1].cost_micros, 2734);
+
+        // Billing the same job again refines the row instead of adding one —
+        // a ledger that lists one payment twice overstates what was spent.
+        db.record_spend(&SpendEntry {
+            job_id: "job-2".into(),
+            model: "deepseek-v4-flash-0731".into(),
+            peer: Some("gpu box".into()),
+            tokens: Some(90),
+            cost_micros: 180,
+            at: 201,
+        })
+        .unwrap();
+        let ledger = db.spend_history(10).unwrap();
+        assert_eq!(ledger.len(), 2);
+        assert_eq!(ledger[0].cost_micros, 180);
+    }
+
+    #[test]
+    fn a_bill_recorded_after_the_reply_lands_on_that_reply() {
+        let db = db();
+        let chat = db.create_conversation("talk", "llm").unwrap();
+        db.add_message(
+            &chat.id,
+            "assistant",
+            "answer",
+            Some("job-1"),
+            None,
+            Some("flash"),
+            None,
+            Some(10),
+            None,
+            None,
+        )
+        .unwrap();
+        db.set_job_cost("job-1", 55).unwrap();
+        assert_eq!(
+            db.conversation_messages(&chat.id).unwrap()[0].cost_micros,
+            Some(55)
+        );
     }
 
     #[test]
@@ -1322,7 +1564,7 @@ mod tests {
         db.enable_mock_peer().unwrap();
 
         let chat = db.create_conversation("talk", "llm").unwrap();
-        db.add_message(&chat.id, "user", "hello", None, None, None, None, None, None)
+        db.add_message(&chat.id, "user", "hello", None, None, None, None, None, None, None)
             .unwrap();
 
         let p = payload();
@@ -1384,6 +1626,7 @@ mod tests {
             &first.id,
             "user",
             "hello again",
+            None,
             None,
             None,
             None,

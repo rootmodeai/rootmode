@@ -158,10 +158,16 @@ pub async fn submit(
                     &payload,
                     client,
                     &payout,
+                    &peer.label,
                 )
                 .await
                 {
                     Ok((bond, reserve)) => {
+                        log::info!(
+                            "priced job {} payout={payout} reserve={}",
+                            record.job_id,
+                            reserve.is_some()
+                        );
                         submit_msg.payer = Some(client.to_string());
                         submit_msg.bond = Some(bond);
                         submit_msg.reserve = reserve;
@@ -371,6 +377,11 @@ fn file_reply(
         .and_then(|v| v.as_u64())
         .or_else(|| meta.get("completion_tokens").and_then(|v| v.as_u64()));
 
+    // A paid invoice is the bill. A priced job not yet billed stays None here
+    // and is filled in by `settle_job` once the charge is computed; a free
+    // provider never records a bill at all.
+    let cost = crate::pot::job_cost_micros(job_id);
+
     let message = state.db.add_message(
         conversation_id,
         "assistant",
@@ -382,6 +393,7 @@ fn file_reply(
             .or(Some(&job.model)),
         Some(&job.peer_label),
         tokens,
+        cost,
         thinking,
     )?;
     Ok(Some(message))

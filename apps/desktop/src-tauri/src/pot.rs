@@ -7,7 +7,7 @@
 //!
 //! The wallet signs deposit, limits, withdraw of unlocked funds, and close.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -21,13 +21,17 @@ use uuid::Uuid;
 
 use crate::error::{AppError, Result};
 use crate::state::AppState;
-use crate::store::{Db, StoredDeposit};
+use crate::store::{Db, SpendEntry, StoredDeposit};
 
 const FUND_HTML: &str = include_str!("fund.html"); // 7702 batch on Base only
 const FUND_PORT: u16 = 17331;
 const DEFAULT_MAX_JOB: Micros = 500_000; // $0.50
 const TICKET_TTL_SECS: u64 = 3600;
 const SETTLE_EVERY: Duration = Duration::from_secs(2);
+/// How long one successful [`status`] reading stays good enough to serve
+/// again. Several screens poll status; without this each poll is a burst of
+/// eth_calls, which is exactly what public RPC endpoints rate-limit.
+const STATUS_FRESH: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainConfig {
@@ -99,6 +103,13 @@ struct PendingJob {
     ceiling: Micros,
     /// Lock covering the whole job (all slices), in micros.
     job_cap: Micros,
+    /// What the worker's final invoice actually billed, once paid. This is
+    /// the number the user audits — the lock above is a ceiling, not a cost.
+    cost: Option<Micros>,
+    /// For the spend ledger: which model and provider this money went to.
+    /// Kept here because a gateway job has no row anywhere else to say so.
+    model: String,
+    peer: String,
 }
 
 struct LatestTicket {
@@ -127,6 +138,12 @@ fn latest() -> &'static Mutex<HashMap<String, LatestTicket>> {
 
 fn flush_at() -> &'static Mutex<Option<Instant>> {
     static T: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+    T.get_or_init(|| Mutex::new(None))
+}
+
+/// The last [`PotStatus`] built from successful chain reads, and when.
+fn status_memo() -> &'static Mutex<Option<(Instant, PotStatus)>> {
+    static T: OnceLock<Mutex<Option<(Instant, PotStatus)>>> = OnceLock::new();
     T.get_or_init(|| Mutex::new(None))
 }
 
@@ -321,22 +338,69 @@ pub async fn status(state: &AppState) -> Result<PotStatus> {
             chain_id: 0,
         });
     };
+    // A recent reading is the reading. The wallet screen polls every few
+    // seconds and the chat screen asks before every priced job; answering
+    // each of those with a fresh burst of eth_calls is what got this app
+    // rate-limited into showing $0 balances.
+    let last = status_memo()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    if let Some((at, ref s)) = last {
+        if at.elapsed() < STATUS_FRESH {
+            return Ok(s.clone());
+        }
+    }
+    let last = last.map(|(_, s)| s);
+
     let reachable = rpc(&cfg.rpc, "eth_chainId", serde_json::json!([])).await.is_ok();
     let client = match state.db.last_deposit_client(cfg.chain_id) {
         Ok(Some(c)) if !c.trim().is_empty() => Some(c),
-        _ => find_client(&cfg, &app_key).await,
+        // Finding the wallet means scanning `Deposited` logs from genesis.
+        // Once found it does not change out from under us — reuse it rather
+        // than re-scanning on every poll.
+        _ => match last.as_ref().and_then(|s| s.client.clone()) {
+            Some(c) => Some(c),
+            None => find_client(&cfg, &app_key).await,
+        },
     };
+    // On a failed read, carry the last good numbers instead of printing $0.
+    // A balance that alternates between the truth and zero with every flaky
+    // RPC response looks like money disappearing; `reachable` is the honest
+    // signal for "the chain is actually gone".
+    let same_wallet = |s: &&PotStatus| s.client == client;
     let (balance, max_job, max_day, spent) = if let Some(ref c) = client {
-        account(&cfg, c).await.unwrap_or((0, 0, 0, 0))
+        match account(&cfg, c).await {
+            Ok(v) => v,
+            Err(_) => last
+                .as_ref()
+                .filter(same_wallet)
+                .map(|s| {
+                    (
+                        s.balance_micros,
+                        s.max_per_job_micros,
+                        s.max_per_day_micros,
+                        s.spent_today_micros,
+                    )
+                })
+                .unwrap_or((0, 0, 0, 0)),
+        }
     } else {
         (0, 0, 0, 0)
     };
     let reserved = if let Some(ref c) = client {
-        locked(&cfg, c, &cfg.worker).await.unwrap_or(0)
+        match sum_locked(state, &cfg, c).await {
+            Some(v) => v,
+            None => last
+                .as_ref()
+                .filter(same_wallet)
+                .map(|s| s.reserved_micros)
+                .unwrap_or(0),
+        }
     } else {
         0
     };
-    Ok(PotStatus {
+    let st = PotStatus {
         configured: true,
         reachable,
         client,
@@ -350,7 +414,12 @@ pub async fn status(state: &AppState) -> Result<PotStatus> {
         pot: cfg.pot,
         usdc: cfg.usdc,
         chain_id: cfg.chain_id,
-    })
+    };
+    if st.reachable {
+        *status_memo().lock().unwrap_or_else(|e| e.into_inner()) =
+            Some((Instant::now(), st.clone()));
+    }
+    Ok(st)
 }
 
 /// Deposits this app saw MetaMask confirm. Local sqlite, not a chain scan.
@@ -500,6 +569,7 @@ pub async fn issue_ticket(
     payload: &JobPayload,
     client: &str,
     worker_payout: &str,
+    peer_label: &str,
 ) -> Result<(JobPay, Option<rootmode_core::ReservePost>)> {
     ensure_flush_loop(state.app_data.clone());
     let cfg = load_chain_config(state).ok_or_else(|| AppError::Invalid("no local chain".into()))?;
@@ -524,6 +594,7 @@ pub async fn issue_ticket(
     let (authorised, _on_chain) = authorised_so_far(&cfg, client, worker_payout).await;
     let cumulative = authorised.saturating_add(need);
     let signed = sign_latest(&state.app_data, &cfg, client, worker_payout, cumulative)?;
+    persist(&state.app_data);
 
     jobs()
         .lock()
@@ -537,6 +608,9 @@ pub async fn issue_ticket(
                 sha256: None,
                 ceiling: need,
                 job_cap,
+                cost: None,
+                model: payload.model_label(),
+                peer: peer_label.to_string(),
             },
         );
     Ok((
@@ -600,12 +674,17 @@ async fn sign_reserve_if_needed(
     worker: &str,
     need: u64,
 ) -> Result<Option<rootmode_core::ReservePost>> {
-    let (reserved, paid) = channel(cfg, client, worker).await.unwrap_or((0, 0));
-    let locked_amt = reserved.saturating_sub(paid);
-    if locked_amt >= need {
+    let ch = channel(cfg, client, worker).await.unwrap_or(ChannelSnap::default());
+    let remaining = ch.remaining();
+    let extra = need.saturating_sub(remaining);
+    let new_max = if extra == 0 {
+        ch.reserved
+    } else {
+        ch.reserved.saturating_add(extra)
+    };
+    if new_max == 0 {
         return Ok(None);
     }
-    let new_max = reserved.saturating_add(need.saturating_sub(locked_amt));
     let key = load_or_create_app_key(&state.app_data)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -764,7 +843,26 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
             } else {
                 row.paid = true;
                 row.sha256 = Some(invoice.sha256.clone());
+                // The final invoice covers the whole job, top-ups included.
+                row.cost = Some(invoice.amount);
             }
+        }
+    }
+
+    if !invoice.top_up {
+        // The one place chat jobs and gateway jobs both cross when money
+        // moves — so the ledger the user audits is written here, not by
+        // whichever screen happened to ask.
+        let billed_tokens = invoice.prompt_tokens.saturating_add(invoice.completion_tokens);
+        if let Err(e) = state.db.record_spend(&SpendEntry {
+            job_id: job_id.to_string(),
+            model: pending.model.clone(),
+            peer: Some(pending.peer.clone()).filter(|p| !p.is_empty()),
+            tokens: (billed_tokens > 0).then_some(billed_tokens),
+            cost_micros: invoice.amount,
+            at: crate::store::now(),
+        }) {
+            log::warn!("record spend: {e}");
         }
     }
 
@@ -782,6 +880,17 @@ pub fn expected_sha256(job_id: Uuid) -> Option<String> {
         .unwrap_or_else(|e| e.into_inner())
         .get(&job_id)
         .and_then(|j| j.sha256.clone())
+}
+
+/// What this job's paid invoice billed, in µUSDC — `None` until the worker
+/// invoices and is paid, and forever for a free job that never locked funds.
+/// A priced job still `None` here gets its bill filled in by [`settle_job`].
+pub fn job_cost_micros(job_id: Uuid) -> Option<Micros> {
+    jobs()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&job_id)
+        .and_then(|j| j.cost)
 }
 
 /// Sign a new cumulative ticket for this job's cost. Does not settle on-chain
@@ -807,6 +916,9 @@ pub async fn settle_job(
         JobKind::Image | JobKind::Video => (pending.price.amount * 1_000_000.0).round() as u64,
     };
     if amount == 0 {
+        // Priced, but the provider reported no billable usage. Recording $0
+        // is what lets the ledger say so, rather than leaving a blank.
+        record_job_cost(state, job_id, &pending, meta, 0);
         return Ok(None);
     }
 
@@ -824,6 +936,9 @@ pub async fn settle_job(
         st.max_per_job_micros
     };
     let amount = amount.min(cap);
+    // This settle path bills providers that never invoiced, and it runs after
+    // the reply was already filed — so the bill lands on that reply now.
+    record_job_cost(state, job_id, &pending, meta, amount);
 
     ensure_flush_loop(state.app_data.clone());
 
@@ -855,22 +970,50 @@ pub async fn settle_job(
     Ok(None)
 }
 
+/// Record a settle-path bill in both places the user sees it: the spend
+/// ledger, and the chat reply it produced (filed before this ran).
+fn record_job_cost(
+    state: &AppState,
+    job_id: Uuid,
+    pending: &PendingJob,
+    meta: Option<&serde_json::Value>,
+    amount: Micros,
+) {
+    if let Err(e) = state.db.set_job_cost(&job_id.to_string(), amount) {
+        log::warn!("record job cost: {e}");
+    }
+    let tokens = match pending.kind {
+        JobKind::Llm => meta.and_then(TokenUsage::from_meta).map(|u| {
+            u.prompt.saturating_add(u.completion)
+        }),
+        JobKind::Image | JobKind::Video => None,
+    }
+    .filter(|&n| n > 0);
+    if let Err(e) = state.db.record_spend(&SpendEntry {
+        job_id: job_id.to_string(),
+        model: pending.model.clone(),
+        peer: Some(pending.peer.clone()).filter(|p| !p.is_empty()),
+        tokens,
+        cost_micros: amount,
+        at: crate::store::now(),
+    }) {
+        log::warn!("record spend: {e}");
+    }
+}
+
 async fn authorised_so_far(cfg: &ChainConfig, client: &str, worker: &str) -> (u64, u64) {
     let cached = {
         let g = latest().lock().unwrap_or_else(|e| e.into_inner());
         g.get(&worker_key(worker))
-            .map(|t| (t.ticket.cumulative, t.on_chain_paid))
+            .map(|t| t.ticket.cumulative)
+            .unwrap_or(0)
     };
-    match cached {
-        Some(v) => v,
-        None => {
-            let paid = channel(cfg, client, worker)
-                .await
-                .map(|(_, paid)| paid)
-                .unwrap_or(0);
-            (paid, paid)
-        }
-    }
+    let ch = channel(cfg, client, worker)
+        .await
+        .unwrap_or(ChannelSnap::default());
+    let on_chain = ch.paid.max(ch.earned);
+    let authorised = cached.max(on_chain);
+    (authorised, on_chain)
 }
 
 fn sign_latest(
@@ -957,59 +1100,12 @@ pub async fn flush_all(app_data: &Path) -> Result<usize> {
 }
 
 async fn flush_worker(app_data: &Path, cfg: &ChainConfig, wk: &str) -> Result<Option<String>> {
-    let pending = {
-        let g = latest().lock().unwrap_or_else(|e| e.into_inner());
-        g.get(wk).map(|t| (t.ticket.clone(), t.sig.clone(), t.on_chain_paid))
-    };
-    let Some((ticket, sig, on_chain)) = pending else {
-        return Ok(None);
-    };
-    if ticket.cumulative <= on_chain {
-        return Ok(None);
-    }
-    let settled_upto = ticket.cumulative;
-    let hash = match send_settle(app_data, cfg, &ticket, &sig).await {
-        Ok(h) => h,
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.to_lowercase().contains("expired") {
-                let (fresh, fresh_sig) =
-                    sign_latest(app_data, cfg, &ticket.client, &ticket.worker_payout, ticket.cumulative)?;
-                let hash = send_settle(app_data, cfg, &fresh, &fresh_sig).await?;
-                latest()
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(
-                        wk.to_string(),
-                        LatestTicket {
-                            ticket: fresh,
-                            sig: fresh_sig,
-                            on_chain_paid: settled_upto,
-                        },
-                    );
-                persist(app_data);
-                log::info!("pot settled {hash}");
-                return Ok(Some(hash));
-            }
-            return Err(e);
-        }
-    };
-    latest()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(
-            wk.to_string(),
-            LatestTicket {
-                ticket,
-                sig,
-                on_chain_paid: settled_upto,
-            },
-        );
-    persist(app_data);
-    log::info!("pot settled {hash}");
-    Ok(Some(hash))
+    // The worker broadcasts settle with its pay key. The client never holds ETH.
+    let _ = (app_data, cfg, wk);
+    Ok(None)
 }
 
+#[allow(dead_code)]
 async fn send_settle(
     app_data: &Path,
     cfg: &ChainConfig,
@@ -1023,6 +1119,7 @@ async fn send_settle(
     Ok(hash)
 }
 
+#[allow(dead_code)]
 async fn wait_ok(cfg: &ChainConfig, hash: &str) -> Result<()> {
     for _ in 0..20 {
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1337,7 +1434,54 @@ async fn account(cfg: &ChainConfig, client: &str) -> Result<(u64, u64, u64, u64)
     ))
 }
 
-async fn channel(cfg: &ChainConfig, client: &str, worker: &str) -> Result<(u64, u64)> {
+#[derive(Default, Clone, Copy)]
+struct ChannelSnap {
+    reserved: u64,
+    paid: u64,
+    earned: u64,
+}
+
+impl ChannelSnap {
+    fn remaining(self) -> u64 {
+        self.reserved.saturating_sub(self.earned)
+    }
+}
+
+/// Total locked across every payout address we know about, or `None` if any
+/// single read failed. A partial sum silently under-reports the lock, which
+/// shows up as the balance jumping between two values as reads flake — better
+/// to say "could not read" and let the caller carry the previous number.
+async fn sum_locked(state: &AppState, cfg: &ChainConfig, client: &str) -> Option<u64> {
+    let mut addrs = BTreeSet::new();
+    if !is_zero_addr(&cfg.fee_vault) {
+        addrs.insert(cfg.fee_vault.to_lowercase());
+    }
+    if !is_zero_addr(&cfg.worker) {
+        addrs.insert(cfg.worker.to_lowercase());
+    }
+    if let Ok(peers) = state.db.list_peers() {
+        for p in peers {
+            if let Ok(a) = named_payout(p.payout.as_deref()) {
+                addrs.insert(a.to_lowercase());
+            }
+        }
+    }
+    for k in latest().lock().unwrap_or_else(|e| e.into_inner()).keys() {
+        addrs.insert(format!("0x{k}"));
+    }
+    let mut total = 0u64;
+    for addr in addrs {
+        total = total.saturating_add(locked(cfg, client, &addr).await.ok()?);
+    }
+    Some(total)
+}
+
+fn is_zero_addr(s: &str) -> bool {
+    let hex = s.trim().trim_start_matches("0x");
+    hex.is_empty() || hex.chars().all(|c| c == '0')
+}
+
+async fn channel(cfg: &ChainConfig, client: &str, worker: &str) -> Result<ChannelSnap> {
     let sel = &keccak(b"channels(address,address)")[..4];
     let mut data = Vec::from(sel);
     data.extend_from_slice(&word_address(client)?);
@@ -1349,10 +1493,14 @@ async fn channel(cfg: &ChainConfig, client: &str, worker: &str) -> Result<(u64, 
     )
     .await?;
     let hex = raw.as_str().unwrap_or("0x").trim_start_matches("0x");
-    if hex.len() < 128 {
-        return Ok((0, 0));
+    if hex.len() < 64 * 6 {
+        return Ok(ChannelSnap::default());
     }
-    Ok((read_u64(&hex[0..64]), read_u64(&hex[64..128])))
+    Ok(ChannelSnap {
+        reserved: read_u64(&hex[0..64]),
+        paid: read_u64(&hex[64..128]),
+        earned: read_u64(&hex[64 * 5..64 * 6]),
+    })
 }
 
 async fn locked(cfg: &ChainConfig, client: &str, worker: &str) -> Result<u64> {
@@ -1388,6 +1536,7 @@ fn word_address(addr: &str) -> Result<[u8; 32]> {
     Ok(word)
 }
 
+#[allow(dead_code)]
 fn encode_settle(ticket: &SpendTicket, sig: &[u8]) -> Result<Vec<u8>> {
     encode_app_call(
         b"settle(address,address,uint256,uint64,bytes)",
@@ -1399,6 +1548,7 @@ fn encode_settle(ticket: &SpendTicket, sig: &[u8]) -> Result<Vec<u8>> {
     )
 }
 
+#[allow(dead_code)]
 fn encode_app_call(
     signature: &[u8],
     client: &str,
@@ -1423,6 +1573,7 @@ fn encode_app_call(
     Ok(out)
 }
 
+#[allow(dead_code)]
 fn word_u256(v: u64) -> [u8; 32] {
     let mut w = [0u8; 32];
     w[24..].copy_from_slice(&v.to_be_bytes());

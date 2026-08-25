@@ -653,6 +653,7 @@ async fn submit(
                     &payload,
                     client,
                     &crate::pot::named_payout(peer.payout.as_deref())?,
+                    &peer.label,
                 )
                 .await?;
                 submit.bond = Some(bond);
@@ -689,10 +690,15 @@ async fn submit(
                     break;
                 }
             }
-            match drive.await {
+            let out = match drive.await {
                 Ok(r) => r,
                 Err(e) => Err(AppError::Net(format!("provider task failed: {e}"))),
-            }
+            };
+            // The chat pipeline clears its lock in `settle_job`; the gateway
+            // has no settle step, so clear it here or priced gateway jobs
+            // accumulate in the pending map forever.
+            crate::pot::drop_job(job_id);
+            out
         })
     };
 

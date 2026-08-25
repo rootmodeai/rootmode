@@ -5,6 +5,16 @@ export function usd(micros: number) {
   return `$${(micros / 1_000_000).toFixed(2)}`;
 }
 
+/**
+ * Exact to the micro-USDC. A single reply often costs a fraction of a cent,
+ * and rounding a bill to $0.00 would hide that money moved at all — the whole
+ * point of showing it is that the user can audit every deduction.
+ */
+export function usdExact(micros: number) {
+  const decimals = micros % 10_000 === 0 ? 2 : micros % 100 === 0 ? 4 : 6;
+  return `$${(micros / 1_000_000).toFixed(decimals)}`;
+}
+
 /** Map a job or check error onto a funding kind, or null if it is unrelated. */
 export function fundingKindFromText(text: string): FundingKind | null {
   if (/limit for a single job|per-job cap|prepaid budget|raise (the |that )?limit|raise the cap/i.test(text)) {

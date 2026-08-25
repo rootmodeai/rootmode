@@ -18,6 +18,10 @@ use crate::error::{Result, WorkerError};
 #[derive(Debug, Clone)]
 pub struct ChannelState {
     pub remaining: u64,
+    pub reserved: u64,
+    /// Highest spend ticket the chain has already recognised. A settle whose
+    /// cumulative is at or below this reverts `NotMonotonic` — it was paid.
+    pub earned: u64,
     pub app_key: String,
 }
 
@@ -52,6 +56,8 @@ pub async fn channel_state(
     if hex.len() < 64 * 6 {
         return Ok(Some(ChannelState {
             remaining: 0,
+            reserved: 0,
+            earned: 0,
             app_key: String::new(),
         }));
     }
@@ -67,13 +73,26 @@ pub async fn channel_state(
     }
     Ok(Some(ChannelState {
         remaining: reserved.saturating_sub(earned),
+        reserved,
+        earned,
         app_key,
     }))
 }
 
 /// Post a client-signed `reserve()`. Anyone may call it; this node does
-/// because it already holds ETH for `settle`.
-pub async fn reserve(payments: &PaymentsConfig, ticket: &ReserveTicket, sig: &[u8]) -> Result<String> {
+/// because it already holds ETH for `settle`. Returns `None` when the chain
+/// already holds a lock at or above this ticket — posting it again would
+/// revert `NotMonotonic`.
+pub async fn reserve(
+    payments: &PaymentsConfig,
+    ticket: &ReserveTicket,
+    sig: &[u8],
+) -> Result<Option<String>> {
+    if let Ok(Some(ch)) = channel_state(payments, &ticket.client, &ticket.worker_payout).await {
+        if ticket.max_amount <= ch.reserved {
+            return Ok(None);
+        }
+    }
     let data = encode_call(
         b"reserve(address,address,uint256,uint64,bytes)",
         &ticket.client,
@@ -84,10 +103,26 @@ pub async fn reserve(payments: &PaymentsConfig, ticket: &ReserveTicket, sig: &[u
     )?;
     let hash = send_call(payments, data).await?;
     wait_ok(&payments.rpc, &hash).await?;
-    Ok(hash)
+    Ok(Some(hash))
 }
 
-pub async fn settle(payments: &PaymentsConfig, ticket: &SpendTicket, sig: &[u8]) -> Result<String> {
+/// Settle a spend ticket, returning the tx hash — or `None` when the chain
+/// has already recognised this cumulative and there is nothing new to pay.
+///
+/// The pre-check matters: a ticket can reach the chain twice (this node
+/// retrying, or an old client build that still settled from its side), and
+/// the second broadcast reverts `NotMonotonic` — a mined failure that costs
+/// gas and looks like a broken contract to anyone reading the explorer.
+pub async fn settle(
+    payments: &PaymentsConfig,
+    ticket: &SpendTicket,
+    sig: &[u8],
+) -> Result<Option<String>> {
+    if let Ok(Some(ch)) = channel_state(payments, &ticket.client, &ticket.worker_payout).await {
+        if ticket.cumulative <= ch.earned {
+            return Ok(None);
+        }
+    }
     let data = encode_call(
         b"settle(address,address,uint256,uint64,bytes)",
         &ticket.client,
@@ -98,7 +133,7 @@ pub async fn settle(payments: &PaymentsConfig, ticket: &SpendTicket, sig: &[u8])
     )?;
     let hash = send_call(payments, data).await?;
     wait_ok(&payments.rpc, &hash).await?;
-    Ok(hash)
+    Ok(Some(hash))
 }
 
 async fn send_call(payments: &PaymentsConfig, data: Vec<u8>) -> Result<String> {
@@ -354,9 +389,9 @@ async fn wait_ok(rpc_url: &str, hash: &str) -> Result<()> {
         if status == "0x1" {
             return Ok(());
         }
-        return Err(WorkerError::Rejected("settle transaction reverted".into()));
+        return Err(WorkerError::Rejected("transaction reverted".into()));
     }
-    Err(WorkerError::Rejected("settle transaction was not mined".into()))
+    Err(WorkerError::Rejected("transaction was not mined".into()))
 }
 
 async fn rpc(url: &str, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {

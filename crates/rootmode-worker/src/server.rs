@@ -179,6 +179,8 @@ impl Worker {
         *self.test_channel.lock().unwrap_or_else(|e| e.into_inner()) =
             Some(crate::chain::ChannelState {
                 remaining,
+                reserved: remaining,
+                earned: 0,
                 app_key: app_key.to_string(),
             });
     }
@@ -433,23 +435,32 @@ impl Worker {
             .get(&submit.job_id)
             .map(|b| b.delta.max(1))
             .unwrap_or(1);
+        tracing::info!(
+            remaining = state.remaining,
+            need,
+            has_reserve = submit.reserve.is_some(),
+            "priced lock check"
+        );
         if state.remaining < need {
-            if let Some(post) = submit.reserve.as_ref() {
-                if !post.ticket.worker_payout.eq_ignore_ascii_case(&payout) {
-                    return Err(WorkerError::Rejected(
-                        "reserve ticket is for a different payout address".into(),
-                    ));
-                }
-                if !post.ticket.client.eq_ignore_ascii_case(payer) {
-                    return Err(WorkerError::Rejected(
-                        "reserve ticket is for a different payer".into(),
-                    ));
-                }
-                let sig = hex::decode(post.sig.trim_start_matches("0x"))
-                    .map_err(|e| WorkerError::Rejected(format!("reserve signature: {e}")))?;
-                crate::chain::reserve(&self.config.payments, &post.ticket, &sig)
-                    .await
-                    .map_err(|e| WorkerError::Rejected(format!("could not post reserve: {e}")))?;
+            let Some(post) = submit.reserve.as_ref() else {
+                return Err(WorkerError::Rejected(
+                    "priced job is missing a reserve ticket".into(),
+                ));
+            };
+            if !post.ticket.worker_payout.eq_ignore_ascii_case(&payout) {
+                return Err(WorkerError::Rejected(
+                    "reserve ticket is for a different payout address".into(),
+                ));
+            }
+            if !post.ticket.client.eq_ignore_ascii_case(payer) {
+                return Err(WorkerError::Rejected(
+                    "reserve ticket is for a different payer".into(),
+                ));
+            }
+            let sig = hex::decode(post.sig.trim_start_matches("0x"))
+                .map_err(|e| WorkerError::Rejected(format!("reserve signature: {e}")))?;
+            if post.ticket.max_amount > state.reserved {
+                let posted = crate::chain::reserve(&self.config.payments, &post.ticket, &sig).await;
                 state = match self.read_channel(payer, &payout).await {
                     Ok(Some(s)) => s,
                     Ok(None) => {
@@ -459,6 +470,13 @@ impl Worker {
                     }
                     Err(e) => return Err(e),
                 };
+                if let Err(e) = posted {
+                    if state.remaining < need {
+                        return Err(WorkerError::Rejected(format!(
+                            "could not post reserve: {e}"
+                        )));
+                    }
+                }
             }
         }
         if state.remaining < need {
@@ -1248,7 +1266,8 @@ impl Worker {
             return;
         }
         match crate::chain::settle(&self.config.payments, &pay.ticket, &sig).await {
-            Ok(hash) => tracing::info!(%job_id, %hash, "settled"),
+            Ok(Some(hash)) => tracing::info!(%job_id, %hash, "settled"),
+            Ok(None) => tracing::info!(%job_id, "already settled on-chain; nothing new to pay"),
             Err(e) => tracing::warn!(%job_id, "settle later: {e}"),
         }
     }

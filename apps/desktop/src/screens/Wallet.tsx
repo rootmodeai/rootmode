@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, errorText } from "../lib/api";
-import { usd } from "../components/FundingNotice";
-import type { Deposit, ModelUsage, PotStatus } from "../lib/types";
+import { usd, usdExact } from "../components/FundingNotice";
+import type { Deposit, ModelUsage, PotStatus, SpendEntry } from "../lib/types";
 
 /**
- * The pot, its deposits, and what you have spent in tokens — a money page,
- * not a setting. Caps are still set in MetaMask when you deposit.
+ * The pot, its deposits, and what every job cost — a money page, not a
+ * setting. Caps are still set in MetaMask when you deposit.
  */
 export function Wallet() {
   const [error, setError] = useState<string | null>(null);
   const [pot, setPot] = useState<PotStatus | null>(null);
   const [deposits, setDeposits] = useState<Deposit[] | null>(null);
   const [usage, setUsage] = useState<ModelUsage[] | null>(null);
+  const [spend, setSpend] = useState<SpendEntry[] | null>(null);
 
   const loadStatus = () =>
     api
@@ -28,6 +29,10 @@ export function Wallet() {
     void api
       .tokenUsage()
       .then(setUsage)
+      .catch((e) => setError(errorText(e)));
+    void api
+      .spendHistory()
+      .then(setSpend)
       .catch((e) => setError(errorText(e)));
   };
 
@@ -46,6 +51,20 @@ export function Wallet() {
           if (!cancelled) setDeposits(d);
         })
         .catch(() => undefined);
+      // Local sqlite reads — cheap, and a reply billed seconds ago should
+      // already be on the money page when the user comes to check it.
+      api
+        .tokenUsage()
+        .then((u) => {
+          if (!cancelled) setUsage(u);
+        })
+        .catch(() => undefined);
+      api
+        .spendHistory()
+        .then((s) => {
+          if (!cancelled) setSpend(s);
+        })
+        .catch(() => undefined);
     };
     tick();
     loadHistory();
@@ -58,6 +77,7 @@ export function Wallet() {
 
   const totalTokens = (usage ?? []).reduce((n, u) => n + u.tokens, 0);
   const maxTokens = Math.max(1, ...((usage ?? []).map((u) => u.tokens)));
+  const totalCost = (usage ?? []).reduce((n, u) => n + u.cost_micros, 0);
 
   return (
     <div className="page">
@@ -77,12 +97,14 @@ export function Wallet() {
         {pot?.reachable && pot.client ? (
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 28, fontWeight: 750, letterSpacing: "-0.03em" }}>
-              {usd(pot.balance_micros)}
+              {usd(pot.balance_micros + pot.reserved_micros)}
             </div>
             <div className="meta" style={{ marginTop: 6 }}>
-              max {usd(pot.max_per_job_micros)} / job · {usd(pot.max_per_day_micros)} / day
+              {pot.reserved_micros > 0
+                ? `${usd(pot.balance_micros)} available · ${usd(pot.reserved_micros)} locked`
+                : `${usd(pot.balance_micros)} available`}
+              {` · max ${usd(pot.max_per_job_micros)} / job · ${usd(pot.max_per_day_micros)} / day`}
               {pot.spent_today_micros > 0 ? ` · ${usd(pot.spent_today_micros)} used today` : ""}
-              {pot.reserved_micros > 0 ? ` · ${usd(pot.reserved_micros)} locked for workers` : ""}
             </div>
             <p style={{ color: "var(--text-2)", fontSize: 13, margin: "10px 0 0", lineHeight: 1.45 }}>
               A single reply cannot spend more than the per-job amount. Raise
@@ -184,43 +206,85 @@ export function Wallet() {
       </div>
 
       <div className="card">
-        <h2>Tokens used</h2>
-        {usage === null ? (
+        <h2>Usage &amp; spend</h2>
+        {spend === null || usage === null ? (
           <p style={{ color: "var(--text-3)", fontSize: 13.5, margin: 0 }}>Loading…</p>
-        ) : usage.length === 0 ? (
+        ) : spend.length === 0 && usage.length === 0 ? (
           <p style={{ color: "var(--text-2)", fontSize: 13.5, margin: 0 }}>
-            No token counts yet. They appear after a provider reports usage on a reply.
+            Nothing yet. Every reply from a priced provider will be listed here
+            with the exact USDC it deducted from your balance; token counts
+            appear once a provider reports usage.
           </p>
         ) : (
           <>
             <p style={{ color: "var(--text-2)", fontSize: 13.5, margin: "0 0 12px" }}>
               {totalTokens.toLocaleString()} tokens across {usage.length} model
               {usage.length === 1 ? "" : "s"}
+              {totalCost > 0 ? ` · ${usdExact(totalCost)} spent` : " · nothing billed"}
+              . Each row is one reply and the exact USDC it deducted — free
+              providers deduct nothing and are not listed.
             </p>
-            <table className="ledger">
-              <thead>
-                <tr>
-                  <th>Model</th>
-                  <th></th>
-                  <th className="num">Tokens</th>
-                  <th className="num">Replies</th>
-                </tr>
-              </thead>
-              <tbody>
-                {usage.map((u) => (
-                  <tr key={u.model}>
-                    <td>{u.model}</td>
-                    <td>
-                      <span className="usage-bar" aria-hidden="true">
-                        <span style={{ width: `${(u.tokens / maxTokens) * 100}%` }} />
-                      </span>
-                    </td>
-                    <td className="num">{u.tokens.toLocaleString()}</td>
-                    <td className="num">{u.replies.toLocaleString()}</td>
+            {spend.length === 0 ? (
+              <p style={{ color: "var(--text-2)", fontSize: 13.5, margin: 0 }}>
+                Nothing billed yet — everything so far ran on free providers.
+              </p>
+            ) : (
+              <table className="ledger">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Model</th>
+                    <th>Provider</th>
+                    <th className="num">Tokens</th>
+                    <th className="num">Cost</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {spend.map((s, i) => (
+                    <tr key={s.job_id ?? `row-${i}`}>
+                      <td>{formatStamp(s.at)}</td>
+                      <td>{s.model}</td>
+                      <td className="meta">{s.peer ?? "—"}</td>
+                      <td className="num">{s.tokens != null ? s.tokens.toLocaleString() : "—"}</td>
+                      <td className="num">{usdExact(s.cost_micros)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {usage.length > 0 && (
+              <details className="advanced">
+                <summary>Totals by model</summary>
+                <div className="body">
+                  <table className="ledger">
+                    <thead>
+                      <tr>
+                        <th>Model</th>
+                        <th></th>
+                        <th className="num">Tokens</th>
+                        <th className="num">Replies</th>
+                        <th className="num">Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usage.map((u) => (
+                        <tr key={u.model}>
+                          <td>{u.model}</td>
+                          <td>
+                            <span className="usage-bar" aria-hidden="true">
+                              <span style={{ width: `${(u.tokens / maxTokens) * 100}%` }} />
+                            </span>
+                          </td>
+                          <td className="num">{u.tokens.toLocaleString()}</td>
+                          <td className="num">{u.replies.toLocaleString()}</td>
+                          <td className="num">{u.cost_micros > 0 ? usdExact(u.cost_micros) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            )}
           </>
         )}
       </div>
@@ -234,15 +298,19 @@ function shortHash(hash: string): string {
   return `${h.slice(0, 6)}…${h.slice(-4)}`;
 }
 
+function formatStamp(at: number): string {
+  return new Date(at * 1000).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function formatWhen(d: Deposit): string {
   if (d.at > 0) {
-    return new Date(d.at * 1000).toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
+    return formatStamp(d.at);
   }
   return `block ${d.block}`;
 }

@@ -473,6 +473,8 @@ pub fn add_message(
         model.as_deref(),
         peer.as_deref(),
         tokens,
+        // Costs are recorded by the payment pipeline, never claimed by the UI.
+        None,
         thinking.as_deref(),
     )
 }
@@ -585,6 +587,13 @@ pub async fn pot_deposits(app: AppHandle) -> Result<Vec<crate::pot::Deposit>> {
 #[tauri::command]
 pub fn token_usage(state: St<'_>) -> Result<Vec<ModelUsage>> {
     state.db.token_usage()
+}
+
+/// The per-job money ledger: every reply whose bill was recorded, newest
+/// first, so the user can audit exactly what left the pot and for what.
+#[tauri::command]
+pub fn spend_history(state: St<'_>, limit: Option<u32>) -> Result<Vec<crate::store::SpendEntry>> {
+    state.db.spend_history(limit.unwrap_or(100))
 }
 
 /// Opens a terminal already running the tool, so a connect can be seen

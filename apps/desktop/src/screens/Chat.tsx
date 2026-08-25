@@ -20,6 +20,7 @@ import {
   FundingNotice,
   fundingKindFromText,
   noticeFromCheck,
+  usdExact,
 } from "../components/FundingNotice";
 
 /**
@@ -484,6 +485,9 @@ export function Chat() {
                         {m.model ?? "unknown model"}
                         {m.peer ? ` · ${m.peer}` : ""}
                         {m.tokens ? ` · ${m.tokens.toLocaleString()} tokens` : ""}
+                        {/* The bill for this exact reply. Absent on free
+                            providers — money that never moved is not shown. */}
+                        {m.cost_micros != null ? ` · ${usdExact(m.cost_micros)}` : ""}
                         {m.sha256 ? ` · ${m.sha256.slice(0, 10)}` : ""}
                       </div>
                     )}

@@ -217,6 +217,11 @@ export interface Message {
   peer: string | null;
   /** Tokens the provider reported, when it reported any. */
   tokens: number | null;
+  /**
+   * What this reply was billed, in millionths of a USDC. 0 is a priced job
+   * that billed nothing; null is a free provider or an unrecorded bill.
+   */
+  cost_micros: number | null;
   /** What the model said to itself before answering, when it said anything. */
   thinking: string | null;
   created_at: number;
@@ -306,6 +311,18 @@ export interface ModelUsage {
   model: string;
   tokens: number;
   replies: number;
+  /** Sum of the recorded bills for this model, in millionths of a USDC. */
+  cost_micros: number;
+}
+
+/** One priced reply and what it was billed — a row in the spend ledger. */
+export interface SpendEntry {
+  job_id: string | null;
+  model: string;
+  peer: string | null;
+  tokens: number | null;
+  cost_micros: number;
+  at: number;
 }
 
 export type FundingKind = "ok" | "cap" | "empty" | "chain";
