@@ -260,6 +260,20 @@ impl Db {
                 at          INTEGER NOT NULL
             );
 
+            -- The Pot's Settled events for this wallet: which on-chain
+            -- transaction collected which cumulative ticket. Joined to spends
+            -- by cumulative, so every reply can point at the tx that took
+            -- its money — even when one tx collected several replies.
+            CREATE TABLE IF NOT EXISTS settlements (
+                tx_hash        TEXT PRIMARY KEY,
+                payout         TEXT NOT NULL,
+                cumulative     INTEGER NOT NULL,
+                block          INTEGER NOT NULL,
+                paid_to_worker INTEGER NOT NULL DEFAULT 0,
+                fee            INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS settlements_by_channel ON settlements (payout, cumulative);
+
             -- Written when MetaMask confirms a deposit, not by scanning the chain.
             CREATE TABLE IF NOT EXISTS deposits (
                 tx_hash              TEXT PRIMARY KEY,
@@ -287,6 +301,10 @@ impl Db {
         // the user's money; a wallet page that shows tokens but not dollars
         // is not auditable by the person paying.
         self.add_column(&conn, "messages", "cost_micros", "INTEGER")?;
+        // Which signed ticket carried a reply's charge, and on which payout
+        // channel. This is what ties a reply to the settle tx that collected it.
+        self.add_column(&conn, "spends", "cumulative_micros", "INTEGER")?;
+        self.add_column(&conn, "spends", "payout", "TEXT")?;
         // Which conversation, if any, a job belongs to. Without it a reply
         // can only be filed by whatever screen happened to be open when the
         // job finished — and if that screen was closed, the answer is lost.
@@ -939,8 +957,9 @@ impl Db {
     pub fn record_spend(&self, s: &SpendEntry) -> Result<()> {
         let conn = self.lock();
         conn.execute(
-            r#"INSERT OR REPLACE INTO spends (job_id, model, peer, tokens, cost_micros, at)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6)"#,
+            r#"INSERT OR REPLACE INTO spends
+               (job_id, model, peer, tokens, cost_micros, at, cumulative_micros, payout)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
             params![
                 s.job_id,
                 s.model,
@@ -948,9 +967,50 @@ impl Db {
                 s.tokens,
                 s.cost_micros as i64,
                 s.at,
+                s.cumulative_micros.map(|c| c as i64),
+                s.payout.as_deref().map(|p| p.to_lowercase()),
             ],
         )?;
         Ok(())
+    }
+
+    /// Record one `Settled` event from the chain.
+    pub fn record_settlement(&self, t: &Settlement) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            r#"INSERT OR REPLACE INTO settlements
+               (tx_hash, payout, cumulative, block, paid_to_worker, fee)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6)"#,
+            params![
+                t.tx_hash.to_lowercase(),
+                t.payout.to_lowercase(),
+                t.cumulative as i64,
+                t.block as i64,
+                t.paid_to_worker as i64,
+                t.fee as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The earliest block a settlement scan needs to start from: wherever
+    /// the last scan stopped, else the first deposit, else `fallback`.
+    pub fn settlement_scan_from(&self, fallback: u64) -> Result<u64> {
+        if let Some(v) = self.get_setting("settle_scan_block")? {
+            if let Ok(n) = v.parse::<u64>() {
+                return Ok(n);
+            }
+        }
+        let conn = self.lock();
+        let first: Option<i64> = conn
+            .query_row(
+                "SELECT MIN(block) FROM deposits WHERE block > 0",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(first.map(|b| b as u64).unwrap_or(fallback))
     }
 
     /// Every bill a priced provider charged, newest first: the per-job audit
@@ -958,9 +1018,18 @@ impl Db {
     /// bill and do not appear — this is a ledger, not a chat history.
     pub fn spend_history(&self, limit: u32) -> Result<Vec<SpendEntry>> {
         let conn = self.lock();
+        // The settle that collected a reply is the first one on its channel
+        // whose cumulative reaches the reply's ticket.
         let mut stmt = conn.prepare(
-            r#"SELECT job_id, model, peer, tokens, cost_micros, at
-               FROM spends ORDER BY at DESC, rowid DESC LIMIT ?1"#,
+            r#"SELECT s.job_id, s.model, s.peer, s.tokens, s.cost_micros, s.at,
+                      s.cumulative_micros, s.payout,
+                      (SELECT t.tx_hash FROM settlements t
+                        WHERE t.payout = s.payout AND t.cumulative >= s.cumulative_micros
+                        ORDER BY t.cumulative ASC, t.block ASC LIMIT 1),
+                      (SELECT t.block FROM settlements t
+                        WHERE t.payout = s.payout AND t.cumulative >= s.cumulative_micros
+                        ORDER BY t.cumulative ASC, t.block ASC LIMIT 1)
+               FROM spends s ORDER BY s.at DESC, s.rowid DESC LIMIT ?1"#,
         )?;
         let rows = stmt.query_map(params![limit], |row| {
             Ok(SpendEntry {
@@ -970,6 +1039,11 @@ impl Db {
                 tokens: row.get(3)?,
                 cost_micros: row.get::<_, i64>(4)? as u64,
                 at: row.get(5)?,
+                cumulative_micros: row.get::<_, Option<i64>>(6)?.map(|c| c as u64),
+                payout: row.get(7)?,
+                settle_tx: row.get(8)?,
+                settle_block: row.get::<_, Option<i64>>(9)?.map(|b| b as u64),
+                settle_url: None,
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -1074,6 +1148,31 @@ pub struct SpendEntry {
     pub tokens: Option<u64>,
     pub cost_micros: u64,
     pub at: i64,
+    /// The signed cumulative ticket this charge rode on, and its channel.
+    /// Together they name the on-chain settle that collected it.
+    #[serde(default)]
+    pub cumulative_micros: Option<u64>,
+    #[serde(default)]
+    pub payout: Option<String>,
+    /// The transaction that collected this charge, once one has. A reply
+    /// with none is charged but not yet collected — or predates tracking.
+    #[serde(default)]
+    pub settle_tx: Option<String>,
+    #[serde(default)]
+    pub settle_block: Option<u64>,
+    #[serde(default)]
+    pub settle_url: Option<String>,
+}
+
+/// One `Settled` event from the Pot: which tx collected up to which ticket.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settlement {
+    pub tx_hash: String,
+    pub payout: String,
+    pub cumulative: u64,
+    pub block: u64,
+    pub paid_to_worker: u64,
+    pub fee: u64,
 }
 
 // --------------------------------------------------------------- row mapping
@@ -1370,6 +1469,11 @@ mod tests {
             tokens: Some(120),
             cost_micros: 2400,
             at: 100,
+            cumulative_micros: None,
+            payout: None,
+            settle_tx: None,
+            settle_block: None,
+            settle_url: None,
         })
         .unwrap();
         db.add_message(
@@ -1392,6 +1496,11 @@ mod tests {
             tokens: Some(80),
             cost_micros: 1600,
             at: 101,
+            cumulative_micros: None,
+            payout: None,
+            settle_tx: None,
+            settle_block: None,
+            settle_url: None,
         })
         .unwrap();
         db.add_message(
@@ -1441,6 +1550,11 @@ mod tests {
             tokens: Some(500),
             cost_micros: 990,
             at: 102,
+            cumulative_micros: None,
+            payout: None,
+            settle_tx: None,
+            settle_block: None,
+            settle_url: None,
         })
         .unwrap();
         let usage = db.token_usage().unwrap();
@@ -1460,6 +1574,11 @@ mod tests {
             tokens: Some(1367),
             cost_micros: 2734,
             at: 100,
+            cumulative_micros: None,
+            payout: None,
+            settle_tx: None,
+            settle_block: None,
+            settle_url: None,
         })
         .unwrap();
         db.record_spend(&SpendEntry {
@@ -1469,6 +1588,11 @@ mod tests {
             tokens: None,
             cost_micros: 0,
             at: 200,
+            cumulative_micros: None,
+            payout: None,
+            settle_tx: None,
+            settle_block: None,
+            settle_url: None,
         })
         .unwrap();
 
@@ -1493,11 +1617,66 @@ mod tests {
             tokens: Some(90),
             cost_micros: 180,
             at: 201,
+            cumulative_micros: None,
+            payout: None,
+            settle_tx: None,
+            settle_block: None,
+            settle_url: None,
         })
         .unwrap();
         let ledger = db.spend_history(10).unwrap();
         assert_eq!(ledger.len(), 2);
         assert_eq!(ledger[0].cost_micros, 180);
+    }
+
+    #[test]
+    fn a_reply_points_at_the_settle_that_first_covered_its_ticket() {
+        let db = db();
+        let spend = |job: &str, cumulative: u64| SpendEntry {
+            job_id: job.into(),
+            model: "glm-5.2".into(),
+            peer: Some("perch".into()),
+            tokens: Some(1000),
+            cost_micros: 400,
+            at: 100,
+            cumulative_micros: Some(cumulative),
+            payout: Some("0xAbC".into()),
+            settle_tx: None,
+            settle_block: None,
+            settle_url: None,
+        };
+        db.record_spend(&spend("j1", 1_000)).unwrap();
+        db.record_spend(&spend("j2", 1_400)).unwrap();
+        db.record_spend(&spend("j3", 1_800)).unwrap();
+        // One batched settle collected j1 and j2; j3 is still outstanding.
+        db.record_settlement(&Settlement {
+            tx_hash: "0xTX1".into(),
+            payout: "0xabc".into(),
+            cumulative: 1_400,
+            block: 7,
+            paid_to_worker: 1_260,
+            fee: 140,
+        })
+        .unwrap();
+
+        let by_job = |rows: &Vec<SpendEntry>, id: &str| rows.iter().find(|r| r.job_id == id).unwrap().clone();
+        let rows = db.spend_history(10).unwrap();
+        assert_eq!(by_job(&rows, "j1").settle_tx.as_deref(), Some("0xtx1"));
+        assert_eq!(by_job(&rows, "j2").settle_tx.as_deref(), Some("0xtx1"), "shares the batch");
+        assert_eq!(by_job(&rows, "j3").settle_tx, None, "charged, not yet collected");
+
+        db.record_settlement(&Settlement {
+            tx_hash: "0xTX2".into(),
+            payout: "0xabc".into(),
+            cumulative: 2_000,
+            block: 9,
+            paid_to_worker: 540,
+            fee: 60,
+        })
+        .unwrap();
+        let rows = db.spend_history(10).unwrap();
+        assert_eq!(by_job(&rows, "j3").settle_tx.as_deref(), Some("0xtx2"));
+        assert_eq!(by_job(&rows, "j1").settle_tx.as_deref(), Some("0xtx1"), "the first covering tx, not the newest");
     }
 
     #[test]

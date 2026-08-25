@@ -5,5 +5,6 @@
   "pot": "0x54eE2d0eBc0Cd7cd45D7fB4f9E9b9Ca91Eafb701",
   "feeVault": "0x17Def6df8c13100aD7c88521c05A23a95fcC6B14",
   "worker": "0x0000000000000000000000000000000000000000",
-  "client": ""
+  "client": "",
+  "deployBlock": 50369140
 }

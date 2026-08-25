@@ -134,6 +134,7 @@ export const api = {
   tokenUsage: () => invoke<ModelUsage[]>("token_usage"),
   spendHistory: (limit?: number) =>
     invoke<SpendEntry[]>("spend_history", { limit: limit ?? null }),
+  syncSettlements: () => invoke<number>("sync_settlements"),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
   skipUpdate: (version: string) => invoke<void>("skip_update", { version }),
   openUpdate: (url?: string) => invoke<void>("open_update", { url: url ?? null }),

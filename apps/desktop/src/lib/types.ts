@@ -323,6 +323,17 @@ export interface SpendEntry {
   tokens: number | null;
   cost_micros: number;
   at: number;
+  /** The signed ticket this charge rode on, and its payout channel. */
+  cumulative_micros: number | null;
+  payout: string | null;
+  /**
+   * The on-chain transaction that collected this charge. Null means charged
+   * but not yet collected (settles are batched), or the reply predates
+   * settlement tracking.
+   */
+  settle_tx: string | null;
+  settle_block: number | null;
+  settle_url: string | null;
 }
 
 export type FundingKind = "ok" | "cap" | "empty" | "chain";

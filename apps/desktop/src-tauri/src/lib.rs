@@ -205,6 +205,7 @@ pub fn run() {
             commands::pot_deposits,
             commands::token_usage,
             commands::spend_history,
+            commands::sync_settlements,
             commands::check_update,
             commands::skip_update,
             commands::open_update,

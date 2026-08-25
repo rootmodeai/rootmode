@@ -47,6 +47,10 @@ pub struct ChainConfig {
     pub worker: String,
     #[serde(default)]
     pub client: String,
+    /// Block the pot was deployed at. Scans for this wallet's events never
+    /// need to look earlier than this.
+    #[serde(rename = "deployBlock", alias = "deploy_block", default)]
+    pub deploy_block: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -907,6 +911,13 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
             tokens: (billed_tokens > 0).then_some(billed_tokens),
             cost_micros: invoice.amount,
             at: crate::store::now(),
+            // The ticket this charge rode on: the settle that collects it on
+            // this channel is the one whose cumulative first reaches this.
+            cumulative_micros: Some(cumulative),
+            payout: Some(worker.clone()),
+            settle_tx: None,
+            settle_block: None,
+            settle_url: None,
         }) {
             log::warn!("record spend: {e}");
         }
@@ -964,7 +975,7 @@ pub async fn settle_job(
     if amount == 0 {
         // Priced, but the provider reported no billable usage. Recording $0
         // is what lets the ledger say so, rather than leaving a blank.
-        record_job_cost(state, job_id, &pending, meta, 0);
+        record_job_cost(state, job_id, &pending, meta, 0, None);
         return Ok(None);
     }
 
@@ -983,9 +994,6 @@ pub async fn settle_job(
         st.max_per_job_micros
     };
     let amount = amount.min(cap);
-    // This settle path bills providers that never invoiced, and it runs after
-    // the reply was already filed — so the bill lands on that reply now.
-    record_job_cost(state, job_id, &pending, meta, amount);
 
     ensure_flush_loop(state.app_data.clone());
 
@@ -1014,6 +1022,9 @@ pub async fn settle_job(
         );
     persist(&state.app_data);
     schedule_flush();
+    // This settle path bills providers that never invoiced, and it runs after
+    // the reply was already filed — so the bill lands on that reply now.
+    record_job_cost(state, job_id, &pending, meta, amount, Some(cumulative));
     Ok(None)
 }
 
@@ -1025,6 +1036,7 @@ fn record_job_cost(
     pending: &PendingJob,
     meta: Option<&serde_json::Value>,
     amount: Micros,
+    cumulative: Option<Micros>,
 ) {
     if let Err(e) = state.db.set_job_cost(&job_id.to_string(), amount) {
         log::warn!("record job cost: {e}");
@@ -1043,6 +1055,11 @@ fn record_job_cost(
         tokens,
         cost_micros: amount,
         at: crate::store::now(),
+        cumulative_micros: cumulative,
+        payout: Some(pending.payout.clone()),
+        settle_tx: None,
+        settle_block: None,
+        settle_url: None,
     }) {
         log::warn!("record spend: {e}");
     }
@@ -1470,7 +1487,95 @@ fn parse_deposit_log(log: &serde_json::Value) -> Option<DepositLog> {
     })
 }
 
-fn explorer_tx(chain_id: u64, hash: &str) -> Option<String> {
+/// Pull this wallet's `Settled` events from the pot into the local ledger,
+/// so each charge can name the transaction that collected it. Scans forward
+/// from wherever the last scan stopped; at most once every 30s, and only
+/// the blocks since — a wallet page polls this, the chain does not enjoy it.
+pub async fn sync_settlements(state: &AppState) -> Result<usize> {
+    {
+        let mut g = settle_sync_at().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(t) = *g {
+            if t.elapsed() < Duration::from_secs(30) {
+                return Ok(0);
+            }
+        }
+        *g = Some(Instant::now());
+    }
+    let Some(cfg) = load_chain_config(state) else {
+        return Ok(0);
+    };
+    let st = status(state).await?;
+    let Some(client) = st.client else {
+        return Ok(0);
+    };
+    let head = rpc(&cfg.rpc, "eth_blockNumber", serde_json::json!([])).await?;
+    let head = u64::from_str_radix(head.as_str().unwrap_or("0x0").trim_start_matches("0x"), 16)
+        .unwrap_or(0);
+    let mut from = state.db.settlement_scan_from(cfg.deploy_block)?;
+    if head == 0 || from > head {
+        return Ok(0);
+    }
+    // Settled(address indexed client, address indexed worker, uint256, uint256, uint256)
+    let topic0 = format!(
+        "0x{}",
+        hex::encode(keccak(b"Settled(address,address,uint256,uint256,uint256)"))
+    );
+    let topic_client = format!("0x{}", hex::encode(word_address(&client)?));
+    // Public RPCs cap the block span of one eth_getLogs; walk in slices.
+    const SPAN: u64 = 20_000;
+    let mut found = 0;
+    while from <= head {
+        let to = (from + SPAN - 1).min(head);
+        let logs = rpc(
+            &cfg.rpc,
+            "eth_getLogs",
+            serde_json::json!([{
+                "address": cfg.pot,
+                "fromBlock": format!("0x{from:x}"),
+                "toBlock": format!("0x{to:x}"),
+                "topics": [topic0, topic_client]
+            }]),
+        )
+        .await?;
+        for log in logs.as_array().into_iter().flatten() {
+            if let Some(t) = parse_settled_log(log) {
+                state.db.record_settlement(&t)?;
+                found += 1;
+            }
+        }
+        state.db.set_setting("settle_scan_block", &(to + 1).to_string())?;
+        from = to + 1;
+    }
+    Ok(found)
+}
+
+fn settle_sync_at() -> &'static Mutex<Option<Instant>> {
+    static T: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+    T.get_or_init(|| Mutex::new(None))
+}
+
+fn parse_settled_log(log: &serde_json::Value) -> Option<crate::store::Settlement> {
+    let topics = log.get("topics")?.as_array()?;
+    let worker_topic = topics.get(2)?.as_str()?.trim_start_matches("0x");
+    if worker_topic.len() < 40 {
+        return None;
+    }
+    let data = log.get("data")?.as_str()?.trim_start_matches("0x");
+    if data.len() < 64 * 3 {
+        return None;
+    }
+    let block = log.get("blockNumber")?.as_str()?.trim_start_matches("0x");
+    Some(crate::store::Settlement {
+        tx_hash: log.get("transactionHash")?.as_str()?.to_string(),
+        payout: format!("0x{}", &worker_topic[worker_topic.len() - 40..]),
+        cumulative: read_u64(&data[0..64]),
+        block: u64::from_str_radix(block, 16).ok()?,
+        paid_to_worker: read_u64(&data[64..128]),
+        fee: read_u64(&data[128..192]),
+    })
+}
+
+pub fn explorer_tx(chain_id: u64, hash: &str) -> Option<String> {
     let hash = if hash.starts_with("0x") || hash.starts_with("0X") {
         hash.to_string()
     } else {

@@ -51,6 +51,10 @@ export function Wallet() {
           if (!cancelled) setDeposits(d);
         })
         .catch(() => undefined);
+      // Pull any new settlement transactions for this wallet from the chain
+      // (throttled in the backend), then re-read the ledger so a reply that
+      // was just collected shows its transaction.
+      api.syncSettlements().catch(() => undefined);
       // Local sqlite reads — cheap, and a reply billed seconds ago should
       // already be on the money page when the user comes to check it.
       api
@@ -221,8 +225,11 @@ export function Wallet() {
               {totalTokens.toLocaleString()} tokens across {usage.length} model
               {usage.length === 1 ? "" : "s"}
               {totalCost > 0 ? ` · ${usdExact(totalCost)} spent` : " · nothing billed"}
-              . Each row is one reply and the exact USDC it deducted — free
-              providers deduct nothing and are not listed.
+              . Each row is one reply, the exact USDC it deducted, and the
+              on-chain transaction that collected it. Charges are collected in
+              batches, so several replies can share one transaction; a reply
+              still waiting on its batch shows as pending. Free providers deduct
+              nothing and are not listed.
             </p>
             {spend.length === 0 ? (
               <p style={{ color: "var(--text-2)", fontSize: 13.5, margin: 0 }}>
@@ -237,6 +244,7 @@ export function Wallet() {
                     <th>Provider</th>
                     <th className="num">Tokens</th>
                     <th className="num">Cost</th>
+                    <th>Collected</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -247,6 +255,26 @@ export function Wallet() {
                       <td className="meta">{s.peer ?? "—"}</td>
                       <td className="num">{s.tokens != null ? s.tokens.toLocaleString() : "—"}</td>
                       <td className="num">{usdExact(s.cost_micros)}</td>
+                      <td className="mono">
+                        {s.settle_tx && s.settle_url ? (
+                          <a
+                            href={s.settle_url}
+                            title={`Collected in block ${s.settle_block ?? "?"}`}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              void openUrl(s.settle_url as string);
+                            }}
+                          >
+                            {shortHash(s.settle_tx)}
+                          </a>
+                        ) : s.settle_tx ? (
+                          shortHash(s.settle_tx)
+                        ) : s.cumulative_micros != null ? (
+                          <span className="meta">pending</span>
+                        ) : (
+                          <span className="meta" title="Recorded before settlement tracking existed">—</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -593,7 +593,23 @@ pub fn token_usage(state: St<'_>) -> Result<Vec<ModelUsage>> {
 /// first, so the user can audit exactly what left the pot and for what.
 #[tauri::command]
 pub fn spend_history(state: St<'_>, limit: Option<u32>) -> Result<Vec<crate::store::SpendEntry>> {
-    state.db.spend_history(limit.unwrap_or(100))
+    let chain_id = crate::pot::load_chain_config(&state).map(|c| c.chain_id).unwrap_or(0);
+    let mut rows = state.db.spend_history(limit.unwrap_or(100))?;
+    for row in &mut rows {
+        row.settle_url = row
+            .settle_tx
+            .as_deref()
+            .and_then(|h| crate::pot::explorer_tx(chain_id, h));
+    }
+    Ok(rows)
+}
+
+/// Pull this wallet's settlement transactions from the chain into the
+/// ledger. Throttled inside; cheap to call from a polling screen.
+#[tauri::command]
+pub async fn sync_settlements(app: AppHandle) -> Result<usize> {
+    let state = app.state::<Arc<AppState>>().inner().clone();
+    crate::pot::sync_settlements(&state).await
 }
 
 /// Opens a terminal already running the tool, so a connect can be seen
