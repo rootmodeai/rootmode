@@ -432,6 +432,35 @@ impl Node {
 }
 
 /// `0.0.0.0` / `::` are placeholders, not addresses anyone can dial.
+/// Whether an address has any chance of working from another network: its
+/// transport starts with a public IP or a DNS name. Loopback, RFC1918,
+/// CGNAT, link-local and docker-bridge ranges do not travel. For a relay
+/// circuit this judges the relay's own address — a circuit through a
+/// private relay address is as dead as the address itself.
+fn reachable_from_afar(addr: &Multiaddr) -> bool {
+    match addr.iter().next() {
+        Some(Protocol::Ip4(ip)) => {
+            let cgnat = ip.octets()[0] == 100 && (ip.octets()[1] & 0b1100_0000) == 64;
+            !(ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || ip.is_broadcast()
+                || ip.is_documentation()
+                || cgnat)
+        }
+        Some(Protocol::Ip6(ip)) => {
+            let unique_local = (ip.segments()[0] & 0xfe00) == 0xfc00;
+            let link_local = (ip.segments()[0] & 0xffc0) == 0xfe80;
+            !(ip.is_loopback() || ip.is_unspecified() || unique_local || link_local)
+        }
+        Some(Protocol::Dns(_) | Protocol::Dns4(_) | Protocol::Dns6(_) | Protocol::Dnsaddr(_)) => {
+            true
+        }
+        _ => false,
+    }
+}
+
 fn is_unspecified(addr: &Multiaddr) -> bool {
     addr.iter().any(|p| match p {
         libp2p::multiaddr::Protocol::Ip4(ip) => ip.is_unspecified(),
@@ -658,14 +687,26 @@ impl EventLoop {
             }
 
             // Identify is how we learn addresses that are actually reachable,
-            // including relayed ones. Feed them to Kademlia.
+            // including relayed ones. Feed them to Kademlia — but not
+            // wholesale: a peer reports every interface it bound, docker
+            // bridges and private subnets included, plus one relay circuit
+            // per such address. From outside its network those are black
+            // holes: each dial sits in a TCP timeout, and the circuit
+            // variants drown the relay connection's stream budget. A fleet
+            // of 24 workers advertising three dead addresses each was enough
+            // to make most of them look offline. The exception is a peer
+            // mdns has seen on our own network — its private addresses are
+            // exactly the reachable ones.
             SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received {
                 peer_id,
                 info,
                 ..
             })) => {
+                let local = self.local_peers.contains(&peer_id);
                 for addr in info.listen_addrs {
-                    self.swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+                    if local || reachable_from_afar(&addr) {
+                        self.swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+                    }
                 }
             }
 
@@ -794,5 +835,38 @@ impl EventLoop {
 
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn judged(addr: &str) -> bool {
+        reachable_from_afar(&addr.parse().unwrap())
+    }
+
+    #[test]
+    fn addresses_that_cannot_travel_are_refused() {
+        // What a dockerised worker actually advertises: every host interface.
+        assert!(!judged("/ip4/172.17.0.1/tcp/4108"), "docker bridge");
+        assert!(!judged("/ip4/10.114.0.7/tcp/4103"), "private VPC");
+        assert!(!judged("/ip4/127.0.0.1/tcp/4001"), "loopback");
+        assert!(!judged("/ip4/192.168.1.20/tcp/9944"), "home LAN");
+        assert!(!judged("/ip4/100.64.0.1/tcp/1"), "CGNAT");
+        assert!(!judged("/ip6/fe80::1/tcp/1"), "link-local v6");
+        // A circuit is only as reachable as the relay it goes through.
+        assert!(!judged(
+            "/ip4/172.17.0.1/tcp/4001/p2p/12D3KooWLXbwVxwKHvEEMdbEbNCv49wVUKc2mieGZfDGw73hj3YW/p2p-circuit"
+        ));
+    }
+
+    #[test]
+    fn addresses_the_wider_internet_can_dial_are_kept() {
+        assert!(judged("/ip4/165.245.246.193/tcp/4101"));
+        assert!(judged("/dns4/bootstrap.rootmode.ai/tcp/4001"));
+        assert!(judged(
+            "/ip4/165.245.246.193/tcp/4001/p2p/12D3KooWLXbwVxwKHvEEMdbEbNCv49wVUKc2mieGZfDGw73hj3YW/p2p-circuit"
+        ));
     }
 }
