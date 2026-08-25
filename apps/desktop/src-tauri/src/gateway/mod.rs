@@ -643,20 +643,20 @@ async fn submit(
         .filter(|p| p.amount > 0.0)
     {
         if let Ok(st) = crate::pot::status(state).await {
-            if let (Some(client), Some(cfg)) = (st.client.as_deref(), crate::pot::load_chain_config(state)) {
+            if let (Some(client), Some(_cfg)) = (st.client.as_deref(), crate::pot::load_chain_config(state)) {
                 submit.payer = Some(client.to_string());
-                submit.bond = Some(
-                    crate::pot::issue_ticket(
-                        state,
-                        job_id,
-                        price,
-                        JobKind::Llm,
-                        &payload,
-                        client,
-                        &cfg.worker,
-                    )
-                    .await?,
-                );
+                let (bond, reserve) = crate::pot::issue_ticket(
+                    state,
+                    job_id,
+                    price,
+                    JobKind::Llm,
+                    &payload,
+                    client,
+                    &crate::pot::named_payout(peer.payout.as_deref())?,
+                )
+                .await?;
+                submit.bond = Some(bond);
+                submit.reserve = reserve;
             }
         }
     }

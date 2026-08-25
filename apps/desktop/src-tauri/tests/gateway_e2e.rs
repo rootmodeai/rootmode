@@ -140,6 +140,7 @@ async fn app_at(worker_endpoint: String) -> (Arc<AppState>, Arc<Gateway>, gatewa
             // No country announced by this stub worker.
             None,
             None,
+            None,
         )
         .unwrap();
 

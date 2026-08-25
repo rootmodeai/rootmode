@@ -6,7 +6,7 @@
 //! transaction, so collection does not depend on a forked client.
 
 use k256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey};
-use rootmode_core::payments::{address_of, keccak, SpendTicket};
+use rootmode_core::payments::{address_of, keccak, ReserveTicket, SpendTicket};
 
 use crate::config::PaymentsConfig;
 use crate::error::{Result, WorkerError};
@@ -71,38 +71,57 @@ pub async fn channel_state(
     }))
 }
 
-/// Record and pay the ticket. Best-effort: a failure leaves the ticket on
-/// disk for a later collect rather than blocking delivery after a valid pay.
-///
-/// If `payments.key` is set, this node signs an EIP-155 transaction and
-/// sends it with `eth_sendRawTransaction`. Otherwise it asks the RPC to
-/// sign (`eth_sendTransaction`) — which only works when that account is
-/// unlocked on the node.
-pub async fn settle(payments: &PaymentsConfig, ticket: &SpendTicket, sig: &[u8]) -> Result<String> {
-    let data = encode_settle(ticket, sig)?;
-    let hash = if let Some(key) = signing_key(payments)? {
-        send_signed(payments, &key, data).await?
-    } else {
-        let from = {
-            let s = payments.sender.trim();
-            if s.is_empty() {
-                return Err(WorkerError::Rejected(
-                    "set payments.key (or ROOTMODE_PAY_KEY) so this node can sign settle".into(),
-                ));
-            }
-            s.to_string()
-        };
-        let tx = serde_json::json!([{
-            "from": from,
-            "to": payments.contract,
-            "data": format!("0x{}", hex::encode(data)),
-            "gas": "0x7a120"
-        }]);
-        let hash = rpc(&payments.rpc, "eth_sendTransaction", tx).await?;
-        hash.as_str().unwrap_or_default().to_string()
-    };
+/// Post a client-signed `reserve()`. Anyone may call it; this node does
+/// because it already holds ETH for `settle`.
+pub async fn reserve(payments: &PaymentsConfig, ticket: &ReserveTicket, sig: &[u8]) -> Result<String> {
+    let data = encode_call(
+        b"reserve(address,address,uint256,uint64,bytes)",
+        &ticket.client,
+        &ticket.worker_payout,
+        ticket.max_amount,
+        ticket.deadline,
+        sig,
+    )?;
+    let hash = send_call(payments, data).await?;
     wait_ok(&payments.rpc, &hash).await?;
     Ok(hash)
+}
+
+pub async fn settle(payments: &PaymentsConfig, ticket: &SpendTicket, sig: &[u8]) -> Result<String> {
+    let data = encode_call(
+        b"settle(address,address,uint256,uint64,bytes)",
+        &ticket.client,
+        &ticket.worker_payout,
+        ticket.cumulative,
+        ticket.deadline,
+        sig,
+    )?;
+    let hash = send_call(payments, data).await?;
+    wait_ok(&payments.rpc, &hash).await?;
+    Ok(hash)
+}
+
+async fn send_call(payments: &PaymentsConfig, data: Vec<u8>) -> Result<String> {
+    if let Some(key) = signing_key(payments)? {
+        return send_signed(payments, &key, data).await;
+    }
+    let from = {
+        let s = payments.sender.trim();
+        if s.is_empty() {
+            return Err(WorkerError::Rejected(
+                "set payments.key (or ROOTMODE_PAY_KEY) so this node can sign chain calls".into(),
+            ));
+        }
+        s.to_string()
+    };
+    let tx = serde_json::json!([{
+        "from": from,
+        "to": payments.contract,
+        "data": format!("0x{}", hex::encode(data)),
+        "gas": "0x7a120"
+    }]);
+    let hash = rpc(&payments.rpc, "eth_sendTransaction", tx).await?;
+    Ok(hash.as_str().unwrap_or_default().to_string())
 }
 
 fn signing_key(payments: &PaymentsConfig) -> Result<Option<SigningKey>> {
@@ -279,13 +298,20 @@ fn parse_u64_hex(s: &str) -> Result<u64> {
     u64::from_str_radix(h, 16).map_err(|e| WorkerError::Net(format!("bad hex quantity {s}: {e}")))
 }
 
-fn encode_settle(ticket: &SpendTicket, sig: &[u8]) -> Result<Vec<u8>> {
-    let sel = &keccak(b"settle(address,address,uint256,uint64,bytes)")[..4];
+fn encode_call(
+    signature: &[u8],
+    client: &str,
+    worker: &str,
+    amount: u64,
+    deadline: u64,
+    sig: &[u8],
+) -> Result<Vec<u8>> {
+    let sel = &keccak(signature)[..4];
     let mut out = Vec::from(sel);
-    out.extend_from_slice(&word_address(&ticket.client)?);
-    out.extend_from_slice(&word_address(&ticket.worker_payout)?);
-    out.extend_from_slice(&word_u256(ticket.cumulative));
-    out.extend_from_slice(&word_u256(ticket.deadline));
+    out.extend_from_slice(&word_address(client)?);
+    out.extend_from_slice(&word_address(worker)?);
+    out.extend_from_slice(&word_u256(amount));
+    out.extend_from_slice(&word_u256(deadline));
     out.extend_from_slice(&word_u256(5 * 32));
     out.extend_from_slice(&word_u256(sig.len() as u64));
     let mut padded = sig.to_vec();

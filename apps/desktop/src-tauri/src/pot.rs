@@ -264,6 +264,19 @@ pub fn app_key_address(state: &AppState) -> Result<String> {
     Ok(address_of(load_or_create_app_key(&state.app_data)?.verifying_key()))
 }
 
+/// The address a priced job locks against: the worker's own payout, not the
+/// unused `worker` field in chain.base.json (zero on Base).
+pub fn named_payout(raw: Option<&str>) -> Result<String> {
+    let s = raw.unwrap_or("").trim();
+    let hex = s.trim_start_matches("0x");
+    if s.is_empty() || hex.chars().all(|c| c == '0') {
+        return Err(AppError::Invalid(
+            "this provider did not name a payout address".into(),
+        ));
+    }
+    Ok(s.to_string())
+}
+
 fn load_or_create_app_key(app_data: &Path) -> Result<SigningKey> {
     let path = app_data.join("pot-app.key");
     if path.exists() {
@@ -476,8 +489,9 @@ fn worst_case_micros(price: f64, kind: JobKind) -> Micros {
 }
 
 /// Lock enough 1M-token slices to cover this job and return the signed bond.
-/// The stream starts immediately; `pay_invoice` later captures the actual bill
-/// (or a mid-stream top-up if the reply runs past the prepaid slices).
+/// If the on-chain reserve is short, also return a signed `reserve()` for the
+/// **worker** to post (it already pays gas). The stream starts immediately;
+/// `pay_invoice` later captures the actual bill.
 pub async fn issue_ticket(
     state: &AppState,
     job_id: Uuid,
@@ -486,7 +500,7 @@ pub async fn issue_ticket(
     payload: &JobPayload,
     client: &str,
     worker_payout: &str,
-) -> Result<JobPay> {
+) -> Result<(JobPay, Option<rootmode_core::ReservePost>)> {
     ensure_flush_loop(state.app_data.clone());
     let cfg = load_chain_config(state).ok_or_else(|| AppError::Invalid("no local chain".into()))?;
     let st = status(state).await?;
@@ -504,7 +518,7 @@ pub async fn issue_ticket(
     // a normal reply never stops to wait for another ticket.
     let need = job_cap;
     let _ = chunk;
-    ensure_reserve(state, &cfg, client, worker_payout, need).await?;
+    let reserve = sign_reserve_if_needed(state, &cfg, client, worker_payout, need).await?;
 
     let _gate = gate().lock().await;
     let (authorised, _on_chain) = authorised_so_far(&cfg, client, worker_payout).await;
@@ -525,12 +539,15 @@ pub async fn issue_ticket(
                 job_cap,
             },
         );
-    Ok(JobPay {
-        v: rootmode_core::PROTOCOL_VERSION,
-        job_id,
-        ticket: signed.0,
-        sig: format!("0x{}", hex::encode(signed.1)),
-    })
+    Ok((
+        JobPay {
+            v: rootmode_core::PROTOCOL_VERSION,
+            job_id,
+            ticket: signed.0,
+            sig: format!("0x{}", hex::encode(signed.1)),
+        },
+        reserve,
+    ))
 }
 
 fn job_lock_micros(price: &Price, kind: JobKind, payload: &JobPayload) -> Micros {
@@ -576,17 +593,17 @@ fn lock_micros(price: &Price, kind: JobKind, payload: &JobPayload) -> Micros {
     }
 }
 
-async fn ensure_reserve(
+async fn sign_reserve_if_needed(
     state: &AppState,
     cfg: &ChainConfig,
     client: &str,
     worker: &str,
     need: u64,
-) -> Result<()> {
+) -> Result<Option<rootmode_core::ReservePost>> {
     let (reserved, paid) = channel(cfg, client, worker).await.unwrap_or((0, 0));
     let locked_amt = reserved.saturating_sub(paid);
     if locked_amt >= need {
-        return Ok(());
+        return Ok(None);
     }
     let new_max = reserved.saturating_add(need.saturating_sub(locked_amt));
     let key = load_or_create_app_key(&state.app_data)?;
@@ -607,25 +624,10 @@ async fn ensure_reserve(
         .map_err(|e| AppError::Invalid(e.to_string()))?;
     let mut bytes = sig.to_bytes().to_vec();
     bytes.push(rec.to_byte() + 27);
-    let data = encode_app_call(
-        b"reserve(address,address,uint256,uint64,bytes)",
-        &ticket.client,
-        &ticket.worker_payout,
-        ticket.max_amount,
-        ticket.deadline,
-        &bytes,
-    )?;
-    let tx = serde_json::json!([{
-        "from": cfg.worker,
-        "to": cfg.pot,
-        "data": format!("0x{}", hex::encode(data)),
-        "gas": "0x7a120"
-    }]);
-    let hash = rpc(&cfg.rpc, "eth_sendTransaction", tx).await?;
-    let hash = hash.as_str().unwrap_or_default().to_string();
-    wait_ok(cfg, &hash).await?;
-    log::info!("pot reserved {new_max} for {worker} {hash}");
-    Ok(())
+    Ok(Some(rootmode_core::ReservePost {
+        ticket,
+        sig: format!("0x{}", hex::encode(bytes)),
+    }))
 }
 
 pub fn drop_job(job_id: Uuid) {
@@ -966,14 +968,14 @@ async fn flush_worker(app_data: &Path, cfg: &ChainConfig, wk: &str) -> Result<Op
         return Ok(None);
     }
     let settled_upto = ticket.cumulative;
-    let hash = match send_settle(cfg, &ticket, &sig).await {
+    let hash = match send_settle(app_data, cfg, &ticket, &sig).await {
         Ok(h) => h,
         Err(e) => {
             let msg = e.to_string();
             if msg.to_lowercase().contains("expired") {
                 let (fresh, fresh_sig) =
                     sign_latest(app_data, cfg, &ticket.client, &ticket.worker_payout, ticket.cumulative)?;
-                let hash = send_settle(cfg, &fresh, &fresh_sig).await?;
+                let hash = send_settle(app_data, cfg, &fresh, &fresh_sig).await?;
                 latest()
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -1008,16 +1010,15 @@ async fn flush_worker(app_data: &Path, cfg: &ChainConfig, wk: &str) -> Result<Op
     Ok(Some(hash))
 }
 
-async fn send_settle(cfg: &ChainConfig, ticket: &SpendTicket, sig: &[u8]) -> Result<String> {
+async fn send_settle(
+    app_data: &Path,
+    cfg: &ChainConfig,
+    ticket: &SpendTicket,
+    sig: &[u8],
+) -> Result<String> {
     let data = encode_settle(ticket, sig)?;
-    let tx = serde_json::json!([{
-        "from": cfg.worker,
-        "to": cfg.pot,
-        "data": format!("0x{}", hex::encode(data)),
-        "gas": "0x7a120"
-    }]);
-    let hash = rpc(&cfg.rpc, "eth_sendTransaction", tx).await?;
-    let hash = hash.as_str().unwrap_or_default().to_string();
+    let key = load_or_create_app_key(app_data)?;
+    let hash = crate::eth_tx::send_call(&cfg.rpc, &key, cfg.chain_id, &cfg.pot, data).await?;
     wait_ok(cfg, &hash).await?;
     Ok(hash)
 }

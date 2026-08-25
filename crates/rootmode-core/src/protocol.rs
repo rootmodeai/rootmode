@@ -92,6 +92,19 @@ pub struct JobSubmit {
     /// the worker settles this prepaid amount.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bond: Option<JobPay>,
+    /// Signed `reserve()` for the worker to post. Anyone can submit it; the
+    /// worker already pays gas to settle, so it posts this too. The client
+    /// never needs ETH.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reserve: Option<ReservePost>,
+}
+
+/// App-key signature over a [`crate::payments::ReserveTicket`]. The worker
+/// (or anyone) posts it on-chain.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReservePost {
+    pub ticket: crate::payments::ReserveTicket,
+    pub sig: String,
 }
 
 impl JobSubmit {
@@ -105,14 +118,15 @@ impl JobSubmit {
             spend: None,
             payer: None,
             bond: None,
+            reserve: None,
         }
     }
 
     /// Sign in place. The `from` field is set to the signer's peer id.
     ///
     /// Preimage is the job object (`v`, `from`, `job_id`, `payload`, and any
-    /// `payer`/`bond`/`spend`) with `sig` removed. The on-the-wire `"type"`
-    /// tag is not part of it.
+    /// `payer`/`bond`/`spend`/`reserve`) with `sig` removed. The on-the-wire
+    /// `"type"` tag is not part of it.
     pub fn signed_by(mut self, identity: &Identity) -> Result<Self> {
         self.from = identity.peer_id();
         self.sig = None;
@@ -378,12 +392,40 @@ impl Default for Price {
     }
 }
 
+/// Round a USD rate up to two decimal places.
+pub fn ceil_cents(x: f64) -> f64 {
+    if !x.is_finite() || x <= 0.0 {
+        return 0.0;
+    }
+    let scaled = x * 100.0;
+    let nearest = scaled.round();
+    if (scaled - nearest).abs() < 1e-6 {
+        nearest / 100.0
+    } else {
+        scaled.ceil() / 100.0
+    }
+}
+
 impl Price {
     pub fn new(amount: f64) -> Self {
         Self {
-            amount,
+            amount: ceil_cents(amount),
             ..Self::default()
         }
+    }
+
+    /// Round every rate up to two decimal places.
+    pub fn round_protocol(mut self) -> Self {
+        self.amount = ceil_cents(self.amount);
+        self.input = self.input.map(ceil_cents);
+        self.output = self.output.map(ceil_cents);
+        self.cache = self.cache.map(ceil_cents);
+        self.cache_write = self.cache_write.map(ceil_cents);
+        let top = self.max_rate();
+        if top > self.amount {
+            self.amount = top;
+        }
+        self
     }
 
     pub fn is_free(&self) -> bool {
@@ -393,12 +435,12 @@ impl Price {
     }
 
     /// Split rates in USD / million tokens. A flat [`Self::amount`] fills
-    /// every missing component.
+    /// every missing component. Each rate is rounded up to two decimal places.
     pub fn llm_rates(&self) -> (f64, f64, f64, f64) {
-        let input = self.input.unwrap_or(self.amount);
-        let output = self.output.unwrap_or(self.amount);
-        let cache = self.cache.unwrap_or(input);
-        let cache_write = self.cache_write.unwrap_or(input).max(input);
+        let input = ceil_cents(self.input.unwrap_or(self.amount));
+        let output = ceil_cents(self.output.unwrap_or(self.amount));
+        let cache = ceil_cents(self.cache.unwrap_or(input));
+        let cache_write = ceil_cents(self.cache_write.unwrap_or(input)).max(input);
         (input, output, cache, cache_write)
     }
 
@@ -451,9 +493,12 @@ pub struct ModelDescriptor {
 }
 
 impl ModelDescriptor {
-    /// What this costs for ranking purposes. Unpriced is free.
+    /// What this costs for ranking and the picker. Unpriced is free.
     pub fn amount(&self) -> f64 {
-        self.price.as_ref().map(|p| p.amount).unwrap_or(0.0)
+        self.price
+            .as_ref()
+            .map(|p| ceil_cents(p.amount.max(p.max_rate())))
+            .unwrap_or(0.0)
     }
 }
 
@@ -753,6 +798,28 @@ mod tests {
         assert_eq!(price.charge_llm_micros(500, 500, 0), 20_000);
         assert_eq!(price.chunk_micros(), 20_000_000, "1M tokens at $20/M is $20");
         assert_eq!(price.tokens_for_micros(500_000), 25_000); // $0.50 at $20/M
+    }
+
+    #[test]
+    fn advertised_rates_round_up_to_cents() {
+        assert_eq!(ceil_cents(0.141), 0.15);
+        assert_eq!(ceil_cents(0.14), 0.14);
+        assert_eq!(ceil_cents(0.15), 0.15);
+        assert_eq!(ceil_cents(0.3 * 1.15), 0.35);
+        assert_eq!(ceil_cents(0.0), 0.0);
+        assert_eq!(Price::new(0.141).amount, 0.15);
+        let listed = ModelDescriptor {
+            id: "m".into(),
+            sha256: None,
+            kind: crate::JobKind::Llm,
+            price: Some(Price {
+                amount: 0.141,
+                input: Some(0.141),
+                output: Some(0.139),
+                ..Price::default()
+            }),
+        };
+        assert_eq!(listed.amount(), 0.15);
     }
 
     #[test]

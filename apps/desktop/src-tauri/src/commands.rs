@@ -119,6 +119,7 @@ pub async fn probe_peer(app: AppHandle, id: String) -> Result<Peer> {
                 a.as_ref().map(|a| a.max_concurrent),
                 a.as_ref().and_then(|a| a.country.as_deref()),
                 None,
+                a.as_ref().and_then(|a| a.payout.as_deref()),
             )?;
         }
         Err(e) => {
@@ -130,7 +131,7 @@ pub async fn probe_peer(app: AppHandle, id: String) -> Result<Peer> {
             };
             state
                 .db
-                .update_peer_status(&id, status, None, None, None, None, None, None, Some(&msg))?;
+                .update_peer_status(&id, status, None, None, None, None, None, None, Some(&msg), None)?;
         }
     }
 
@@ -220,6 +221,7 @@ pub async fn refresh_discovered(app: &AppHandle) -> Result<Vec<Peer>> {
             Some(announce.max_concurrent),
             announce.country.as_deref(),
             None,
+            announce.payout.as_deref(),
         )?;
         if let Ok(Some(updated)) = state.db.get_peer(&row.id) {
             log::info!("added {} ({})", updated.label, updated.caps.join(", "));

@@ -22,7 +22,7 @@ pub use job::{
 };
 pub use protocol::{
     ClientMessage, JobCancel, JobDelta, JobInvoice, JobPay, JobResult, JobResultBody,
-    JobStatusUpdate, JobSubmit, ModelDescriptor, PeerAnnounce, Price, WorkerMessage,
+    JobStatusUpdate, JobSubmit, ModelDescriptor, PeerAnnounce, Price, ReservePost, WorkerMessage,
     PROTOCOL_VERSION, STOPPED, TOKEN_CHUNK,
 };
 pub use tokens::TokenUsage;

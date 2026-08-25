@@ -354,11 +354,11 @@ impl Worker {
                 .iter()
                 .find(|m| m.id == model || model.starts_with(&m.id) || m.id.starts_with(model))
             {
-                return found.price.clone().unwrap_or_default();
+                return found.price.clone().unwrap_or_default().round_protocol();
             }
         }
         if models.len() == 1 {
-            return models[0].price.clone().unwrap_or_default();
+            return models[0].price.clone().unwrap_or_default().round_protocol();
         }
         Price::default()
     }
@@ -413,7 +413,7 @@ impl Worker {
             .domain()
             .ok_or_else(|| WorkerError::Rejected("this node has no settlement contract".into()))?;
 
-        let state = match self.read_channel(payer, &payout).await {
+        let mut state = match self.read_channel(payer, &payout).await {
             Ok(Some(state)) => state,
             Ok(None) => {
                 return Err(WorkerError::Rejected(
@@ -426,7 +426,42 @@ impl Worker {
             // than serve a priced job we cannot check.
             Err(e) => return Err(e),
         };
-        if state.remaining == 0 {
+        let need = self
+            .pending_bonds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&submit.job_id)
+            .map(|b| b.delta.max(1))
+            .unwrap_or(1);
+        if state.remaining < need {
+            if let Some(post) = submit.reserve.as_ref() {
+                if !post.ticket.worker_payout.eq_ignore_ascii_case(&payout) {
+                    return Err(WorkerError::Rejected(
+                        "reserve ticket is for a different payout address".into(),
+                    ));
+                }
+                if !post.ticket.client.eq_ignore_ascii_case(payer) {
+                    return Err(WorkerError::Rejected(
+                        "reserve ticket is for a different payer".into(),
+                    ));
+                }
+                let sig = hex::decode(post.sig.trim_start_matches("0x"))
+                    .map_err(|e| WorkerError::Rejected(format!("reserve signature: {e}")))?;
+                crate::chain::reserve(&self.config.payments, &post.ticket, &sig)
+                    .await
+                    .map_err(|e| WorkerError::Rejected(format!("could not post reserve: {e}")))?;
+                state = match self.read_channel(payer, &payout).await {
+                    Ok(Some(s)) => s,
+                    Ok(None) => {
+                        return Err(WorkerError::Rejected(
+                            "reserve posted but the channel could not be read back".into(),
+                        ));
+                    }
+                    Err(e) => return Err(e),
+                };
+            }
+        }
+        if state.remaining < need {
             return Err(WorkerError::Rejected(
                 "no remaining reserve on this channel; lock funds before sending work".into(),
             ));

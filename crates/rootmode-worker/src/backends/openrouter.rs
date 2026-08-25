@@ -162,14 +162,17 @@ impl Pricing {
             .max(output)
             .max(cache.unwrap_or(0.0))
             .max(cache_write.unwrap_or(0.0));
-        Some(Price {
-            amount,
-            currency: "USD".into(),
-            input: Some(input),
-            output: Some(output),
-            cache,
-            cache_write,
-        })
+        Some(
+            Price {
+                amount,
+                currency: "USD".into(),
+                input: Some(input),
+                output: Some(output),
+                cache,
+                cache_write,
+            }
+            .round_protocol(),
+        )
     }
 }
 
@@ -332,16 +335,16 @@ mod tests {
         assert_eq!(price.input, Some(0.3));
         assert_eq!(price.output, Some(2.5));
         assert_eq!(price.cache, Some(0.03));
-        assert_eq!(price.cache_write, Some(0.375));
+        assert_eq!(price.cache_write, Some(0.38)); // 0.375 rounds up
         assert_eq!(price.amount, 2.5);
         let marked = pricing.to_price(1.15).expect("priced");
-        assert_eq!(marked.input, Some(0.3 * 1.15));
-        assert_eq!(marked.output, Some(2.5 * 1.15));
-        assert_eq!(marked.cache, Some(0.03 * 1.15));
-        assert_eq!(marked.cache_write, Some(0.375 * 1.15));
-        assert_eq!(marked.amount, 2.5 * 1.15);
-        // 800 fresh at write premium 0.375 + 200 cached at 0.03 + 100 out at 2.5
-        assert_eq!(price.charge_llm_micros(1000, 100, 200), 300 + 6 + 250);
+        assert_eq!(marked.input, Some(0.35)); // 0.345
+        assert_eq!(marked.output, Some(2.88)); // 2.875
+        assert_eq!(marked.cache, Some(0.04)); // 0.0345
+        assert_eq!(marked.cache_write, Some(0.44)); // 0.43125
+        assert_eq!(marked.amount, 2.88);
+        // 800 fresh at write premium 0.38 + 200 cached at 0.03 + 100 out at 2.5
+        assert_eq!(price.charge_llm_micros(1000, 100, 200), 304 + 6 + 250);
     }
 
     #[test]

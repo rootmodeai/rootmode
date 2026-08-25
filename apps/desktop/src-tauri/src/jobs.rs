@@ -141,7 +141,15 @@ pub async fn submit(
         .filter(|p| p.amount > 0.0)
     {
         if let Ok(st) = crate::pot::status(&state).await {
-            if let (Some(client), Some(cfg)) = (st.client.as_deref(), crate::pot::load_chain_config(&state)) {
+            if let (Some(client), Some(_cfg)) = (st.client.as_deref(), crate::pot::load_chain_config(&state)) {
+                let payout = match crate::pot::named_payout(peer.payout.as_deref()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let msg = format!("could not lock funds for this job: {e}");
+                        fail(app, &state, record.job_id, &msg);
+                        return Err(AppError::Invalid(msg));
+                    }
+                };
                 match crate::pot::issue_ticket(
                     &state,
                     record.job_id,
@@ -149,13 +157,14 @@ pub async fn submit(
                     kind,
                     &payload,
                     client,
-                    &cfg.worker,
+                    &payout,
                 )
                 .await
                 {
-                    Ok(bond) => {
+                    Ok((bond, reserve)) => {
                         submit_msg.payer = Some(client.to_string());
                         submit_msg.bond = Some(bond);
+                        submit_msg.reserve = reserve;
                     }
                     Err(e) => {
                         let msg = format!("could not lock funds for this job: {e}");

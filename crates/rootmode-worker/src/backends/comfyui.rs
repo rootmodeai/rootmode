@@ -1354,10 +1354,13 @@ struct QueueResponse {
 
 impl ComfyBackend {
     fn advertised_price(&self, model_id: &str) -> Option<Price> {
-        lookup_price(model_id, self.config.price, &self.config.prices).map(|amount| Price {
-            amount,
-            currency: self.config.currency.clone(),
-            ..Price::default()
+        lookup_price(model_id, self.config.price, &self.config.prices).map(|amount| {
+            Price {
+                amount,
+                currency: self.config.currency.clone(),
+                ..Price::default()
+            }
+            .round_protocol()
         })
     }
 }

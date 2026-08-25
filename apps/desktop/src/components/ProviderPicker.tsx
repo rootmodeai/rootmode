@@ -155,7 +155,7 @@ export function ProviderPicker({
                     {r.peer_label}
                   </span>
                   <span className="s">
-                    {r.unpriced ? "free" : `${r.price} ${r.currency}`}
+                    {r.unpriced ? "free" : `${r.price.toFixed(2)} ${r.currency}`}
                     {r.latency_ms !== null ? ` · ${r.latency_ms} ms` : ""}
                   </span>
                 </button>

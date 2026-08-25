@@ -194,6 +194,7 @@ mod tests {
             last_error: None,
             source: "discovered".into(),
             added_at: 0,
+            payout: None,
         }
     }
 
@@ -288,6 +289,17 @@ mod tests {
             .map(|o| o.model)
             .collect();
         assert_eq!(images, vec!["sdxl"]);
+    }
+
+    #[test]
+    fn listed_prices_round_up_to_cents() {
+        let peers = vec![peer(
+            "or",
+            Some(10),
+            vec![model("llama", Some(0.141))],
+        )];
+        let rows = provider_options(&peers, JobKind::Llm);
+        assert_eq!(rows[0].price, 0.15);
     }
 
     #[test]

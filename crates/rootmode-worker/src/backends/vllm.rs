@@ -248,10 +248,13 @@ impl Backend for VllmBackend {
                     .get(&id)
                     .copied()
                     .or(self.config.price)
-                    .map(|amount| Price {
-                        amount,
-                        currency: self.config.currency.clone(),
-                        ..Price::default()
+                    .map(|amount| {
+                        Price {
+                            amount,
+                            currency: self.config.currency.clone(),
+                            ..Price::default()
+                        }
+                        .round_protocol()
                     }),
                 id,
                 kind: JobKind::Llm,

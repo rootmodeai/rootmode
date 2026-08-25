@@ -27,6 +27,9 @@ pub struct Peer {
     /// ISO 3166-1 alpha-2, as the worker declared it. `None` means it did not
     /// say — which is shown as "not stated", never guessed at from the address.
     pub country: Option<String>,
+    /// Where this peer asked to be paid. Named by the worker; locking funds
+    /// for a priced job uses this address, not a baked-in chain config.
+    pub payout: Option<String>,
     /// `ws://host:port/path`, `wss://…`, or [`MOCK_ENDPOINT`].
     pub endpoint: String,
     /// Expected ed25519 public key, if the user pinned one. When set, an
@@ -258,6 +261,7 @@ impl Db {
         // recorded before we measured it.
         self.add_column(&conn, "peers", "source", "TEXT NOT NULL DEFAULT 'manual'")?;
         self.add_column(&conn, "peers", "country", "TEXT")?;
+        self.add_column(&conn, "peers", "payout", "TEXT")?;
         self.add_column(&conn, "messages", "tokens", "INTEGER")?;
         self.add_column(&conn, "messages", "thinking", "TEXT")?;
         // Which conversation, if any, a job belongs to. Without it a reply
@@ -352,7 +356,7 @@ impl Db {
         let conn = self.lock();
         let mut stmt = conn.prepare(
             r#"SELECT id, label, endpoint, public_key, peer_id, status, latency_ms,
-                      caps, models, max_concurrent, last_seen, last_error, added_at, source, country
+                      caps, models, max_concurrent, last_seen, last_error, added_at, source, country, payout
                FROM peers ORDER BY (endpoint = ?1) DESC, added_at ASC"#,
         )?;
         let rows = stmt.query_map(params![MOCK_ENDPOINT], row_to_peer)?;
@@ -363,7 +367,7 @@ impl Db {
         let conn = self.lock();
         let mut stmt = conn.prepare(
             r#"SELECT id, label, endpoint, public_key, peer_id, status, latency_ms,
-                      caps, models, max_concurrent, last_seen, last_error, added_at, source, country
+                      caps, models, max_concurrent, last_seen, last_error, added_at, source, country, payout
                FROM peers WHERE id = ?1"#,
         )?;
         Ok(stmt.query_row(params![id], row_to_peer).optional()?)
@@ -406,7 +410,7 @@ impl Db {
         let conn = self.lock();
         let mut stmt = conn.prepare(
             r#"SELECT id, label, endpoint, public_key, peer_id, status, latency_ms,
-                      caps, models, max_concurrent, last_seen, last_error, added_at, source, country
+                      caps, models, max_concurrent, last_seen, last_error, added_at, source, country, payout
                FROM peers WHERE endpoint = ?1"#,
         )?;
         Ok(stmt.query_row(params![endpoint], row_to_peer).optional()?)
@@ -443,6 +447,7 @@ impl Db {
         max_concurrent: Option<u32>,
         country: Option<&str>,
         last_error: Option<&str>,
+        payout: Option<&str>,
     ) -> Result<()> {
         let conn = self.lock();
         conn.execute(
@@ -455,6 +460,7 @@ impl Db {
                  max_concurrent = COALESCE(?7, max_concurrent),
                  country        = COALESCE(?8, country),
                  last_error     = ?9,
+                 payout         = COALESCE(?11, payout),
                  last_seen      = CASE WHEN ?2 = 'online' THEN ?10 ELSE last_seen END
                WHERE id = ?1"#,
             params![
@@ -468,6 +474,7 @@ impl Db {
                 country,
                 last_error,
                 now(),
+                payout,
             ],
         )?;
         Ok(())
@@ -976,6 +983,7 @@ fn row_to_peer(row: &rusqlite::Row<'_>) -> rusqlite::Result<Peer> {
         added_at: row.get(12)?,
         source: row.get(13)?,
         country: row.get(14)?,
+        payout: row.get(15)?,
     })
 }
 
@@ -1079,11 +1087,11 @@ mod tests {
             .add_peer("typed by hand", "ws://10.0.0.9:9944", None)
             .unwrap();
 
-        db.update_peer_status(&alive.id, "online", None, None, None, None, None, None, None)
+        db.update_peer_status(&alive.id, "online", None, None, None, None, None, None, None, None)
             .unwrap();
-        db.update_peer_status(&dead.id, "offline", None, None, None, None, None, None, None)
+        db.update_peer_status(&dead.id, "offline", None, None, None, None, None, None, None, None)
             .unwrap();
-        db.update_peer_status(&typed.id, "offline", None, None, None, None, None, None, None)
+        db.update_peer_status(&typed.id, "offline", None, None, None, None, None, None, None, None)
             .unwrap();
 
         assert_eq!(db.prune_dead_discovered(Duration::from_secs(0)).unwrap(), 1);

@@ -5,6 +5,7 @@ pub mod commands;
 pub mod connected_tools;
 pub mod erase;
 pub mod error;
+pub mod eth_tx;
 pub mod gateway;
 pub mod identity_store;
 pub mod jobs;

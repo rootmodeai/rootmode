@@ -10,6 +10,9 @@ export function fundingKindFromText(text: string): FundingKind | null {
   if (/limit for a single job|per-job cap|prepaid budget|raise (the |that )?limit|raise the cap/i.test(text)) {
     return "cap";
   }
+  if (/needs a little ETH|payout address/i.test(text)) {
+    return "chain";
+  }
   if (/does not cover|deposit more|fund your pot|this provider charges|could not lock funds/i.test(text)) {
     return "empty";
   }

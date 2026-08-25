@@ -104,6 +104,7 @@ export interface Peer {
    * null means "did not say" rather than "unknown location".
    */
   country: string | null;
+  payout: string | null;
   added_at: number;
 }
 

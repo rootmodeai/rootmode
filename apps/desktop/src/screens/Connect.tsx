@@ -193,7 +193,7 @@ export function Connect() {
                     {m.model} — {m.peer_label}
                     {m.unpriced
                       ? " · free"
-                      : ` · ${m.price} ${m.currency} / M tokens`}
+                      : ` · ${m.price.toFixed(2)} ${m.currency} / M tokens`}
                     {m.providers > 1 ? ` · ${m.providers} providers` : ""}
                   </option>
                 ))}
