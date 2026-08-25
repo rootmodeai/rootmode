@@ -182,6 +182,13 @@ impl Node {
                 if bootstrap_count == 0 {
                     kad_config.set_periodic_bootstrap_interval(None);
                 }
+                // The default cap is 16KiB, and a response listing 20 peers
+                // that each advertise every interface they bound comes to
+                // 20–30KB. The reader kills such a response, the query sees
+                // silence, and a whole healthy fleet reads as "nobody
+                // advertises". Addresses are also pruned at the source now,
+                // but one bloated node anywhere must not blind its callers.
+                kad_config.set_max_packet_size(256 * 1024);
 
                 Behaviour {
                     identify: identify::Behaviour::new(
@@ -506,6 +513,11 @@ struct EventLoop {
     /// Keys we are currently announcing, so a later `provide` can withdraw
     /// the ones that are no longer in the set.
     provided: HashSet<kad::RecordKey>,
+    /// Private/loopback addresses we advertised while no public one existed,
+    /// so the first public address can withdraw them.
+    advertised_private: Vec<Multiaddr>,
+    /// Whether any advertised address is one the wider internet can dial.
+    has_public_external: bool,
 }
 
 impl EventLoop {
@@ -517,6 +529,9 @@ impl EventLoop {
         relays: HashMap<PeerId, Multiaddr>,
         entry_points: Vec<Multiaddr>,
     ) -> Self {
+        // Operator-declared externals count: a node told to advertise a
+        // public address must not also advertise its private interfaces.
+        let has_public_external = swarm.external_addresses().any(reachable_from_afar);
         Self {
             swarm,
             commands,
@@ -531,6 +546,8 @@ impl EventLoop {
             reserved: HashSet::new(),
             entry_points,
             provided: HashSet::new(),
+            advertised_private: Vec::new(),
+            has_public_external,
         }
     }
 
@@ -659,7 +676,27 @@ impl EventLoop {
                 // so publish what we bound to — including relay circuit
                 // addresses, which are exactly the reachable ones when this
                 // node is behind NAT.
-                if !is_unspecified(&address) {
+                //
+                // But not every interface: a box with a docker bridge and two
+                // private subnets used to advertise all of them, and a DHT
+                // response listing twenty such peers blows past kad's packet
+                // cap and reads as an empty network. Once any address the
+                // wider internet can dial exists, it replaces the private
+                // ones; a node with none (a LAN worker, a dev machine) keeps
+                // advertising what it has, which is all its callers can use.
+                if is_unspecified(&address) {
+                    return;
+                }
+                if reachable_from_afar(&address) {
+                    if !self.has_public_external {
+                        self.has_public_external = true;
+                        for old in self.advertised_private.drain(..) {
+                            self.swarm.remove_external_address(&old);
+                        }
+                    }
+                    self.swarm.add_external_address(address);
+                } else if !self.has_public_external {
+                    self.advertised_private.push(address.clone());
                     self.swarm.add_external_address(address);
                 }
             }
