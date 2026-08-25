@@ -305,6 +305,13 @@ impl Db {
         // channel. This is what ties a reply to the settle tx that collected it.
         self.add_column(&conn, "spends", "cumulative_micros", "INTEGER")?;
         self.add_column(&conn, "spends", "payout", "TEXT")?;
+        // A reply that ended without a bill — stopped, or the stream broke —
+        // may still cost its prepaid chunk: the worker keeps it. Whether it
+        // did is settled by the chain (a settle of exactly the bond ticket),
+        // so the row carries the bond and the chunk, and resolves later.
+        self.add_column(&conn, "spends", "abandoned", "INTEGER NOT NULL DEFAULT 0")?;
+        self.add_column(&conn, "spends", "bond_cumulative", "INTEGER")?;
+        self.add_column(&conn, "spends", "chunk_micros", "INTEGER")?;
         // Which conversation, if any, a job belongs to. Without it a reply
         // can only be filed by whatever screen happened to be open when the
         // job finished — and if that screen was closed, the answer is lost.
@@ -958,8 +965,9 @@ impl Db {
         let conn = self.lock();
         conn.execute(
             r#"INSERT OR REPLACE INTO spends
-               (job_id, model, peer, tokens, cost_micros, at, cumulative_micros, payout)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+               (job_id, model, peer, tokens, cost_micros, at, cumulative_micros, payout,
+                abandoned, bond_cumulative, chunk_micros)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
             params![
                 s.job_id,
                 s.model,
@@ -969,6 +977,9 @@ impl Db {
                 s.at,
                 s.cumulative_micros.map(|c| c as i64),
                 s.payout.as_deref().map(|p| p.to_lowercase()),
+                s.abandoned as i64,
+                s.bond_cumulative.map(|c| c as i64),
+                s.chunk_micros.map(|c| c as i64),
             ],
         )?;
         Ok(())
@@ -991,6 +1002,23 @@ impl Db {
             ],
         )?;
         Ok(())
+    }
+
+    /// Resolve abandoned replies against the chain: a settle of exactly a
+    /// reply's bond ticket means the worker kept the prepaid chunk, and that
+    /// is what the reply cost. Returns how many were resolved.
+    pub fn resolve_abandoned(&self) -> Result<usize> {
+        let conn = self.lock();
+        let n = conn.execute(
+            r#"UPDATE spends
+               SET cost_micros = chunk_micros, cumulative_micros = bond_cumulative
+               WHERE abandoned = 1 AND cost_micros = 0 AND chunk_micros IS NOT NULL
+                 AND EXISTS (SELECT 1 FROM settlements t
+                              WHERE t.payout = spends.payout
+                                AND t.cumulative = spends.bond_cumulative)"#,
+            [],
+        )?;
+        Ok(n)
     }
 
     /// The block a settlement scan starts from: wherever the last scan
@@ -1022,17 +1050,21 @@ impl Db {
     pub fn spend_history(&self, limit: u32) -> Result<Vec<SpendEntry>> {
         let conn = self.lock();
         // The settle that collected a reply is the first one on its channel
-        // whose cumulative reaches the reply's ticket.
+        // whose cumulative reaches the reply's ticket. An abandoned reply
+        // appears only once the chain shows its chunk was kept; until then
+        // nothing was deducted and there is nothing to list.
         let mut stmt = conn.prepare(
             r#"SELECT s.job_id, s.model, s.peer, s.tokens, s.cost_micros, s.at,
-                      s.cumulative_micros, s.payout,
+                      s.cumulative_micros, s.payout, s.abandoned,
                       (SELECT t.tx_hash FROM settlements t
                         WHERE t.payout = s.payout AND t.cumulative >= s.cumulative_micros
                         ORDER BY t.cumulative ASC, t.block ASC LIMIT 1),
                       (SELECT t.block FROM settlements t
                         WHERE t.payout = s.payout AND t.cumulative >= s.cumulative_micros
                         ORDER BY t.cumulative ASC, t.block ASC LIMIT 1)
-               FROM spends s ORDER BY s.at DESC, s.rowid DESC LIMIT ?1"#,
+               FROM spends s
+               WHERE NOT (s.abandoned = 1 AND s.cost_micros = 0)
+               ORDER BY s.at DESC, s.rowid DESC LIMIT ?1"#,
         )?;
         let rows = stmt.query_map(params![limit], |row| {
             Ok(SpendEntry {
@@ -1044,8 +1076,11 @@ impl Db {
                 at: row.get(5)?,
                 cumulative_micros: row.get::<_, Option<i64>>(6)?.map(|c| c as u64),
                 payout: row.get(7)?,
-                settle_tx: row.get(8)?,
-                settle_block: row.get::<_, Option<i64>>(9)?.map(|b| b as u64),
+                abandoned: row.get::<_, i64>(8)? != 0,
+                bond_cumulative: None,
+                chunk_micros: None,
+                settle_tx: row.get(9)?,
+                settle_block: row.get::<_, Option<i64>>(10)?.map(|b| b as u64),
                 settle_url: None,
             })
         })?;
@@ -1157,6 +1192,16 @@ pub struct SpendEntry {
     pub cumulative_micros: Option<u64>,
     #[serde(default)]
     pub payout: Option<String>,
+    /// True when the reply ended without a bill and the worker kept the
+    /// prepaid chunk instead — `cost_micros` is then the chunk.
+    #[serde(default)]
+    pub abandoned: bool,
+    /// For an abandoned reply: the bond ticket and chunk at stake, until the
+    /// chain says whether the chunk was kept.
+    #[serde(default)]
+    pub bond_cumulative: Option<u64>,
+    #[serde(default)]
+    pub chunk_micros: Option<u64>,
     /// The transaction that collected this charge, once one has. A reply
     /// with none is charged but not yet collected — or predates tracking.
     #[serde(default)]
@@ -1474,6 +1519,9 @@ mod tests {
             at: 100,
             cumulative_micros: None,
             payout: None,
+            abandoned: false,
+            bond_cumulative: None,
+            chunk_micros: None,
             settle_tx: None,
             settle_block: None,
             settle_url: None,
@@ -1501,6 +1549,9 @@ mod tests {
             at: 101,
             cumulative_micros: None,
             payout: None,
+            abandoned: false,
+            bond_cumulative: None,
+            chunk_micros: None,
             settle_tx: None,
             settle_block: None,
             settle_url: None,
@@ -1555,6 +1606,9 @@ mod tests {
             at: 102,
             cumulative_micros: None,
             payout: None,
+            abandoned: false,
+            bond_cumulative: None,
+            chunk_micros: None,
             settle_tx: None,
             settle_block: None,
             settle_url: None,
@@ -1579,6 +1633,9 @@ mod tests {
             at: 100,
             cumulative_micros: None,
             payout: None,
+            abandoned: false,
+            bond_cumulative: None,
+            chunk_micros: None,
             settle_tx: None,
             settle_block: None,
             settle_url: None,
@@ -1593,6 +1650,9 @@ mod tests {
             at: 200,
             cumulative_micros: None,
             payout: None,
+            abandoned: false,
+            bond_cumulative: None,
+            chunk_micros: None,
             settle_tx: None,
             settle_block: None,
             settle_url: None,
@@ -1622,6 +1682,9 @@ mod tests {
             at: 201,
             cumulative_micros: None,
             payout: None,
+            abandoned: false,
+            bond_cumulative: None,
+            chunk_micros: None,
             settle_tx: None,
             settle_block: None,
             settle_url: None,
@@ -1644,6 +1707,9 @@ mod tests {
             at: 100,
             cumulative_micros: Some(cumulative),
             payout: Some("0xAbC".into()),
+            abandoned: false,
+            bond_cumulative: None,
+            chunk_micros: None,
             settle_tx: None,
             settle_block: None,
             settle_url: None,
@@ -1680,6 +1746,51 @@ mod tests {
         let rows = db.spend_history(10).unwrap();
         assert_eq!(by_job(&rows, "j3").settle_tx.as_deref(), Some("0xtx2"));
         assert_eq!(by_job(&rows, "j1").settle_tx.as_deref(), Some("0xtx1"), "the first covering tx, not the newest");
+    }
+
+    #[test]
+    fn a_stopped_reply_costs_its_chunk_only_once_the_chain_says_so() {
+        let db = db();
+        db.record_spend(&SpendEntry {
+            job_id: "stopped".into(),
+            model: "kimi-k3".into(),
+            peer: Some("anvil".into()),
+            tokens: None,
+            cost_micros: 0,
+            at: 100,
+            cumulative_micros: None,
+            payout: Some("0xabc".into()),
+            abandoned: true,
+            bond_cumulative: Some(2_111_626),
+            chunk_micros: Some(500_000),
+            settle_tx: None,
+            settle_block: None,
+            settle_url: None,
+        })
+        .unwrap();
+        assert!(
+            db.spend_history(10).unwrap().is_empty(),
+            "nothing deducted yet, so nothing to list"
+        );
+        // A settle past the bond, but not of it, is other work being collected.
+        db.record_settlement(&Settlement {
+            tx_hash: "0xother".into(), payout: "0xabc".into(), cumulative: 2_111_700,
+            block: 5, paid_to_worker: 0, fee: 0,
+        })
+        .unwrap();
+        assert_eq!(db.resolve_abandoned().unwrap(), 0);
+        // The bond ticket itself settling is the worker keeping the chunk.
+        db.record_settlement(&Settlement {
+            tx_hash: "0xchunk".into(), payout: "0xabc".into(), cumulative: 2_111_626,
+            block: 4, paid_to_worker: 450_000, fee: 50_000,
+        })
+        .unwrap();
+        assert_eq!(db.resolve_abandoned().unwrap(), 1);
+        let rows = db.spend_history(10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].abandoned);
+        assert_eq!(rows[0].cost_micros, 500_000);
+        assert_eq!(rows[0].settle_tx.as_deref(), Some("0xchunk"));
     }
 
     #[test]

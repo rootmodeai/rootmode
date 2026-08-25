@@ -251,7 +251,14 @@ export function Wallet() {
                   {spend.map((s, i) => (
                     <tr key={s.job_id ?? `row-${i}`}>
                       <td>{formatStamp(s.at)}</td>
-                      <td>{s.model}</td>
+                      <td>
+                        {s.model}
+                        {s.abandoned && (
+                          <div className="meta" title="The reply ended before it was billed, so the provider kept the prepaid amount">
+                            stopped · prepaid amount kept
+                          </div>
+                        )}
+                      </td>
                       <td className="meta">{s.peer ?? "—"}</td>
                       <td className="num">{s.tokens != null ? s.tokens.toLocaleString() : "—"}</td>
                       <td className="num">{usdExact(s.cost_micros)}</td>

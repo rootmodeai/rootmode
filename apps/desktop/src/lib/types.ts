@@ -326,6 +326,10 @@ export interface SpendEntry {
   /** The signed ticket this charge rode on, and its payout channel. */
   cumulative_micros: number | null;
   payout: string | null;
+  /** The reply ended without a bill and the worker kept the prepaid chunk. */
+  abandoned: boolean;
+  bond_cumulative: number | null;
+  chunk_micros: number | null;
   /**
    * The on-chain transaction that collected this charge. Null means charged
    * but not yet collected (settles are batched), or the reply predates

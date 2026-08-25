@@ -421,7 +421,9 @@ fn handle_message(
 }
 
 fn fail(app: &AppHandle, state: &AppState, job_id: Uuid, error: &str) {
-    crate::pot::drop_job(job_id);
+    // The bond may already be with the worker; whether it keeps the chunk
+    // is for the chain to say, so the job is abandoned, not forgotten.
+    crate::pot::abandon_job(state, job_id);
     let _ = state
         .db
         .update_job_status(job_id, JobStatus::Failed, 0.0, Some(error));

@@ -695,9 +695,10 @@ async fn submit(
                 Err(e) => Err(AppError::Net(format!("provider task failed: {e}"))),
             };
             // The chat pipeline clears its lock in `settle_job`; the gateway
-            // has no settle step, so clear it here or priced gateway jobs
-            // accumulate in the pending map forever.
-            crate::pot::drop_job(job_id);
+            // has no settle step. A job the client paid needs nothing more;
+            // one that ended unbilled is recorded with its bond, so the
+            // settlement scan can show whether the worker kept the chunk.
+            crate::pot::abandon_job(&state, job_id);
             out
         })
     };

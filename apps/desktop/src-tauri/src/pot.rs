@@ -120,6 +120,9 @@ struct PendingJob {
     /// settles must sign for this channel — `cfg.worker` is the zero address
     /// on Base, and a ticket for the zero channel can never be banked.
     payout: String,
+    /// The bond ticket's cumulative. If the reply ends unbilled and the
+    /// worker keeps the chunk, this is the ticket the chain will show settled.
+    bond_cumulative: Micros,
 }
 
 struct LatestTicket {
@@ -636,6 +639,7 @@ pub async fn issue_ticket(
                 model: payload.model_label(),
                 peer: peer_label.to_string(),
                 payout: worker_payout.to_string(),
+                bond_cumulative: cumulative,
             },
         );
     Ok((
@@ -743,11 +747,48 @@ async fn sign_reserve_if_needed(
     }))
 }
 
+/// Forget a job whose bond never reached a worker: nothing can be charged.
 pub fn drop_job(job_id: Uuid) {
     jobs()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&job_id);
+}
+
+/// A job that ended without a bill after its bond was sent — stopped, or the
+/// stream broke. The worker is entitled to keep the prepaid chunk, and may;
+/// whether it did is the chain's to say. Record the reply with its bond so
+/// the settlement scan can resolve it, and show it only if the chunk was
+/// actually taken. A job already billed needs nothing.
+pub fn abandon_job(state: &AppState, job_id: Uuid) {
+    let pending = jobs()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&job_id);
+    let Some(pending) = pending else {
+        return;
+    };
+    if pending.paid {
+        return;
+    }
+    if let Err(e) = state.db.record_spend(&SpendEntry {
+        job_id: job_id.to_string(),
+        model: pending.model.clone(),
+        peer: Some(pending.peer.clone()).filter(|p| !p.is_empty()),
+        tokens: None,
+        cost_micros: 0,
+        at: crate::store::now(),
+        cumulative_micros: None,
+        payout: Some(pending.payout.clone()),
+        abandoned: true,
+        bond_cumulative: Some(pending.bond_cumulative),
+        chunk_micros: Some(pending.ceiling),
+        settle_tx: None,
+        settle_block: None,
+        settle_url: None,
+    }) {
+        log::warn!("record abandoned job: {e}");
+    }
 }
 
 /// Sign a SpendTicket for this invoice. Refuses an amount above the
@@ -915,6 +956,9 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
             // this channel is the one whose cumulative first reaches this.
             cumulative_micros: Some(cumulative),
             payout: Some(worker.clone()),
+            abandoned: false,
+            bond_cumulative: None,
+            chunk_micros: None,
             settle_tx: None,
             settle_block: None,
             settle_url: None,
@@ -966,6 +1010,16 @@ pub async fn settle_job(
         return Ok(None);
     };
     if pending.paid {
+        return Ok(None);
+    }
+    // No result at all: the reply was stopped or the stream broke. There is
+    // nothing to meter; what it cost is whether the worker kept the chunk.
+    if meta.is_none() {
+        jobs()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(job_id, pending);
+        abandon_job(state, job_id);
         return Ok(None);
     }
     let amount = match pending.kind {
@@ -1057,6 +1111,9 @@ fn record_job_cost(
         at: crate::store::now(),
         cumulative_micros: cumulative,
         payout: Some(pending.payout.clone()),
+        abandoned: false,
+        bond_cumulative: None,
+        chunk_micros: None,
         settle_tx: None,
         settle_block: None,
         settle_url: None,
@@ -1546,6 +1603,13 @@ pub async fn sync_settlements(state: &AppState) -> Result<usize> {
         }
         state.db.set_setting("settle_scan_block", &(to + 1).to_string())?;
         from = to + 1;
+    }
+    if found > 0 {
+        match state.db.resolve_abandoned() {
+            Ok(n) if n > 0 => log::info!("{n} stopped repl{} charged their prepaid chunk", if n == 1 { "y" } else { "ies" }),
+            Err(e) => log::warn!("resolve abandoned replies: {e}"),
+            _ => {}
+        }
     }
     Ok(found)
 }
