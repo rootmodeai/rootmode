@@ -27,6 +27,8 @@ const FUND_HTML: &str = include_str!("fund.html"); // 7702 batch on Base only
 const FUND_PORT: u16 = 17331;
 const DEFAULT_MAX_JOB: Micros = 500_000; // $0.50
 const TICKET_TTL_SECS: u64 = 3600;
+/// How many jobs' worth of lock to hold on a channel when topping it up.
+const RESERVE_HEADROOM_JOBS: u64 = 4;
 const SETTLE_EVERY: Duration = Duration::from_secs(2);
 /// How long one successful [`status`] reading stays good enough to serve
 /// again. Several screens poll status; without this each poll is a burst of
@@ -603,7 +605,9 @@ pub async fn issue_ticket(
     // a normal reply never stops to wait for another ticket.
     let need = job_cap;
     let _ = chunk;
-    let reserve = sign_reserve_if_needed(state, &cfg, client, worker_payout, ch, need).await?;
+    let reserve =
+        sign_reserve_if_needed(state, &cfg, client, worker_payout, ch, need, st.balance_micros)
+            .await?;
 
     let _gate = gate().lock().await;
     let cached = cached_cumulative(worker_payout);
@@ -691,14 +695,23 @@ async fn sign_reserve_if_needed(
     worker: &str,
     ch: ChannelSnap,
     need: u64,
+    free: u64,
 ) -> Result<Option<rootmode_core::ReservePost>> {
     let remaining = ch.remaining();
-    let extra = need.saturating_sub(remaining);
-    let new_max = if extra == 0 {
-        ch.reserved
+    // Lock a few jobs' worth at a time, not exactly this job's need. Raised
+    // to the margin, the lock is exhausted by the next request: an editor
+    // fires several at once, each settles a little, and whichever worker
+    // reads the channel last finds itself a few thousand micros short and
+    // refuses with "no remaining reserve". Unused lock returns on close.
+    let want = need.saturating_mul(RESERVE_HEADROOM_JOBS);
+    let extra = if remaining < need.saturating_mul(2) {
+        want.saturating_sub(remaining).min(free)
     } else {
-        ch.reserved.saturating_add(extra)
+        0
     };
+    // Even with nothing to add, a ticket at the current lock lets the
+    // worker verify the payer signed for this channel at all.
+    let new_max = ch.reserved.saturating_add(extra);
     if new_max == 0 {
         return Ok(None);
     }

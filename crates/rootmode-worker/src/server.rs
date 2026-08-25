@@ -446,12 +446,11 @@ impl Worker {
             has_reserve = submit.reserve.is_some(),
             "priced lock check"
         );
-        if state.remaining < need {
-            let Some(post) = submit.reserve.as_ref() else {
-                return Err(WorkerError::Rejected(
-                    "priced job is missing a reserve ticket".into(),
-                ));
-            };
+        // Post a raise whenever the payer signed one above the current lock,
+        // not only once the lock is already short. The client tops up with
+        // headroom for several jobs; waiting until a job cannot fit means
+        // every concurrent request at the margin is refused first.
+        if let Some(post) = submit.reserve.as_ref() {
             if !post.ticket.worker_payout.eq_ignore_ascii_case(&payout) {
                 return Err(WorkerError::Rejected(
                     "reserve ticket is for a different payout address".into(),
@@ -485,9 +484,11 @@ impl Worker {
             }
         }
         if state.remaining < need {
-            return Err(WorkerError::Rejected(
-                "no remaining reserve on this channel; lock funds before sending work".into(),
-            ));
+            return Err(WorkerError::Rejected(if submit.reserve.is_none() {
+                "priced job is missing a reserve ticket".into()
+            } else {
+                "no remaining reserve on this channel; lock funds before sending work".into()
+            }));
         }
         if crate::chain::is_zero_address(&state.app_key) {
             return Err(WorkerError::Rejected(
