@@ -494,6 +494,17 @@ Reputation. Discovery gets clients to you; it does not tell them whether you
 are honest, and it does not tell you whether they are. Use `allow_peers` if
 you only want to serve people you know.
 
+## Images from OpenRouter
+
+An `openrouter` backend can also serve pictures: name a model whose output
+is images (`google/gemini-3.1-flash-image`, `openai/gpt-5-image-mini`, …)
+in its `models` list and the node advertises it as an **image** model. The
+per-picture price is the catalogue's output-image rate, times a dear-case
+2,000 image tokens, times `markup` — that is what the client locks. The
+bill is what the picture actually cost plus the markup, never more than
+the advertised price. A starting image (`from_image`) is passed along for
+edits. Video has no OpenRouter path; that stays with ComfyUI on a GPU.
+
 ## Payment
 
 A priced job is prepaid in **1 million token slices** (at the dearest of
