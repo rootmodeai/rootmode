@@ -110,6 +110,10 @@ struct PendingJob {
     /// Kept here because a gateway job has no row anywhere else to say so.
     model: String,
     peer: String,
+    /// The payout address this job's funds are locked against. Invoices and
+    /// settles must sign for this channel — `cfg.worker` is the zero address
+    /// on Base, and a ticket for the zero channel can never be banked.
+    payout: String,
 }
 
 struct LatestTicket {
@@ -583,15 +587,27 @@ pub async fn issue_ticket(
         JobKind::Llm => price.chunk_micros(),
         JobKind::Image | JobKind::Video => (price.amount * 1_000_000.0).round().max(1.0) as u64,
     };
-    let job_cap = job_lock_micros(&price, kind, payload).min(cap).max(1);
+    // One authoritative read of the channel for this whole issuance. A failed
+    // read must fail the job, not default to zero: a ticket signed against a
+    // guessed-at zero does not raise what the worker has already banked, and
+    // every job after it is rejected with a message nobody can act on.
+    let ch = channel_with_retry(&cfg, client, worker_payout).await?;
+    let mut job_cap = job_lock_micros(&price, kind, payload).min(cap).max(1);
+    // The contract checks each settle against the caps snapshotted into the
+    // channel at its first reserve — raising the account's limits later does
+    // not raise them. A lock above the channel's cap would settle as OverCap.
+    if ch.max_per_job > 0 {
+        job_cap = job_cap.min(ch.max_per_job);
+    }
     // First signature covers as many 1M-token slices as the job needs, so
     // a normal reply never stops to wait for another ticket.
     let need = job_cap;
     let _ = chunk;
-    let reserve = sign_reserve_if_needed(state, &cfg, client, worker_payout, need).await?;
+    let reserve = sign_reserve_if_needed(state, &cfg, client, worker_payout, ch, need).await?;
 
     let _gate = gate().lock().await;
-    let (authorised, _on_chain) = authorised_so_far(&cfg, client, worker_payout).await;
+    let cached = cached_cumulative(worker_payout);
+    let authorised = cached.max(ch.paid.max(ch.earned));
     let cumulative = authorised.saturating_add(need);
     let signed = sign_latest(&state.app_data, &cfg, client, worker_payout, cumulative)?;
     persist(&state.app_data);
@@ -611,6 +627,7 @@ pub async fn issue_ticket(
                 cost: None,
                 model: payload.model_label(),
                 peer: peer_label.to_string(),
+                payout: worker_payout.to_string(),
             },
         );
     Ok((
@@ -672,9 +689,9 @@ async fn sign_reserve_if_needed(
     cfg: &ChainConfig,
     client: &str,
     worker: &str,
+    ch: ChannelSnap,
     need: u64,
 ) -> Result<Option<rootmode_core::ReservePost>> {
-    let ch = channel(cfg, client, worker).await.unwrap_or(ChannelSnap::default());
     let remaining = ch.remaining();
     let extra = need.saturating_sub(remaining);
     let new_max = if extra == 0 {
@@ -789,7 +806,11 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
         .client
         .clone()
         .ok_or_else(|| AppError::Invalid("no funded pot".into()))?;
-    let worker = cfg.worker.clone();
+    // The channel this job locked funds against — never `cfg.worker`, which
+    // is the zero address on Base. A ticket for the zero channel is one the
+    // worker can only refuse, and refusing the real bill means it keeps the
+    // whole prepaid chunk instead.
+    let worker = pending.payout.clone();
     let cap = if st.max_per_job_micros == 0 {
         DEFAULT_MAX_JOB
     } else {
@@ -804,7 +825,7 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
 
     ensure_flush_loop(state.app_data.clone());
 
-    let (authorised, on_chain) = authorised_so_far(&cfg, &client, &worker).await;
+    let (authorised, on_chain) = authorised_so_far(&cfg, &client, &worker).await?;
     let extra = if invoice.top_up {
         pending.ceiling.saturating_add(invoice.amount)
     } else {
@@ -816,7 +837,7 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
         flush_worker(&state.app_data, &cfg, &wk).await?;
     }
 
-    let (authorised, on_chain) = authorised_so_far(&cfg, &client, &worker).await;
+    let (authorised, on_chain) = authorised_so_far(&cfg, &client, &worker).await?;
     let cumulative = authorised.saturating_add(extra);
     let signed = sign_latest(&state.app_data, &cfg, &client, &worker, cumulative)?;
     if !invoice.top_up {
@@ -929,7 +950,8 @@ pub async fn settle_job(
         .client
         .clone()
         .ok_or_else(|| AppError::Invalid("no funded pot".into()))?;
-    let worker = cfg.worker.clone();
+    // Same channel the funds were locked against — see `pay_invoice`.
+    let worker = pending.payout.clone();
     let cap = if st.max_per_job_micros == 0 {
         DEFAULT_MAX_JOB
     } else {
@@ -943,7 +965,7 @@ pub async fn settle_job(
     ensure_flush_loop(state.app_data.clone());
 
     let wk = worker_key(&worker);
-    let (authorised, on_chain) = authorised_so_far(&cfg, &client, &worker).await;
+    let (authorised, on_chain) = authorised_so_far(&cfg, &client, &worker).await?;
     let pending_delta = authorised.saturating_sub(on_chain);
     if pending_delta > 0 && pending_delta.saturating_add(amount) > cap {
         // This settle's delta is capped on-chain at maxPerJob, so flush
@@ -951,7 +973,7 @@ pub async fn settle_job(
         flush_worker(&state.app_data, &cfg, &wk).await?;
     }
 
-    let (authorised, on_chain) = authorised_so_far(&cfg, &client, &worker).await;
+    let (authorised, on_chain) = authorised_so_far(&cfg, &client, &worker).await?;
     let cumulative = authorised.saturating_add(amount);
     let signed = sign_latest(&state.app_data, &cfg, &client, &worker, cumulative)?;
     latest()
@@ -1001,19 +1023,42 @@ fn record_job_cost(
     }
 }
 
-async fn authorised_so_far(cfg: &ChainConfig, client: &str, worker: &str) -> (u64, u64) {
-    let cached = {
-        let g = latest().lock().unwrap_or_else(|e| e.into_inner());
-        g.get(&worker_key(worker))
-            .map(|t| t.ticket.cumulative)
-            .unwrap_or(0)
-    };
-    let ch = channel(cfg, client, worker)
-        .await
-        .unwrap_or(ChannelSnap::default());
+fn cached_cumulative(worker: &str) -> u64 {
+    latest()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&worker_key(worker))
+        .map(|t| t.ticket.cumulative)
+        .unwrap_or(0)
+}
+
+/// Read the channel, retrying a couple of times before giving up.
+///
+/// Callers sign money against this number. A failed read must surface as a
+/// failed read — treating it as an empty channel produces tickets below what
+/// the worker has already banked, and it rejects every one of them with
+/// "does not raise the authorised spend" until something re-reads correctly.
+async fn channel_with_retry(cfg: &ChainConfig, client: &str, worker: &str) -> Result<ChannelSnap> {
+    let mut last = String::new();
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(300 * attempt)).await;
+        }
+        match channel(cfg, client, worker).await {
+            Ok(ch) => return Ok(ch),
+            Err(e) => last = e.to_string(),
+        }
+    }
+    Err(AppError::Net(format!(
+        "could not read the payment channel on Base ({last}) — try again in a moment"
+    )))
+}
+
+async fn authorised_so_far(cfg: &ChainConfig, client: &str, worker: &str) -> Result<(u64, u64)> {
+    let cached = cached_cumulative(worker);
+    let ch = channel_with_retry(cfg, client, worker).await?;
     let on_chain = ch.paid.max(ch.earned);
-    let authorised = cached.max(on_chain);
-    (authorised, on_chain)
+    Ok((cached.max(on_chain), on_chain))
 }
 
 fn sign_latest(
@@ -1439,6 +1484,10 @@ struct ChannelSnap {
     reserved: u64,
     paid: u64,
     earned: u64,
+    /// Per-job cap snapshotted into the channel at its first reserve. The
+    /// contract settles against this, not the account's live limit — a lock
+    /// signed above it can never settle. 0 means no channel yet.
+    max_per_job: u64,
 }
 
 impl ChannelSnap {
@@ -1500,6 +1549,11 @@ async fn channel(cfg: &ChainConfig, client: &str, worker: &str) -> Result<Channe
         reserved: read_u64(&hex[0..64]),
         paid: read_u64(&hex[64..128]),
         earned: read_u64(&hex[64 * 5..64 * 6]),
+        max_per_job: if hex.len() >= 64 * 7 {
+            read_u64(&hex[64 * 6..64 * 7])
+        } else {
+            0
+        },
     })
 }
 
