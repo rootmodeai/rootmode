@@ -1521,8 +1521,9 @@ pub async fn sync_settlements(state: &AppState) -> Result<usize> {
         hex::encode(keccak(b"Settled(address,address,uint256,uint256,uint256)"))
     );
     let topic_client = format!("0x{}", hex::encode(word_address(&client)?));
-    // Public RPCs cap the block span of one eth_getLogs; walk in slices.
-    const SPAN: u64 = 20_000;
+    // Public Base RPCs cap one eth_getLogs at 10,000 blocks; walk in slices
+    // just under that. (Others cap lower still and fail over to the next.)
+    const SPAN: u64 = 9_000;
     let mut found = 0;
     while from <= head {
         let to = (from + SPAN - 1).min(head);

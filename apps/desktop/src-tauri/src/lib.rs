@@ -104,6 +104,22 @@ pub fn run() {
                 });
             }
 
+            // Keep the spend ledger's settlement links current whether or not
+            // the wallet screen is open — the scan is throttled inside.
+            {
+                let state = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(45)).await;
+                        match crate::pot::sync_settlements(&state).await {
+                            Ok(n) if n > 0 => log::info!("recorded {n} settlement(s) from the chain"),
+                            Err(e) => log::debug!("settlement sync: {e}"),
+                            _ => {}
+                        }
+                    }
+                });
+            }
+
             // Discovery runs by default and needs no configuration: peers on
             // this network announce themselves and we react to that, rather
             // than polling and making the user wait for the next tick.
