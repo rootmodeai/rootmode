@@ -428,12 +428,17 @@ impl Worker {
             // than serve a priced job we cannot check.
             Err(e) => return Err(e),
         };
+        // How much lock this job needs is measured from what the chain has
+        // already recognised, not from this node's own ledger. Every seed
+        // shares one payout channel, so other nodes settle on it between our
+        // jobs; a delta taken against a stale local ledger grows with each
+        // of those settles until no reserve is ever "enough".
         let need = self
             .pending_bonds
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(&submit.job_id)
-            .map(|b| b.delta.max(1))
+            .map(|b| b.pay.ticket.cumulative.saturating_sub(state.earned).max(1))
             .unwrap_or(1);
         tracing::info!(
             remaining = state.remaining,
@@ -501,6 +506,12 @@ impl Worker {
             .get_mut(&submit.job_id)
         {
             entry.app_key = state.app_key;
+            // What this job earns is the rise above whichever is higher: the
+            // last ticket this node banked, or what the chain shows settled
+            // by anyone on this channel. Crediting the gap other nodes already
+            // earned would overstate this job's bill.
+            let above_chain = entry.pay.ticket.cumulative.saturating_sub(state.earned).max(1);
+            entry.delta = entry.delta.min(above_chain);
         }
         Ok(())
     }
