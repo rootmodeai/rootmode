@@ -3,6 +3,9 @@
 # and apps/desktop/src-tauri/chain.base.json (baked into the next desktop build).
 #
 #   BASE_RPC_URL=https://mainnet.base.org PRIVATE_KEY=0x... ./contracts/deploy-base.sh
+#
+# Redeploying the pot only: keep the treasury by naming the existing vault.
+#   FEE_VAULT=0x17De... PRIVATE_KEY=0x... ./contracts/deploy-base.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,6 +20,7 @@ if ! command -v vyper >/dev/null 2>&1; then
 fi
 
 echo "deploying to Base via $RPC"
+if [ -n "${FEE_VAULT:-}" ]; then echo "reusing fee vault $FEE_VAULT"; fi
 OUT="$(forge script script/DeployBase.s.sol:DeployBase --broadcast --rpc-url "$RPC" --private-key "$PRIVATE_KEY" -vv)"
 echo "$OUT"
 
@@ -42,6 +46,9 @@ JSON=$(cat <<EOF
 }
 EOF
 )
+# The block the pot went live at bounds every later scan of its events.
+BLOCK="$(cast block-number --rpc-url "$RPC")"
+JSON="$(printf '%s' "$JSON" | sed "s/\"client\": \"\"/\"client\": \"\",\n  \"deployBlock\": $BLOCK/")"
 printf '%s\n' "$JSON" > deployments/base.json
 printf '%s\n' "$JSON" > "$ROOT/apps/desktop/src-tauri/chain.base.json"
 

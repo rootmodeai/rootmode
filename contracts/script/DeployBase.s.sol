@@ -7,13 +7,21 @@ import {Script, console} from "forge-std/Script.sol";
 ///
 ///   forge script script/DeployBase.s.sol:DeployBase --broadcast \
 ///     --rpc-url "$BASE_RPC_URL" --private-key "$PRIVATE_KEY"
+///
+/// Set FEE_VAULT to an existing vault to deploy a new pot against the same
+/// treasury — a pot redeploy should not open a second one.
 contract DeployBase is Script {
     address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
 
     function run() external {
         require(block.chainid == 8453, "not Base");
+        address vault = vm.envOr("FEE_VAULT", address(0));
         vm.startBroadcast();
-        address vault = vm.deployCode("src/FeeVault.vy", abi.encode(USDC));
+        if (vault == address(0)) {
+            vault = vm.deployCode("src/FeeVault.vy", abi.encode(USDC));
+        } else {
+            require(vault.code.length > 0, "FEE_VAULT is not a contract");
+        }
         address pot = vm.deployCode("src/RootmodePot.vy", abi.encode(USDC, vault, uint64(15 minutes)));
         vm.stopBroadcast();
         console.log("USDC", USDC);
