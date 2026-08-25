@@ -1511,7 +1511,7 @@ pub async fn sync_settlements(state: &AppState) -> Result<usize> {
     let head = rpc(&cfg.rpc, "eth_blockNumber", serde_json::json!([])).await?;
     let head = u64::from_str_radix(head.as_str().unwrap_or("0x0").trim_start_matches("0x"), 16)
         .unwrap_or(0);
-    let mut from = state.db.settlement_scan_from(cfg.deploy_block)?;
+    let mut from = state.db.settlement_scan_from(cfg.chain_id, cfg.deploy_block)?;
     if head == 0 || from > head {
         return Ok(0);
     }

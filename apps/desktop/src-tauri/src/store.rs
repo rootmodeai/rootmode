@@ -993,24 +993,27 @@ impl Db {
         Ok(())
     }
 
-    /// The earliest block a settlement scan needs to start from: wherever
-    /// the last scan stopped, else the first deposit, else `fallback`.
-    pub fn settlement_scan_from(&self, fallback: u64) -> Result<u64> {
+    /// The block a settlement scan starts from: wherever the last scan
+    /// stopped, else this chain's first deposit — and never below `floor`,
+    /// the pot's deployment block. A deposit recorded on another chain (a
+    /// local Anvil, say) has a block number that means nothing here; without
+    /// the floor it once sent the scan to block 10 of Base mainnet.
+    pub fn settlement_scan_from(&self, chain_id: u64, floor: u64) -> Result<u64> {
         if let Some(v) = self.get_setting("settle_scan_block")? {
             if let Ok(n) = v.parse::<u64>() {
-                return Ok(n);
+                return Ok(n.max(floor));
             }
         }
         let conn = self.lock();
         let first: Option<i64> = conn
             .query_row(
-                "SELECT MIN(block) FROM deposits WHERE block > 0",
-                [],
+                "SELECT MIN(block) FROM deposits WHERE block > 0 AND chain_id = ?1",
+                params![chain_id as i64],
                 |r| r.get(0),
             )
             .optional()?
             .flatten();
-        Ok(first.map(|b| b as u64).unwrap_or(fallback))
+        Ok(first.map(|b| b as u64).unwrap_or(floor).max(floor))
     }
 
     /// Every bill a priced provider charged, newest first: the per-job audit
