@@ -1634,7 +1634,36 @@ fn word_u256(v: u64) -> [u8; 32] {
     w
 }
 
+/// Public Base endpoints to fall back to when the configured one refuses.
+/// Money reads must not fail because one free RPC is having a moment — the
+/// primary rate-limits exactly the polling a wallet screen does.
+const BASE_MAINNET_FALLBACK_RPCS: &[&str] = &[
+    "https://base-rpc.publicnode.com",
+    "https://1rpc.io/base",
+    "https://base.drpc.org",
+];
+
 async fn rpc(url: &str, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+    match rpc_once(url, method, params.clone()).await {
+        Ok(v) => Ok(v),
+        Err(first) => {
+            // Only for Base mainnet's well-known endpoint: a custom or local
+            // chain config must never silently query a different network —
+            // zeros from the wrong chain read as "your money is gone".
+            if !url.contains("base.org") {
+                return Err(first);
+            }
+            for alt in BASE_MAINNET_FALLBACK_RPCS {
+                if let Ok(v) = rpc_once(alt, method, params.clone()).await {
+                    return Ok(v);
+                }
+            }
+            Err(first)
+        }
+    }
+}
+
+async fn rpc_once(url: &str, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
     let body = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
