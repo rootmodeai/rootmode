@@ -389,7 +389,16 @@ impl Worker {
                     _ => TokenUsage::default(),
                 };
                 let usage = local.reconcile(TokenUsage::from_meta(&result.meta));
-                price.charge_llm_micros(usage.prompt, usage.completion, usage.cached)
+                let by_rate = price.charge_llm_micros(usage.prompt, usage.completion, usage.cached);
+                // A backend that knows what the job actually cost sets a
+                // floor — see the OpenRouter backend. The rate table is the
+                // advertised price; the floor is the guarantee of margin.
+                let floor = result
+                    .meta
+                    .get("min_bill_micros")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                by_rate.max(floor)
             }
             rootmode_core::JobKind::Image | rootmode_core::JobKind::Video => {
                 (price.amount * 1_000_000.0).round().max(1.0) as u64

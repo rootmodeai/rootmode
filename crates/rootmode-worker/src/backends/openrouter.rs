@@ -283,8 +283,24 @@ impl Backend for OpenRouterBackend {
                 *slot = shown.into();
             }
         }
+        // The advertised rates are the catalogue's list price times markup,
+        // but OpenRouter routes each request to a provider of its choosing,
+        // and that provider's rate can sit above the list. The bill it
+        // reports is what this job actually cost; the job must never be
+        // billed below that plus the same margin, or the margin is fiction.
+        if let Some(cost) = result.meta.get("upstream_cost").and_then(|c| c.as_f64()) {
+            result.meta["min_bill_micros"] = serde_json::json!(bill_floor_micros(cost, self.config.markup));
+        }
         Ok(result)
     }
+}
+
+/// The least a job may be billed, in micros: what it actually cost upstream,
+/// plus the same margin the advertised rates carry. Rounded up — a floor
+/// that rounds down is not a floor.
+fn bill_floor_micros(upstream_cost_usd: f64, markup: f64) -> u64 {
+    let markup = if markup > 0.0 { markup } else { 1.0 };
+    (upstream_cost_usd * markup * 1_000_000.0).ceil().max(0.0) as u64
 }
 
 /// The one model a config entry means.
@@ -313,6 +329,15 @@ fn pick<'a>(wanted: &str, catalogue: &'a [Listed]) -> Option<&'a Listed> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_bill_floor_is_actual_cost_plus_margin_rounded_up() {
+        // The glm-5.2 job that exposed this: list-based bill 394 micros,
+        // OpenRouter charged $0.0004022 — under the list-based bill by 2%.
+        assert_eq!(super::bill_floor_micros(0.0004022, 1.15), 463);
+        assert_eq!(super::bill_floor_micros(0.0, 1.15), 0);
+        assert_eq!(super::bill_floor_micros(0.000001, 0.0), 1, "no markup configured is x1, never x0");
+    }
+
     use super::*;
 
     #[test]
