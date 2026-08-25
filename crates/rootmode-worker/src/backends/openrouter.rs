@@ -33,6 +33,7 @@ use uuid::Uuid;
 
 use super::vllm::VllmBackend;
 use super::{Backend, Progress};
+use base64::Engine as _;
 use crate::config::{OpenRouterConfig, VllmConfig};
 use crate::error::{Result, WorkerError};
 
@@ -115,7 +116,30 @@ struct Listed {
     id: String,
     #[serde(default)]
     pricing: Pricing,
+    #[serde(default)]
+    architecture: Architecture,
 }
+
+#[derive(Deserialize, Default)]
+struct Architecture {
+    #[serde(default)]
+    output_modalities: Vec<String>,
+}
+
+impl Listed {
+    /// A model that answers with pictures. Text-first routers (`openrouter/auto`)
+    /// also list `image` among their outputs and are not what an image job
+    /// should land on; the ones that mean it name `image` first.
+    fn makes_images(&self) -> bool {
+        self.architecture.output_modalities.first().map(String::as_str) == Some("image")
+    }
+}
+
+/// Output images are metered in tokens, and how many a picture costs is the
+/// provider's business (Gemini bills 1,290 for a 1024×1024; GPT image models
+/// vary with size and quality). The advertised per-image price is the
+/// client's lock, so it must cover the dear case: assume this many.
+const IMAGE_OUTPUT_TOKENS: f64 = 2_000.0;
 
 /// Per *token*, as decimal strings — so `"0.0000025"` is $2.50 per million.
 #[derive(Deserialize, Default)]
@@ -128,9 +152,24 @@ struct Pricing {
     input_cache_read: String,
     #[serde(default)]
     input_cache_write: String,
+    /// Per output-image token, for models that answer with pictures.
+    #[serde(default)]
+    image_output: String,
 }
 
 impl Pricing {
+    /// A flat per-image price, after markup, for a model that answers with
+    /// pictures. `None` when the catalogue names no output-image rate: a
+    /// picture that costs something must not be advertised as free.
+    fn per_image(&self, markup: f64) -> Option<Price> {
+        let markup = if markup > 0.0 { markup } else { 1.0 };
+        let per_token: f64 = self.image_output.trim().parse().ok()?;
+        if per_token <= 0.0 {
+            return None;
+        }
+        Some(Price::new(per_token * IMAGE_OUTPUT_TOKENS * markup))
+    }
+
     fn per_million_token(raw: &str) -> Option<f64> {
         if raw.is_empty() {
             return None;
@@ -229,14 +268,24 @@ impl Backend for OpenRouterBackend {
                 tracing::warn!("'{want}' resolves to '{id}', which is already advertised");
                 continue;
             }
-            let price = listed.pricing.to_price(self.config.markup);
+            let (kind, price) = if listed.makes_images() {
+                match listed.pricing.per_image(self.config.markup) {
+                    Some(p) => (JobKind::Image, Some(p)),
+                    None => {
+                        tracing::warn!("'{want}' makes images but lists no output-image rate — not advertising it");
+                        continue;
+                    }
+                }
+            } else {
+                (JobKind::Llm, listed.pricing.to_price(self.config.markup))
+            };
             if listed.id != id {
                 tracing::debug!("advertising '{}' as '{id}'", listed.id);
             }
             map.insert(id.clone(), listed.id.clone());
             models.push(ModelDescriptor {
                 id,
-                kind: JobKind::Llm,
+                kind,
                 sha256: None,
                 price,
             });
@@ -260,6 +309,9 @@ impl Backend for OpenRouterBackend {
     }
 
     async fn run(&self, job_id: Uuid, payload: &JobPayload, progress: &Progress) -> Result<JobResult> {
+        if let JobPayload::Image(params) = payload {
+            return self.run_image(job_id, params).await;
+        }
         // Translate the advertised name back to the catalogue key before
         // forwarding; a client asked for what this node said it had.
         let mut payload = payload.clone();
@@ -303,6 +355,117 @@ fn bill_floor_micros(upstream_cost_usd: f64, markup: f64) -> u64 {
     (upstream_cost_usd * markup * 1_000_000.0).ceil().max(0.0) as u64
 }
 
+impl OpenRouterBackend {
+    /// A picture from a model that answers with one: the same chat-completions
+    /// call as text, asking for an image modality, with the picture coming
+    /// back inline as a data URL. One image per job.
+    async fn run_image(&self, job_id: Uuid, params: &rootmode_core::ImageParams) -> Result<JobResult> {
+        let advertised = params
+            .checkpoint_id
+            .as_deref()
+            .ok_or_else(|| WorkerError::Rejected("image jobs must name a model".into()))?;
+        let upstream = self
+            .upstream_id(advertised)
+            .ok_or_else(|| WorkerError::Rejected(format!("'{advertised}' is not served here")))?;
+
+        let mut content = vec![serde_json::json!({ "type": "text", "text": params.prompt })];
+        if let Some(from) = params.from_image.as_deref().filter(|s| !s.trim().is_empty()) {
+            content.push(serde_json::json!({
+                "type": "image_url",
+                "image_url": { "url": as_data_url(from) },
+            }));
+        }
+        let body = serde_json::json!({
+            "model": upstream,
+            "messages": [{ "role": "user", "content": content }],
+            "modalities": ["image", "text"],
+            "usage": { "include": true },
+        });
+        let resp = self
+            .http
+            .post(format!("{BASE}/v1/chat/completions"))
+            .bearer_auth(&self.config.api_key)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| WorkerError::backend("openrouter", e))?;
+        let status = resp.status();
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| WorkerError::backend("openrouter", e))?;
+        if !status.is_success() {
+            return Err(WorkerError::backend("openrouter", format!("HTTP {status}: {text}")));
+        }
+        let (bytes, cost) = parse_image_response(&text)?;
+        let mut meta = serde_json::json!({
+            "model": advertised,
+            "backend": "openrouter",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+        });
+        if let Some(cost) = cost {
+            meta["upstream_cost"] = serde_json::json!(cost);
+            meta["min_bill_micros"] = serde_json::json!(bill_floor_micros(cost, self.config.markup));
+        }
+        Ok(JobResult {
+            v: rootmode_core::PROTOCOL_VERSION,
+            job_id,
+            kind: JobKind::Image,
+            sha256: rootmode_core::hash::sha256_hex(&bytes),
+            text: None,
+            tool_calls: Vec::new(),
+            image_path_or_b64: Some(base64::engine::general_purpose::STANDARD.encode(&bytes)),
+            thinking: None,
+            meta,
+        })
+    }
+}
+
+/// Base64 in, data URL out; a data URL is left alone.
+fn as_data_url(image: &str) -> String {
+    let s = image.trim();
+    if s.starts_with("data:") {
+        s.to_string()
+    } else {
+        format!("data:image/png;base64,{s}")
+    }
+}
+
+/// The picture out of an image-modality chat completion, and what it cost.
+/// A reply with no picture is an error carrying whatever text the model
+/// sent instead — usually a refusal, and worth showing.
+fn parse_image_response(text: &str) -> Result<(Vec<u8>, Option<f64>)> {
+    let v: serde_json::Value = serde_json::from_str(text)
+        .map_err(|e| WorkerError::backend("openrouter", format!("bad response: {e}")))?;
+    let message = &v["choices"][0]["message"];
+    let url = message["images"][0]["image_url"]["url"]
+        .as_str()
+        .ok_or_else(|| {
+            let said = message["content"].as_str().unwrap_or("").trim();
+            WorkerError::backend(
+                "openrouter",
+                if said.is_empty() {
+                    "the model returned no image".to_string()
+                } else {
+                    format!("the model returned no image: {said}")
+                },
+            )
+        })?;
+    let b64 = url
+        .split_once(";base64,")
+        .map(|(_, b)| b)
+        .ok_or_else(|| WorkerError::backend("openrouter", "image is not a base64 data URL"))?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64.trim())
+        .map_err(|e| WorkerError::backend("openrouter", format!("image is not valid base64: {e}")))?;
+    if bytes.is_empty() {
+        return Err(WorkerError::backend("openrouter", "the model returned an empty image"));
+    }
+    let cost = v["usage"]["cost"].as_f64();
+    Ok((bytes, cost))
+}
+
 /// The one model a config entry means.
 ///
 /// Exact first — on OpenRouter's own id or on the bare name. Only if nothing
@@ -330,6 +493,34 @@ fn pick<'a>(wanted: &str, catalogue: &'a [Listed]) -> Option<&'a Listed> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn an_image_model_is_priced_per_picture_at_the_dear_case() {
+        let listed: super::Listed = serde_json::from_str(r#"{"id":"google/gemini-3.1-flash-image",
+            "pricing":{"prompt":"0.0000005","completion":"0.000003","image_output":"0.00006"},
+            "architecture":{"output_modalities":["image","text"]}}"#).unwrap();
+        assert!(listed.makes_images());
+        let price = listed.pricing.per_image(1.15).unwrap();
+        // 0.00006 × 2000 tokens × 1.15 = 0.138 → rounded up to the cent
+        assert_eq!(price.amount, 0.14);
+        let router: super::Listed = serde_json::from_str(r#"{"id":"openrouter/auto",
+            "pricing":{"prompt":"-1","completion":"-1"},
+            "architecture":{"output_modalities":["text","image"]}}"#).unwrap();
+        assert!(!router.makes_images(), "text-first routers are not image models");
+    }
+
+    #[test]
+    fn a_picture_comes_out_of_the_data_url_with_its_cost() {
+        let png = b"\x89PNG fake";
+        let b64 = base64::engine::general_purpose::STANDARD.encode(png);
+        let body = format!(r#"{{"choices":[{{"message":{{"content":"","images":[{{"type":"image_url","image_url":{{"url":"data:image/png;base64,{b64}"}}}}]}}}}],"usage":{{"cost":0.0412}}}}"#);
+        let (bytes, cost) = super::parse_image_response(&body).unwrap();
+        assert_eq!(bytes, png);
+        assert_eq!(cost, Some(0.0412));
+        let refusal = r#"{"choices":[{"message":{"content":"I can't draw that."}}]}"#;
+        let err = super::parse_image_response(refusal).unwrap_err().to_string();
+        assert!(err.contains("I can't draw that."), "{err}");
+    }
+
+    #[test]
     fn the_bill_floor_is_actual_cost_plus_margin_rounded_up() {
         // The glm-5.2 job that exposed this: list-based bill 394 micros,
         // OpenRouter charged $0.0004022 — under the list-based bill by 2%.
@@ -355,6 +546,7 @@ mod tests {
             completion: "0.0000025".into(),
             input_cache_read: "0.00000003".into(),
             input_cache_write: "0.000000375".into(),
+            image_output: String::new(),
         };
         let price = pricing.to_price(1.0).expect("priced");
         assert_eq!(price.input, Some(0.3));
@@ -389,6 +581,7 @@ mod tests {
         Listed {
             id: id.into(),
             pricing: Pricing::default(),
+            architecture: Default::default(),
         }
     }
 

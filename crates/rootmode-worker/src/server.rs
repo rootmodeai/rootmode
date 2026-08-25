@@ -417,7 +417,14 @@ impl Worker {
                 by_rate.max(floor)
             }
             rootmode_core::JobKind::Image | rootmode_core::JobKind::Video => {
-                (price.amount * 1_000_000.0).round().max(1.0) as u64
+                let flat = (price.amount * 1_000_000.0).round().max(1.0) as u64;
+                // A backend that knows the picture's actual cost bills that
+                // plus margin — the advertised price is the ceiling the
+                // client locked, and a picture that cost less is billed less.
+                match result.meta.get("min_bill_micros").and_then(|v| v.as_u64()) {
+                    Some(floor) => floor.min(flat).max(1),
+                    None => flat,
+                }
             }
         }
     }
