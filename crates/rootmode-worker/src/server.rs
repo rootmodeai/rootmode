@@ -502,6 +502,21 @@ impl Worker {
             }
             let sig = hex::decode(post.sig.trim_start_matches("0x"))
                 .map_err(|e| WorkerError::Rejected(format!("reserve signature: {e}")))?;
+            if post.ticket.max_amount <= state.reserved && state.remaining < need {
+                // The chain already holds a lock at or above what this job
+                // signed for, yet it is short: another job's raise landed
+                // between the client's read and ours, and its settle may be
+                // consuming it, or a bigger raise is in flight. Give the
+                // chain a few seconds before calling the lock empty.
+                let mut waited = 0;
+                while state.remaining < need && waited < 8 {
+                    tokio::time::sleep(Duration::from_millis(750)).await;
+                    waited += 1;
+                    if let Ok(Some(s)) = self.read_channel(payer, &payout).await {
+                        state = s;
+                    }
+                }
+            }
             if post.ticket.max_amount > state.reserved {
                 let posted = crate::chain::reserve(&self.config.payments, &post.ticket, &sig).await;
                 state = match self.read_channel(payer, &payout).await {

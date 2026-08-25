@@ -27,8 +27,12 @@ const FUND_HTML: &str = include_str!("fund.html"); // 7702 batch on Base only
 const FUND_PORT: u16 = 17331;
 const DEFAULT_MAX_JOB: Micros = 500_000; // $0.50
 const TICKET_TTL_SECS: u64 = 3600;
-/// How many jobs' worth of lock to hold on a channel when topping it up.
+/// How many jobs' worth of lock to hold on a channel when topping it up —
+/// and never less than `RESERVE_HEADROOM_FLOOR`, because a tool that fires
+/// requests in parallel drains a few jobs' worth in minutes and every one
+/// of those jobs then races to raise the same lock.
 const RESERVE_HEADROOM_JOBS: u64 = 4;
+const RESERVE_HEADROOM_FLOOR: Micros = 3_000_000; // $3
 const SETTLE_EVERY: Duration = Duration::from_secs(2);
 /// How long one successful [`status`] reading stays good enough to serve
 /// again. Several screens poll status; without this each poll is a burst of
@@ -711,8 +715,8 @@ async fn sign_reserve_if_needed(
     // fires several at once, each settles a little, and whichever worker
     // reads the channel last finds itself a few thousand micros short and
     // refuses with "no remaining reserve". Unused lock returns on close.
-    let want = need.saturating_mul(RESERVE_HEADROOM_JOBS);
-    let extra = if remaining < need.saturating_mul(2) {
+    let want = need.saturating_mul(RESERVE_HEADROOM_JOBS).max(RESERVE_HEADROOM_FLOOR);
+    let extra = if remaining < need.saturating_mul(2) || remaining < RESERVE_HEADROOM_FLOOR / 2 {
         want.saturating_sub(remaining).min(free)
     } else {
         0
