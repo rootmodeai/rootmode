@@ -503,7 +503,18 @@ per-picture price is the catalogue's output-image rate, times a dear-case
 2,000 image tokens, times `markup` — that is what the client locks. The
 bill is what the picture actually cost plus the markup, never more than
 the advertised price. A starting image (`from_image`) is passed along for
-edits. Video has no OpenRouter path; that stays with ComfyUI on a GPU.
+edits.
+
+Video works the same way through OpenRouter's asynchronous video API: name
+a model from `GET /api/v1/videos/models` (`google/veo-3.1-lite`,
+`kwaivgi/kling-v3.0-std`, `bytedance/seedance-2.0-fast`, …) and the node
+advertises it as a **video** model. Every clip from a seed node has one
+shape — 5 seconds (or the nearest the model offers), 720p, 16:9, silent —
+because the request carries only a prompt and an optional first frame, and
+one shape is one price: the catalogue's per-second rate for that shape,
+times the seconds, times `markup`. The node submits the job, polls until it
+completes (up to 20 minutes), downloads the mp4, and bills the reported cost
+plus markup, never above the advertised price.
 
 ## Payment
 

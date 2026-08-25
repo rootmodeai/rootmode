@@ -31,11 +31,20 @@ pub struct ModelOption {
 
 /// Every model on offer, best provider first within each.
 ///
-/// Ranking is cheapest, then lowest latency. A provider that names no price is
-/// treated as free, because nothing is being charged — pretending otherwise
-/// would push work away from the people running nodes for nothing.
+/// Ranking is cheapest; among providers at the same price the choice is
+/// random, so equal offers share the load. Choosing the lowest latency was
+/// the earlier rule, and it sent every user of a model to the same node —
+/// the fastest to answer a probe is not the one with a free slot. A provider
+/// that names no price is treated as free, because nothing is being charged
+/// — pretending otherwise would push work away from the people running
+/// nodes for nothing.
 pub fn model_options(peers: &[Peer], kind: JobKind) -> Vec<ModelOption> {
     let mut options: Vec<ModelOption> = Vec::new();
+    // How many providers have tied for the current best price of each model,
+    // so a newcomer at that price replaces the holder with probability 1/n —
+    // every tied provider ends up equally likely (reservoir sampling).
+    let mut ties: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut rng = rand::thread_rng();
 
     for peer in peers.iter().filter(|p| p.status == "online") {
         for model in peer.models.iter().filter(|m| m.kind == kind) {
@@ -59,13 +68,26 @@ pub fn model_options(peers: &[Peer], kind: JobKind) -> Vec<ModelOption> {
             match options.iter_mut().find(|o| o.model == candidate.model) {
                 Some(existing) => {
                     existing.providers += 1;
-                    if beats(&candidate, existing) {
+                    let take = if candidate.price < existing.price {
+                        ties.insert(candidate.model.clone(), 1);
+                        true
+                    } else if candidate.price == existing.price {
+                        let n = ties.entry(candidate.model.clone()).or_insert(1);
+                        *n += 1;
+                        rand::Rng::gen_range(&mut rng, 0..*n) == 0
+                    } else {
+                        false
+                    };
+                    if take {
                         let providers = existing.providers;
                         *existing = candidate;
                         existing.providers = providers;
                     }
                 }
-                None => options.push(candidate),
+                None => {
+                    ties.insert(candidate.model.clone(), 1);
+                    options.push(candidate);
+                }
             }
         }
     }
@@ -78,20 +100,6 @@ pub fn model_options(peers: &[Peer], kind: JobKind) -> Vec<ModelOption> {
             .then_with(|| a.model.cmp(&b.model))
     });
     options
-}
-
-/// Cheaper wins. Equal price, lower latency wins. Unknown latency loses to
-/// known, because a provider we have never timed is a provider we have never
-/// successfully used.
-fn beats(candidate: &ModelOption, current: &ModelOption) -> bool {
-    if candidate.price != current.price {
-        return candidate.price < current.price;
-    }
-    match (candidate.latency_ms, current.latency_ms) {
-        (Some(a), Some(b)) => a < b,
-        (Some(_), None) => true,
-        _ => false,
-    }
 }
 
 /// One (model, provider) pair on offer.
@@ -147,18 +155,13 @@ pub fn provider_options(peers: &[Peer], kind: JobKind) -> Vec<ProviderOption> {
         })
         .collect();
 
+    // Cheapest first; equals by name, so the picker holds still between
+    // refreshes. Latency is shown, not sorted on — the app does not steer
+    // everyone to one node, and neither should the list's order.
     out.sort_by(|a, b| {
         a.price
             .partial_cmp(&b.price)
             .unwrap_or(std::cmp::Ordering::Equal)
-            // A provider we have never timed sorts last among equals: never
-            // having timed it means never having successfully used it.
-            .then_with(|| match (a.latency_ms, b.latency_ms) {
-                (Some(x), Some(y)) => x.cmp(&y),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
-            })
             .then_with(|| a.model.cmp(&b.model))
             .then_with(|| a.peer_label.cmp(&b.peer_label))
     });
@@ -221,17 +224,36 @@ mod tests {
     }
 
     #[test]
-    fn equal_price_is_broken_by_latency() {
+    fn equal_prices_share_the_load() {
+        // Three providers at one price: over many choices each gets picked,
+        // and none is favoured for answering a probe faster.
         let peers = vec![
             peer("far", Some(200), vec![model("llama", Some(0.10))]),
             peer("near", Some(12), vec![model("llama", Some(0.10))]),
+            peer("untimed", None, vec![model("llama", Some(0.10))]),
         ];
-        assert_eq!(
-            provider_for(&peers, JobKind::Llm, "llama")
-                .unwrap()
-                .peer_label,
-            "near"
-        );
+        let mut seen = std::collections::HashMap::new();
+        for _ in 0..600 {
+            let chosen = provider_for(&peers, JobKind::Llm, "llama").unwrap();
+            assert_eq!(chosen.providers, 3);
+            *seen.entry(chosen.peer_label).or_insert(0u32) += 1;
+        }
+        assert_eq!(seen.len(), 3, "every tied provider is chosen sometimes: {seen:?}");
+        assert!(seen.values().all(|n| *n > 100), "roughly evenly: {seen:?}");
+    }
+
+    #[test]
+    fn a_cheaper_provider_always_wins_the_tie_break_is_only_among_equals() {
+        let peers = vec![
+            peer("dear", Some(1), vec![model("llama", Some(0.20))]),
+            peer("cheap-a", Some(500), vec![model("llama", Some(0.10))]),
+            peer("cheap-b", None, vec![model("llama", Some(0.10))]),
+        ];
+        for _ in 0..50 {
+            let chosen = provider_for(&peers, JobKind::Llm, "llama").unwrap();
+            assert!(chosen.peer_label.starts_with("cheap-"), "{}", chosen.peer_label);
+            assert_eq!(chosen.price, 0.10);
+        }
     }
 
     #[test]
@@ -324,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_prices_are_ordered_by_latency_then_name() {
+    fn equal_prices_are_listed_by_name() {
         let peers = vec![
             peer("far", Some(300), vec![model("llama", Some(0.5))]),
             peer("near", Some(9), vec![model("llama", Some(0.5))]),
@@ -335,8 +357,8 @@ mod tests {
                 .iter()
                 .map(|r| r.peer_label.as_str())
                 .collect::<Vec<_>>(),
-            vec!["near", "far", "untimed"],
-            "a provider never timed is one never successfully used"
+            vec!["far", "near", "untimed"],
+            "the picker holds still; latency is shown, not sorted on"
         );
     }
 

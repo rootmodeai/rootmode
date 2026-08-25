@@ -50,6 +50,8 @@ pub struct OpenRouterBackend {
     /// Advertised id → the id OpenRouter knows, e.g.
     /// `llama-3.3-70b-instruct` → `meta-llama/llama-3.3-70b-instruct`.
     upstream: RwLock<BTreeMap<String, String>>,
+    /// Advertised id → the video catalogue entry, for the clip's shape.
+    videos: RwLock<BTreeMap<String, ListedVideo>>,
 }
 
 impl OpenRouterBackend {
@@ -79,6 +81,7 @@ impl OpenRouterBackend {
             inner,
             http,
             upstream: RwLock::new(BTreeMap::new()),
+            videos: RwLock::new(BTreeMap::new()),
         })
     }
 
@@ -132,6 +135,132 @@ impl Listed {
     /// should land on; the ones that mean it name `image` first.
     fn makes_images(&self) -> bool {
         self.architecture.output_modalities.first().map(String::as_str) == Some("image")
+    }
+}
+
+/// One entry of `GET /api/v1/videos/models`: a separate catalogue with its
+/// own shape — clips are priced per second by SKU (resolution, audio).
+#[derive(Deserialize, Clone)]
+struct ListedVideo {
+    id: String,
+    // The catalogue writes `null` for a field a model does not have, and
+    // `#[serde(default)]` only covers a field that is absent — so these are
+    // options, read through `unwrap_or_default`.
+    #[serde(default)]
+    supported_durations: Option<Vec<u32>>,
+    #[serde(default)]
+    supported_resolutions: Option<Vec<String>>,
+    #[serde(default)]
+    supported_aspect_ratios: Option<Vec<String>>,
+    #[serde(default)]
+    pricing_skus: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Deserialize)]
+struct VideoCatalogue {
+    data: Vec<ListedVideo>,
+}
+
+/// Every clip the seed makes has one shape: this long, this size, silent.
+/// The client's request carries a prompt and an optional first frame and
+/// nothing else, so the shape is the node's to choose — and one shape is
+/// one price, which is what the client locks before the work starts.
+pub const VIDEO_SECONDS: u32 = 5;
+const VIDEO_RESOLUTION: &str = "720p";
+const VIDEO_ASPECT: &str = "16:9";
+
+/// Video tokens per second of 720p footage, the way ByteDance meters it:
+/// width × height × 24 frames / 1024. The lock is computed for the 720p
+/// clip this node asks for.
+const VIDEO_TOKENS_PER_SECOND_720P: f64 = 1280.0 * 720.0 * 24.0 / 1024.0;
+
+/// What one clip of this node's shape costs upstream, in USD, from a
+/// model's `pricing_skus` — OpenRouter's video catalogue speaks several
+/// dialects, and a lock computed from the wrong one is either a refused
+/// job or a loss:
+///
+/// - `duration_seconds…`: dollars per second;
+/// - `cents_per_second…` / `cents_per_video_output_second…`: cents per second;
+/// - `video_tokens…`: dollars per video token, tokens = w × h × 24 fps / 1024;
+/// - anything else (per megapixel, per image input): not a clip price.
+///
+/// Within a dialect, SKUs for shapes dearer than ours (1080p, 4K, audio,
+/// continuation) are left out and the dearest of the rest is taken, so an
+/// image-to-video surcharge is covered. `None` means "do not advertise".
+fn clip_cost_usd(skus: &BTreeMap<String, String>, seconds: u32) -> Option<f64> {
+    let dearer = |k: &str| {
+        ["1080p", "1024p", "4k", "with_audio", "continuation", "megapixel", "2k"]
+            .iter()
+            .any(|x| k.contains(x))
+    };
+    let pick = |prefix_ok: &dyn Fn(&str) -> bool| -> Option<f64> {
+        skus.iter()
+            .filter(|(k, _)| prefix_ok(k) && !dearer(k))
+            .filter_map(|(_, v)| v.trim().parse::<f64>().ok())
+            .filter(|v| *v > 0.0)
+            .fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))))
+    };
+    let secs = seconds as f64;
+    if let Some(usd_per_s) = pick(&|k| k.contains("duration_seconds")) {
+        return Some(usd_per_s * secs);
+    }
+    if let Some(cents_per_s) = pick(&|k| k.contains("cents_per_second") || k.contains("cents_per_video_output_second")) {
+        let floor = skus
+            .get("minimum_cents_per_generation")
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .unwrap_or(0.0);
+        return Some((cents_per_s * secs).max(floor) / 100.0);
+    }
+    if let Some(usd_per_token) = pick(&|k| k.starts_with("video_tokens") && !k.contains("with_video_input")) {
+        return Some(usd_per_token * VIDEO_TOKENS_PER_SECOND_720P * secs);
+    }
+    None
+}
+
+impl ListedVideo {
+    /// The clip length this node will ask for: `VIDEO_SECONDS` when the model
+    /// allows it, else the shortest longer option, else the longest it has.
+    fn duration(&self) -> u32 {
+        let offered = self.supported_durations.as_deref().unwrap_or(&[]);
+        if offered.is_empty() || offered.contains(&VIDEO_SECONDS) {
+            return VIDEO_SECONDS;
+        }
+        offered
+            .iter()
+            .copied()
+            .filter(|d| *d > VIDEO_SECONDS)
+            .min()
+            .or_else(|| offered.iter().copied().max())
+            .unwrap_or(VIDEO_SECONDS)
+    }
+
+    fn resolution(&self) -> Option<String> {
+        let offered = self.supported_resolutions.as_deref().unwrap_or(&[]);
+        offered
+            .iter()
+            .find(|r| r.as_str() == VIDEO_RESOLUTION)
+            .or_else(|| offered.first())
+            .cloned()
+    }
+
+    fn aspect(&self) -> Option<String> {
+        let offered = self.supported_aspect_ratios.as_deref().unwrap_or(&[]);
+        offered
+            .iter()
+            .find(|r| r.as_str() == VIDEO_ASPECT)
+            .or_else(|| offered.first())
+            .cloned()
+    }
+
+    fn skus(&self) -> BTreeMap<String, String> {
+        self.pricing_skus.clone().unwrap_or_default()
+    }
+
+    /// Flat price for one clip of this node's shape, after markup.
+    fn per_clip(&self, markup: f64) -> Option<Price> {
+        let markup = if markup > 0.0 { markup } else { 1.0 };
+        let cost = clip_cost_usd(&self.skus(), self.duration())?;
+        Some(Price::new(cost * markup))
     }
 }
 
@@ -256,11 +385,45 @@ impl Backend for OpenRouterBackend {
         // to route against anyway. Each of these nodes is configured with the
         // handful it is pretending to have on disk — and each entry resolves
         // to exactly one model, or to none.
+        // Video models live in their own catalogue; fetch it only when the
+        // config names something the chat catalogue does not carry.
+        let mut video_catalogue: Option<Vec<ListedVideo>> = None;
+        let mut videos = BTreeMap::new();
         let mut map = BTreeMap::new();
         let mut models = Vec::new();
         for want in &self.config.models {
             let Some(listed) = pick(want, &catalogue.data) else {
-                tracing::warn!("openrouter does not list '{want}' — not advertising it");
+                if video_catalogue.is_none() {
+                    video_catalogue = Some(self.video_models().await.unwrap_or_else(|e| {
+                        tracing::warn!("openrouter video catalogue: {e}");
+                        Vec::new()
+                    }));
+                }
+                let found = video_catalogue
+                    .as_deref()
+                    .unwrap_or(&[])
+                    .iter()
+                    .find(|v| v.id.eq_ignore_ascii_case(want) || advertised_id(&v.id) == advertised_id(want))
+                    .cloned();
+                match found {
+                    Some(video) => {
+                        let id = advertised_id(&video.id);
+                        match video.per_clip(self.config.markup) {
+                            Some(price) => {
+                                map.insert(id.clone(), video.id.clone());
+                                videos.insert(id.clone(), video);
+                                models.push(ModelDescriptor {
+                                    id,
+                                    kind: JobKind::Video,
+                                    sha256: None,
+                                    price: Some(price),
+                                });
+                            }
+                            None => tracing::warn!("'{want}' makes video but lists no per-second rate — not advertising it"),
+                        }
+                    }
+                    None => tracing::warn!("openrouter does not list '{want}' — not advertising it"),
+                }
                 continue;
             };
             let id = advertised_id(&listed.id);
@@ -292,6 +455,7 @@ impl Backend for OpenRouterBackend {
         }
 
         *self.upstream.write().unwrap_or_else(|e| e.into_inner()) = map;
+        *self.videos.write().unwrap_or_else(|e| e.into_inner()) = videos;
         Ok(models)
     }
 
@@ -311,6 +475,9 @@ impl Backend for OpenRouterBackend {
     async fn run(&self, job_id: Uuid, payload: &JobPayload, progress: &Progress) -> Result<JobResult> {
         if let JobPayload::Image(params) = payload {
             return self.run_image(job_id, params).await;
+        }
+        if let JobPayload::Video(params) = payload {
+            return self.run_video(job_id, params, progress).await;
         }
         // Translate the advertised name back to the catalogue key before
         // forwarding; a client asked for what this node said it had.
@@ -422,6 +589,165 @@ impl OpenRouterBackend {
     }
 }
 
+impl OpenRouterBackend {
+    async fn video_models(&self) -> Result<Vec<ListedVideo>> {
+        let resp = self
+            .http
+            .get(format!("{BASE}/v1/videos/models"))
+            .bearer_auth(&self.config.api_key)
+            .send()
+            .await
+            .map_err(|e| WorkerError::backend("openrouter", e))?;
+        if !resp.status().is_success() {
+            return Err(WorkerError::backend("openrouter", format!("HTTP {} listing video models", resp.status())));
+        }
+        let cat: VideoCatalogue = resp
+            .json()
+            .await
+            .map_err(|e| WorkerError::backend("openrouter", format!("bad video model list: {e}")))?;
+        Ok(cat.data)
+    }
+
+    /// A clip. OpenRouter's video API is asynchronous: submit, poll until the
+    /// job completes, then download the bytes. Every clip from this node has
+    /// the same shape (see `VIDEO_SECONDS`), which is what its price covers.
+    async fn run_video(
+        &self,
+        job_id: Uuid,
+        params: &rootmode_core::VideoParams,
+        progress: &Progress,
+    ) -> Result<JobResult> {
+        let advertised = params
+            .checkpoint_id
+            .as_deref()
+            .ok_or_else(|| WorkerError::Rejected("video jobs must name a model".into()))?;
+        let listed = self
+            .videos
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(advertised)
+            .cloned()
+            .ok_or_else(|| WorkerError::Rejected(format!("'{advertised}' is not served here")))?;
+
+        let mut body = serde_json::json!({
+            "model": listed.id,
+            "prompt": params.prompt,
+            "duration": listed.duration(),
+            "generate_audio": false,
+        });
+        if let Some(r) = listed.resolution() {
+            body["resolution"] = serde_json::json!(r);
+        }
+        if let Some(a) = listed.aspect() {
+            body["aspect_ratio"] = serde_json::json!(a);
+        }
+        if let Some(from) = params.from_image.as_deref().filter(|s| !s.trim().is_empty()) {
+            body["frame_images"] = serde_json::json!([{
+                "type": "image_url",
+                "frame_type": "first_frame",
+                "image_url": { "url": as_data_url(from) },
+            }]);
+        }
+
+        let submitted: serde_json::Value = self
+            .video_call(self.http.post(format!("{BASE}/v1/videos")).json(&body))
+            .await?;
+        let id = submitted["id"]
+            .as_str()
+            .ok_or_else(|| WorkerError::backend("openrouter", "video job was not given an id"))?
+            .to_string();
+        progress.set(0.05);
+
+        // Clips take from tens of seconds to several minutes. Poll gently;
+        // the client's own video deadline is the long stop.
+        let started = std::time::Instant::now();
+        let (status, cost) = loop {
+            tokio::time::sleep(std::time::Duration::from_secs(if cfg!(test) { 0 } else { 5 })).await;
+            let job: serde_json::Value = self
+                .video_call(self.http.get(format!("{BASE}/v1/videos/{id}")))
+                .await?;
+            let status = job["status"].as_str().unwrap_or("").to_string();
+            match status.as_str() {
+                "completed" => break (status, job["usage"]["cost"].as_f64()),
+                "failed" | "cancelled" | "expired" => {
+                    let why = job["error"].as_str().unwrap_or("no reason given");
+                    return Err(WorkerError::backend("openrouter", format!("video {status}: {why}")));
+                }
+                _ => {
+                    // A guess at progress: most clips land inside two minutes.
+                    let frac = (started.elapsed().as_secs_f32() / 120.0).min(0.9);
+                    progress.set(0.05 + 0.85 * frac);
+                }
+            }
+            if started.elapsed() > std::time::Duration::from_secs(20 * 60) {
+                return Err(WorkerError::backend("openrouter", "video did not finish within 20 minutes"));
+            }
+        };
+        let _ = status;
+
+        let resp = self
+            .http
+            .get(format!("{BASE}/v1/videos/{id}/content"))
+            .bearer_auth(&self.config.api_key)
+            .send()
+            .await
+            .map_err(|e| WorkerError::backend("openrouter", e))?;
+        if !resp.status().is_success() {
+            return Err(WorkerError::backend("openrouter", format!("HTTP {} downloading the clip", resp.status())));
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| WorkerError::backend("openrouter", e))?
+            .to_vec();
+        if bytes.is_empty() {
+            return Err(WorkerError::backend("openrouter", "the clip came back empty"));
+        }
+        progress.set(1.0);
+
+        let mut meta = serde_json::json!({
+            "model": advertised,
+            "backend": "openrouter",
+            "seconds": listed.duration(),
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+        });
+        if let Some(cost) = cost {
+            meta["upstream_cost"] = serde_json::json!(cost);
+            meta["min_bill_micros"] = serde_json::json!(bill_floor_micros(cost, self.config.markup));
+        }
+        Ok(JobResult {
+            v: rootmode_core::PROTOCOL_VERSION,
+            job_id,
+            kind: JobKind::Video,
+            sha256: rootmode_core::hash::sha256_hex(&bytes),
+            text: None,
+            tool_calls: Vec::new(),
+            image_path_or_b64: Some(base64::engine::general_purpose::STANDARD.encode(&bytes)),
+            thinking: None,
+            meta,
+        })
+    }
+
+    /// One authenticated JSON round trip to the video API.
+    async fn video_call(&self, req: reqwest::RequestBuilder) -> Result<serde_json::Value> {
+        let resp = req
+            .bearer_auth(&self.config.api_key)
+            .send()
+            .await
+            .map_err(|e| WorkerError::backend("openrouter", e))?;
+        let status = resp.status();
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| WorkerError::backend("openrouter", e))?;
+        if !status.is_success() {
+            return Err(WorkerError::backend("openrouter", format!("HTTP {status}: {text}")));
+        }
+        serde_json::from_str(&text).map_err(|e| WorkerError::backend("openrouter", format!("bad response: {e}")))
+    }
+}
+
 /// Base64 in, data URL out; a data URL is left alone.
 fn as_data_url(image: &str) -> String {
     let s = image.trim();
@@ -492,6 +818,54 @@ fn pick<'a>(wanted: &str, catalogue: &'a [Listed]) -> Option<&'a Listed> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_clip_is_priced_for_the_shape_this_node_asks_for() {
+        let veo: super::ListedVideo = serde_json::from_str(r#"{"id":"google/veo-3.1-lite",
+            "supported_durations":[8,4,6],"supported_resolutions":["720p","1080p"],
+            "supported_aspect_ratios":["16:9","9:16"],
+            "pricing_skus":{"duration_seconds_with_audio":"0.08","duration_seconds_without_audio":"0.05",
+                            "duration_seconds_with_audio_720p":"0.05","duration_seconds_without_audio_720p":"0.03"}}"#).unwrap();
+        // 5s is not offered: the shortest longer option, 6s. Silent 720p is
+        // 0.03/s but the bare silent rate is 0.05/s and the lock takes the
+        // dearer of the shapes it might be charged as: 0.05 × 6 × 1.15 = 0.345.
+        assert_eq!(veo.duration(), 6);
+        assert_eq!(veo.resolution().as_deref(), Some("720p"));
+        assert_eq!(veo.aspect().as_deref(), Some("16:9"));
+        assert_eq!(veo.per_clip(1.15).unwrap().amount, 0.35);
+
+        // Real catalogue entries, one per pricing dialect.
+        let clip = |json: &str| -> f64 {
+            let v: super::ListedVideo = serde_json::from_str(json).unwrap();
+            v.per_clip(1.15).unwrap().amount
+        };
+        // dollars per second, image-to-video dearer than text-to-video: covered
+        assert_eq!(clip(r#"{"id":"alibaba/wan-2.6","pricing_skus":{"text_to_video_duration_seconds_480p":"0.04",
+            "text_to_video_duration_seconds_720p":"0.08","image_to_video_duration_seconds_720p":"0.10",
+            "text_to_video_duration_seconds_1080p":"0.12","image_to_video_duration_seconds_1080p":"0.15"}}"#), 0.58); // 0.10×5×1.15
+        // cents per second
+        assert_eq!(clip(r#"{"id":"runway/gen-4.5","pricing_skus":{"cents_per_second_output":"12"}}"#), 0.69); // 60¢ ×1.15
+        // cents per second with a minimum per generation
+        assert_eq!(clip(r#"{"id":"runway/aleph-2","pricing_skus":{"cents_per_second_output":"28","minimum_cents_per_generation":"56"}}"#), 1.61);
+        // cents per output second by resolution (grok): the 720p one, not the input-image fee
+        assert_eq!(clip(r#"{"id":"x-ai/grok-imagine-video","pricing_skus":{"cents_per_image_input":"0.2",
+            "cents_per_video_output_second_480p":"5","cents_per_video_output_second_720p":"7"}}"#), 0.41); // 35¢ ×1.15
+        // per video token: 1280×720×24/1024 = 21,600 tokens/s × 5s × 0.0000042 = $0.4536
+        assert_eq!(clip(r#"{"id":"bytedance/seedance-2.0-fast","pricing_skus":{"video_tokens":"0.0000042",
+            "video_tokens_without_audio":"0.0000042","video_tokens_with_video_input":"0.000002475"}}"#), 0.53);
+        // an upscaler priced per megapixel is not a clip: not advertised
+        let up: super::ListedVideo = serde_json::from_str(r#"{"id":"black-forest-labs/flux-video-upscale",
+            "pricing_skus":{"cents_per_megapixel_second_precise":"7.5"}}"#).unwrap();
+        assert!(up.per_clip(1.15).is_none());
+
+        // What the catalogue actually sends for a model with gaps: nulls.
+        let sparse: super::ListedVideo = serde_json::from_str(r#"{"id":"kwaivgi/kling-video-o1",
+            "supported_durations":null,"supported_resolutions":null,"supported_aspect_ratios":null,
+            "supported_sizes":null,"pricing_skus":{"duration_seconds":"0.1120"}}"#).unwrap();
+        assert_eq!(sparse.duration(), 5);
+        assert_eq!(sparse.resolution(), None);
+        assert_eq!(sparse.per_clip(1.15).unwrap().amount, 0.65); // 0.56 × 1.15
+    }
+
     #[test]
     fn an_image_model_is_priced_per_picture_at_the_dear_case() {
         let listed: super::Listed = serde_json::from_str(r#"{"id":"google/gemini-3.1-flash-image",
