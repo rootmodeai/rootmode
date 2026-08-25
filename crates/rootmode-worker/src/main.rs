@@ -68,6 +68,56 @@ async fn main() -> ExitCode {
     }
 }
 
+/// Below this the pay key is nearly out of gas — a few hundred settles.
+const LOW_GAS_WEI: u128 = 300_000_000_000_000; // 0.0003 ETH
+
+/// A node that charges must be able to collect. Every paid job ends with a
+/// transaction from the pay key — the client's reserve, and settles — and a
+/// key with no ETH cannot send one, so the work is done and the tickets
+/// expire unpaid an hour later. Refuse to start charging in that state,
+/// loudly, rather than serve for free without anybody noticing. A read that
+/// fails (RPC down) only warns: that is a transient, not an empty key.
+async fn check_gas(config: &rootmode_worker::config::Config) -> rootmode_worker::Result<()> {
+    let payments = &config.payments;
+    let charging = !payments.contract.trim().is_empty() && !payments.rpc.trim().is_empty();
+    if !charging {
+        return Ok(());
+    }
+    let sender = payments.sender.trim();
+    if sender.is_empty() {
+        tracing::warn!(
+            "charging is configured but no pay key is set — set ROOTMODE_PAY_KEY, or mount \
+             the volume so one is minted; until then nothing this node earns can be collected"
+        );
+        return Ok(());
+    }
+    match rootmode_worker::chain::eth_balance(payments, sender).await {
+        Ok(0) => Err(rootmode_worker::WorkerError::Config(format!(
+            "pay key {sender} has no ETH on chain {}: it cannot post reserves or settles, so \
+             paid work would never be collected. Send it a little ETH for gas (0.002 ETH is \
+             roughly 3,500 transactions), or unset ROOTMODE_POT to serve without charging",
+            payments.chain_id
+        ))),
+        Ok(wei) if wei < LOW_GAS_WEI => {
+            tracing::warn!(
+                "pay key {sender} is low on ETH ({:.5} ETH, about {} transactions) — top it up or \
+                 collection stops when it runs out",
+                wei as f64 / 1e18,
+                wei / 91_000 / 6_000_000 // ~91k gas at ~0.006 gwei
+            );
+            Ok(())
+        }
+        Ok(wei) => {
+            tracing::info!("pay key {sender} has {:.5} ETH for gas", wei as f64 / 1e18);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::warn!("could not read the pay key's ETH balance ({e}); continuing");
+            Ok(())
+        }
+    }
+}
+
 async fn run(cli: Cli) -> rootmode_worker::Result<()> {
     match cli.command {
         Command::Init { path, force } => {
@@ -156,6 +206,7 @@ async fn run(cli: Cli) -> rootmode_worker::Result<()> {
             }
 
             let worker = Arc::new(Worker::from_config(config).await?);
+            check_gas(worker.config()).await?;
             let listener = worker.bind().await?;
             let addr = listener
                 .local_addr()

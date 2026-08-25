@@ -1418,7 +1418,18 @@ impl Worker {
                 tracing::info!(%job_id, "already settled on-chain; nothing new to pay");
                 self.channels.settled(channel_id, pay.ticket.cumulative);
             }
-            Err(e) => tracing::warn!(%job_id, "settle later: {e}"),
+            Err(e) => {
+                let msg = e.to_string().to_lowercase();
+                if msg.contains("insufficient funds") || msg.contains("gas required exceeds") {
+                    tracing::error!(
+                        %job_id,
+                        "settle failed: the pay key is out of ETH for gas — top it up or paid work \
+                         goes uncollected: {e}"
+                    );
+                } else {
+                    tracing::warn!(%job_id, "settle later: {e}");
+                }
+            }
         }
     }
 

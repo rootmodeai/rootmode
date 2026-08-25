@@ -85,6 +85,19 @@ pub async fn channel_state(
     }))
 }
 
+/// The pay key's ETH balance in wei, for the gas check at start.
+pub async fn eth_balance(payments: &PaymentsConfig, address: &str) -> Result<u128> {
+    let raw = rpc(
+        &payments.rpc,
+        "eth_getBalance",
+        serde_json::json!([address, "latest"]),
+    )
+    .await?;
+    let hex = raw.as_str().unwrap_or("0x0").trim_start_matches("0x");
+    u128::from_str_radix(if hex.is_empty() { "0" } else { hex }, 16)
+        .map_err(|e| WorkerError::Net(format!("eth_getBalance: {e}")))
+}
+
 /// Post a client-signed `reserve()`. Anyone may call it; this node does
 /// because it already holds ETH for `settle`. Returns `None` when the chain
 /// already holds a lock at or above this ticket — posting it again would

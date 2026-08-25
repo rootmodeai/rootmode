@@ -55,7 +55,7 @@ host's own. With published ports instead, set `ROOTMODE_P2P_EXTERNAL` to the
 address other peers should dial — otherwise they discover this node and then
 cannot reach it.
 
-**Mount the volume.** `/var/lib/rootmode` holds `worker.key`. Without it the
+**Mount the volume.** `/var/lib/rootmode` holds `worker.key` — and, once you charge, `pay.key` (an Ethereum key with your gas ETH on it) and `channels.json` (bills you have not yet collected). Losing the volume loses money, not just a peer id. Without it the
 peer id changes every time the container is recreated, and every client that
 pinned it stops recognising the node.
 
@@ -75,9 +75,9 @@ and set `ROOTMODE_CONFIG` to its path — then none of the variables apply.
 | `ROOTMODE_PAYOUT` | — | where the 90% USDC is sent when a job settles |
 | `ROOTMODE_POT` | — | RootmodePot address. Empty = not charging on-chain |
 | `ROOTMODE_CHAIN_ID` | `8453` | settlement chain (Base) |
-| `ROOTMODE_RPC` | — | JSON-RPC URL used to check the lock and to submit spend tickets |
-| `ROOTMODE_PAY_KEY` | — | Ethereum private key (secp256k1, 32-byte hex) this node signs `settle` with |
-| `ROOTMODE_PAY_SENDER` | — | address that posts `settle`; derived from the key if omitted |
+| `ROOTMODE_RPC` | — | JSON-RPC URL for lock checks and transactions. On `mainnet.base.org` the node fails over to other public Base endpoints when it is rate-limited |
+| `ROOTMODE_PAY_KEY` | — | Ethereum private key (secp256k1, 32-byte hex) this node signs `reserve`/`settle` with. Omit it and one is minted on the volume (`pay.key`). **Needs ETH on Base for gas** — see *Before you charge* |
+| `ROOTMODE_PAY_SENDER` | — | only for a node whose RPC holds an unlocked account (`eth_sendTransaction`). On a public RPC this fails with `unknown account`; use a key instead |
 | `ROOTMODE_BOOTSTRAP` | — | comma-separated bootstrap multiaddrs |
 | `ROOTMODE_P2P_EXTERNAL` | — | address to advertise, if not what it binds |
 | `ROOTMODE_LABEL` | hostname | shown to clients |
@@ -90,7 +90,7 @@ and set `ROOTMODE_CONFIG` to its path — then none of the variables apply.
 | `ROOTMODE_REQUIRE_SIGNATURE` | `true` | refuse unsigned submissions |
 | `ROOTMODE_ALLOW_PEERS` | — | comma-separated client peer ids |
 | `ROOTMODE_RELAY` | `true` | ask for a relay slot (needed behind NAT) |
-| `ROOTMODE_DHT_SERVER` | `false` | answer DHT queries for others |
+| `ROOTMODE_DHT_SERVER` | `false` | answer DHT queries for others. Set `true` on a publicly reachable node — otherwise its records live only in the bootstrap's memory |
 | `ROOTMODE_VLLM_API_KEY`, `ROOTMODE_VLLM_MODELS` | — | |
 | `ROOTMODE_COMFYUI_WORKFLOW`, `ROOTMODE_COMFYUI_CHECKPOINT`, `ROOTMODE_COMFYUI_SLOTS` | see below | |
 | `ROOTMODE_COMFYUI_WORKFLOWS` | — | `model=/path/graph.json,…` — one graph per model |
@@ -110,6 +110,31 @@ The image ships `sdxl_txt2img.json` and defaults the slots to match it.
 Health: the container reports unhealthy only when **no** configured backend
 is answering. A box with vLLM up and ComfyUI off is still a worker.
 
+
+## Before you charge
+
+Serving is free to run. **Charging is not**: every paid job ends with this
+node posting a transaction on Base — the client's lock (`reserve`) and,
+batched, its own `settle` — and each one costs gas, about $0.0014. So a
+charging node needs an Ethereum key with ETH on it, and it needs it **before
+the first paid job**, or that job is served and never collected.
+
+1. Set `ROOTMODE_PAYOUT` (where your USDC goes), `ROOTMODE_POT`,
+   `ROOTMODE_RPC` and start the container.
+2. On first start it mints `pay.key` on the volume and logs the address:
+   ```
+   INFO settle signer 0x1fdc…0ba2
+   ```
+   Send that address a little ETH on Base. `0.002 ETH` (a few dollars) is
+   roughly 3,500 transactions; it is a hot key for gas only, never for
+   revenue — revenue goes to `ROOTMODE_PAYOUT`, which can be a cold wallet.
+3. The node refuses to start charging while that address has no ETH, and
+   warns at start when it is running low. Watch `docker compose logs` for
+   `pay key … has no ETH` / `is low on ETH`. When the key runs dry, paid
+   work still gets done but its tickets expire uncollected an hour later.
+
+Leave `ROOTMODE_POT` empty and none of this applies: the node serves free,
+even if it advertises a price.
 ## Build from source
 
 ```sh
@@ -472,17 +497,32 @@ you only want to serve people you know.
 ## Payment
 
 A priced job is prepaid in **1 million token slices** (at the dearest of
-input / output / cache-write, clipped to the pot's per-job cap). The client
-app signs however many slices the prompt and answer ceiling need, so
-streaming never pauses on a boundary. If a reply still runs long, this node
-asks for the next slice mid-stream (`top_up`); the app signs it with no UI.
-After the job it invoices the actual bill; if that signature does not
-arrive, the prepaid slices are settled.
+input / output / cache-write, clipped to the channel's per-job cap — the
+client's limit, taken from its account when the channel is opened). Before
+the GPU starts, the node checks that the prompt and answer ceiling fit that
+lock, pricing the prompt at the input rate and the answer at the output
+rate. If a reply runs long, this node asks for the next slice mid-stream
+(`top_up`); the app signs it with no UI. After the job it invoices the
+actual bill: `uncached prompt × input + cached × cache + completion × output`
+(completion includes reasoning), and never less than what the work actually
+cost upstream times the markup, when the backend reports that cost
+(OpenRouter does). If the invoice signature does not arrive — the client
+stopped the reply, or went away — the prepaid slice is kept instead.
 
-This node checks the on-chain lock before the GPU starts, then **signs** the
-`settle` transaction itself (`eth_sendRawTransaction`) so collection does
-not depend on the client. 90% goes to `ROOTMODE_PAYOUT`, 10% to the network
-fee vault.
+Collection is this node's job, not the client's. It checks the on-chain lock
+before work, posts the client's signed `reserve` when the lock is short, and
+**settles** with its own key (`eth_sendRawTransaction`). Settles are batched
+— once a channel holds about $0.05 unsettled, at half the per-job cap at the
+latest, and always before a ticket's one-hour deadline — so gas stays under a
+few percent of what is collected. 90% goes to `ROOTMODE_PAYOUT`, 10% to the
+network fee vault.
+
+Every paid job logs one line you can reconcile against your provider's
+statement:
+
+```
+INFO billed job_id=… model="kimi-k3" billed_micros=27234 upstream_cost_usd=0.02231 prompt=47909 cached=44928 completion=71 reasoning=0
+```
 
 Two Ethereum keys, different jobs:
 
@@ -514,8 +554,9 @@ In Docker: `ROOTMODE_PAYOUT`, `ROOTMODE_POT`, `ROOTMODE_RPC`,
 without charging, even if it advertised a price.
 
 If `ROOTMODE_PAY_KEY` is unset and `ROOTMODE_PAY_SENDER` is set, the RPC is
-asked to sign (`eth_sendTransaction`). That only works when the node has
-that account unlocked.
+asked to sign (`eth_sendTransaction`). That only works against your own node
+with that account unlocked; a public RPC answers `unknown account` and no
+job ever settles. Prefer the key.
 
 ## Reporting usage
 
