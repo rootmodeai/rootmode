@@ -501,6 +501,26 @@ impl Worker {
             has_reserve = submit.reserve.is_some(),
             "priced lock check"
         );
+        // The contract settles each job against the per-job cap snapshotted
+        // into the payer's channel. A bond above it, or a picture or clip
+        // whose one bill is above it, could never settle: the work would be
+        // done and the cost borne, and nothing collected. Refuse it here,
+        // before the backend is called, and say why.
+        if state.max_per_job > 0 {
+            let flat = match submit.payload.kind() {
+                rootmode_core::JobKind::Llm => 0,
+                _ => (self.advertised_price(&submit.payload).amount * 1_000_000.0).round() as u64,
+            };
+            let over = need.max(flat);
+            if over > state.max_per_job {
+                return Err(WorkerError::Rejected(format!(
+                    "this job is ${:.2} but the payer's channel allows ${:.2} per job; nothing above that can settle. \
+                     Raise the limit in your pot and reopen the channel",
+                    over as f64 / 1_000_000.0,
+                    state.max_per_job as f64 / 1_000_000.0
+                )));
+            }
+        }
         // Post a raise whenever the payer signed one above the current lock,
         // not only once the lock is already short. The client tops up with
         // headroom for several jobs; waiting until a job cannot fit means

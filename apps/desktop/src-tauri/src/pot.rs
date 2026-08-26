@@ -610,6 +610,19 @@ pub async fn issue_ticket(
     // channel at its first reserve — raising the account's limits later does
     // not raise them. A lock above the channel's cap would settle as OverCap.
     if ch.max_per_job > 0 {
+        // A picture or clip is one bill at its advertised price; clamped
+        // under that price it cannot be paid for, and the worker would be
+        // left with the cost. Say so before anything is sent.
+        if kind != JobKind::Llm && chunk > ch.max_per_job {
+            return Err(AppError::Invalid(format!(
+                "This {} costs ${:.2}, more than the ${:.2} per-job cap on your payment channel. \
+                 Your account allows ${:.2}; the channel takes that limit when it is reopened.",
+                if kind == JobKind::Video { "clip" } else { "picture" },
+                chunk as f64 / 1_000_000.0,
+                ch.max_per_job as f64 / 1_000_000.0,
+                cap as f64 / 1_000_000.0,
+            )));
+        }
         job_cap = job_cap.min(ch.max_per_job);
     }
     // First signature covers as many 1M-token slices as the job needs, so
