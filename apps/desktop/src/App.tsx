@@ -52,9 +52,9 @@ function Gate() {
 
 function Shell() {
   const [screen, setScreen] = useState<Screen>("chat");
-  // The section whose models are unfolded in the navigation. Follows the
-  // screen you open; clicking the open section again folds them away.
-  const [unfolded, setUnfolded] = useState<Screen | null>("chat");
+  // The section whose models are unfolded in the navigation. Closed until
+  // you open one; clicking the open section again folds it away.
+  const [unfolded, setUnfolded] = useState<Screen | null>(null);
   const { peers, bootError } = useStore();
   const [status, setStatus] = useState<NetworkStatus | null>(null);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);

@@ -845,7 +845,7 @@ td { padding: 10px 10px 10px 0; border-bottom: 1px solid var(--border); vertical
    and indented, so the section stays the thing you clicked. */
 .nav-section { display: flex; flex-direction: column; }
 .nav-caret { margin-left: auto; font-size: 9px; opacity: 0.55; }
-.nav-models { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 6px 12px; }
+.nav-models { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 6px 8px; }
 .nav-models-search {
   margin: 2px 0 4px 10px; padding: 5px 8px; box-sizing: border-box; width: calc(100% - 10px);
   border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
@@ -857,7 +857,7 @@ td { padding: 10px 10px 10px 0; border-bottom: 1px solid var(--border); vertical
 .nav-model-wrap { display: flex; flex-direction: column; }
 .nav .nav-model {
   display: flex; align-items: baseline; gap: 8px; justify-content: space-between;
-  width: 100%; padding: 5px 8px 5px 10px; border-radius: 7px;
+  width: 100%; padding: 5px 6px 5px 8px; border-radius: 7px;
   border: 0; border-left: 2px solid var(--border-strong); background: none;
   font: inherit; font-size: 12.5px; color: var(--text-2); cursor: pointer; text-align: left;
   box-shadow: none; font-weight: 400;
@@ -866,7 +866,7 @@ td { padding: 10px 10px 10px 0; border-bottom: 1px solid var(--border); vertical
 .nav .nav-model.active { border-left-color: var(--accent); background: var(--surface); color: var(--text); font-weight: 550; }
 .nav .nav-model.active.stale { border-left-color: var(--red); }
 .nav .nav-model.auto .s { color: var(--text-3); }
-.nav-model .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-model .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-model .s { flex: none; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .nav-model .s.free { color: var(--accent); font-weight: 600; }
 .nav-model-more { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 4px 12px; }

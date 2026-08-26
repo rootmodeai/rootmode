@@ -120,10 +120,10 @@ export function NavModels({ kind, onPick }: { kind: JobKind; onPick: () => void 
                 <button
                   className={`nav-model${active ? " active" : ""}${active && stale ? " stale" : ""}`}
                   onClick={() => pick({ ...cheapest, pinned: false })}
-                  title={[r.maker, r.model].filter(Boolean).join(" · ")}
+                  title={[r.maker, r.model, priceLabel(cheapest)].filter(Boolean).join(" · ")}
                 >
                   <span className="n">{r.name}</span>
-                  <span className={`s${free ? " free" : ""}`}>{free ? "free" : priceLabel(cheapest)}</span>
+                  <span className={`s${free ? " free" : ""}`}>{free ? "free" : cheapest.price.toFixed(2)}</span>
                 </button>
                 {active && (
                   <div className="nav-model-more">
