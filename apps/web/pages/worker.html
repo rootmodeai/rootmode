@@ -1,20 +1,20 @@
 <title>Run a rootmode worker</title>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="description" content="Turn a machine with GPUs into a peer on the network. One compose file, pointed at the vLLM or ComfyUI you already run. No application, no approval queue." />
+<meta name="description" content="Three lines in a file and the machine you already run models on earns USDC. Point the worker at your vLLM or ComfyUI; the network is built in. No sign-up, no approval." />
 <meta name="theme-color" content="#7433f7" />
 <link rel="canonical" href="https://rootmode.ai/worker" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="rootmode" />
 <meta property="og:title" content="Run a rootmode worker" />
-<meta property="og:description" content="Turn a machine with GPUs into a peer on the network. One compose file, pointed at the vLLM or ComfyUI you already run. No application, no approval queue." />
+<meta property="og:description" content="Three lines in a file and the machine you already run models on earns USDC. Point the worker at your vLLM or ComfyUI; the network is built in. No sign-up, no approval." />
 <meta property="og:url" content="https://rootmode.ai/worker" />
 <meta property="og:image" content="https://rootmode.ai/assets/og.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Run a rootmode worker" />
-<meta name="twitter:description" content="Turn a machine with GPUs into a peer on the network. One compose file, pointed at the vLLM or ComfyUI you already run. No application, no approval queue." />
+<meta name="twitter:description" content="Three lines in a file and the machine you already run models on earns USDC. Point the worker at your vLLM or ComfyUI; the network is built in. No sign-up, no approval." />
 <meta name="twitter:image" content="https://rootmode.ai/assets/og.png" />
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
 <style>
@@ -442,14 +442,14 @@
       <p class="eyebrow">For operators</p>
       <h1>Run a worker.</h1>
       <p class="lede">
-        A worker is what turns a machine with GPUs into a peer on the network. One
-        compose file, pointed at the vLLM or ComfyUI you already run. It needs no GPU
-        access of its own, and there's no application or approval queue — start it
-        and you're serving.
+        Three lines in a file, and the machine you already run models on starts
+        earning USDC. The worker sits next to your vLLM or ComfyUI, talks to it over
+        HTTP, and takes care of the network. No sign-up, no approval, nothing to
+        apply for.
       </p>
       <div class="actions">
         <a class="btn btn-solid" href="#quickstart">Start here</a>
-        <a class="btn btn-ghost" href="https://github.com/rootmodeai/rootmode/blob/main/docs/WORKER.md">Full documentation</a>
+        <a class="btn btn-ghost" href="#faq">Questions</a>
       </div>
     </div>
   </section>
@@ -458,24 +458,20 @@
     <div class="wrap">
       <div class="head">
         <p class="eyebrow">Before you start</p>
-        <h2>What you need on the box.</h2>
-        <p>
-          The worker doesn't hold models and doesn't touch your GPUs. It speaks to an
-          inference server you already run, over HTTP.
-        </p>
+        <h2>Three things. You probably have two already.</h2>
       </div>
       <div class="reqs">
         <div class="req">
           <h3>Docker</h3>
-          <p>And a clone of the repo. <code>docker compose up</code> is the whole start. Or a Rust toolchain, if you'd rather build from source.</p>
+          <p>That's the whole install. The worker runs in one container and never touches your GPUs itself.</p>
         </div>
         <div class="req">
-          <h3>vLLM, for text</h3>
-          <p>Any OpenAI-compatible endpoint. Typically <code>127.0.0.1:8000</code>. Comment it out in <code>.env</code> if this box only serves images.</p>
+          <h3>A model server</h3>
+          <p><b>vLLM</b> (or any OpenAI-compatible server) for text. <b>ComfyUI</b> for images. Either one, or both — whatever this box already runs.</p>
         </div>
         <div class="req">
-          <h3>ComfyUI, for images and video</h3>
-          <p>Uncomment it in <code>.env</code> and every checkpoint installed is served — still images, and video models such as MiniMax if they're on the box. Export a workflow instead when your pipeline has a shape of its own.</p>
+          <h3>A wallet address, to be paid</h3>
+          <p>Any address on Base. A cold wallet is fine — nothing on the box ever holds your earnings. Skip it and the node still works; see <a href="#free">serving for free</a>.</p>
         </div>
       </div>
     </div>
@@ -485,128 +481,166 @@
     <div class="wrap">
       <div class="head">
         <p class="eyebrow">Quickstart</p>
-        <h2>Serving in about ten minutes.</h2>
+        <h2>Earning in five minutes.</h2>
+        <p>Every box uses the same compose file. The only thing you write is <code>.env</code>, and it is three lines.</p>
       </div>
       <div class="flow">
 
         <div class="stepblk">
-          <h3>Clone it and name the endpoints</h3>
-          <p>
-            The compose file is the same on every box — Spark, A100, H100, or a
-            machine whose cards sit behind a remote URL. <code>.env</code> is the
-            only thing that changes. Uncomment vLLM, ComfyUI, or both; at least one
-            is required. A price is one more line; leave it out and you advertise
-            as free.
-          </p>
+          <h3>Get the code</h3>
           <div class="term">
-            <div class="term-bar"><i></i><i></i><i></i><b>setup</b></div>
+            <div class="term-bar"><i></i><i></i><i></i><b>terminal</b></div>
             <pre>$ git clone https://github.com/rootmodeai/rootmode
 $ cd rootmode
 $ cp .env.example .env</pre>
           </div>
+        </div>
+
+        <div class="stepblk">
+          <h3>Fill in three lines</h3>
+          <p>
+            Where your model server is, what you charge, and where the money goes.
+            That is the entire configuration.
+          </p>
           <div class="term">
             <div class="term-bar"><i></i><i></i><i></i><b>.env</b></div>
-            <pre><span class="c"># OpenAI-compatible server. Comment out if this box only serves images.</span>
-ROOTMODE_VLLM=http://127.0.0.1:8000
-<span class="c"># ROOTMODE_VLLM_PRICE=0.15          # per million tokens, every model</span>
+            <pre><span class="c"># 1. What this box serves (vLLM, SGLang, llama.cpp, … — or ComfyUI for images)</span>
+ROOTMODE_VLLM=<span class="g">http://127.0.0.1:8000</span>
 
-<span class="c"># ComfyUI. Uncomment to serve images too, or instead of vLLM.</span>
-<span class="c"># ROOTMODE_COMFYUI=http://127.0.0.1:8188</span>
-<span class="c"># ROOTMODE_COMFYUI_PRICE=0.02       # per image, every checkpoint</span>
-<span class="c"># ROOTMODE_COMFYUI_PRICES=sdxl=0.02,krea2-turbo=0.08</span></pre>
+<span class="c"># 2. What it charges, in USD per million tokens (per image for ComfyUI)</span>
+ROOTMODE_VLLM_PRICE=<span class="g">0.15</span>
+
+<span class="c"># 3. Where your USDC lands. Any Base address.</span>
+ROOTMODE_PAYOUT=<span class="g">0xYourWalletAddress</span></pre>
+          </div>
+          <p>
+            You don't need to know a contract address, a chain id, an RPC or a
+            bootstrap peer. All of that is built into the worker. Serving images
+            instead? Swap the first two lines for <code>ROOTMODE_COMFYUI</code> and
+            <code>ROOTMODE_COMFYUI_PRICE</code>.
+          </p>
+        </div>
+
+        <div class="stepblk">
+          <h3>Start it</h3>
+          <div class="term">
+            <div class="term-bar"><i></i><i></i><i></i><b>terminal</b></div>
+            <pre>$ docker compose up -d --build
+$ docker compose logs -f</pre>
+          </div>
+          <p>It tells you what it is serving, and where it settles:</p>
+          <div class="term">
+            <div class="term-bar"><i></i><i></i><i></i><b>docker compose logs -f</b></div>
+            <pre><span class="c">INFO</span> settle signer <span class="g">0x1fdc1df454aa7ef9433ec00e6798a3b1e5cf0ba2</span>
+<span class="c">INFO</span> rootmode worker v0.1.10
+<span class="c">INFO</span> listening on ws://0.0.0.0:9944
+<span class="c">INFO</span> settling on pot 0x8115…D5a9 (chain 8453) via https://mainnet.base.org — payout <span class="g">0xYour…ress</span>
+<span class="c">INFO</span> caps: [llm]  max_concurrent: 2
+<span class="c">INFO</span>   <span class="g">meta-llama/Llama-3.1-8B-Instruct (llm)</span></pre>
           </div>
         </div>
 
         <div class="stepblk">
-          <h3>Start the worker</h3>
+          <h3>Send the gas key a few dollars of ETH</h3>
           <p>
-            The container talks to your inference server over HTTP, so it needs no
-            GPU access itself. Host networking is the simplest thing that works on
-            Linux.
+            Every paid job ends with your node posting a tiny transaction on Base
+            to collect — about a tenth of a cent each. It signs those with its own
+            key, minted on first start and printed as <code>settle signer</code>
+            above. That key needs a little ETH, once:
           </p>
           <div class="term">
-            <div class="term-bar"><i></i><i></i><i></i><b>run</b></div>
-            <pre>$ docker compose up -d --build</pre>
+            <div class="term-bar"><i></i><i></i><i></i><b>do this once</b></div>
+            <pre>Send <span class="g">0.002 ETH</span> on <span class="g">Base</span> to the <span class="g">settle signer</span> address from the log.
+<span class="c"># ≈ a few dollars, ≈ 3,500 collections. Gas only — never your revenue.</span></pre>
           </div>
+          <p>
+            Until the ETH arrives the node refuses to charge (it says so in the log,
+            and keeps retrying on its own). Once it lands, you're live. It warns you
+            in the log when the key runs low.
+          </p>
+        </div>
+
+        <div class="stepblk">
+          <h3>That's it</h3>
+          <p>
+            Clients on the network find your node and pick it by price. Each job
+            locks the client's money <em>before</em> your GPU runs, bills what was
+            actually used, and settles on Base: <b>90% to your payout address, 10%
+            to the network.</b> Nothing about the job — no prompt, no answer — goes
+            on-chain.
+          </p>
           <div class="note">
-            <b>Keep the volume.</b>
+            <b>Keep the Docker volume.</b>
             <p>
-              <code>/var/lib/rootmode</code> holds the node's key, and that key
-              <em>is</em> its identity. Lose it and your peer id changes — every
-              client that pinned you stops recognising the node. Once you charge,
-              it also holds <code>pay.key</code> — an Ethereum key with your gas
-              ETH on it — and the bills you have not collected yet. Losing it
-              then loses money, not just a name.
+              <code>/var/lib/rootmode</code> holds your node's identity, its gas key,
+              and bills it hasn't collected yet. Never <code>docker compose down -v</code>.
+              Losing the volume loses money, not just a name.
             </p>
           </div>
         </div>
 
-        <div class="stepblk">
-          <h3>Before you charge, fund the gas key</h3>
-          <p>
-            Serving is free to run. Charging is not: every paid job ends with this
-            node posting a transaction on Base — the client's lock, and its own
-            settle — and each one costs gas, about a tenth of a cent. So a
-            charging node needs an Ethereum key with a little ETH on it, and it
-            needs it <em>before the first paid job</em>. Set
-            <code>ROOTMODE_POT</code>, <code>ROOTMODE_RPC</code> and
-            <code>ROOTMODE_PAYOUT</code>, start it, and read the address it prints:
-          </p>
-          <div class="term">
-            <div class="term-bar"><i></i><i></i><i></i><b>docker compose logs -f</b></div>
-            <pre><span class="c">INFO</span> settle signer <span class="g">0x1fdc1df454aa7ef9433ec00e6798a3b1e5cf0ba2</span>
-<span class="c">ERROR</span> pay key 0x1fdc…0ba2 has no ETH on chain 8453: it cannot post
-      reserves or settles, so paid work would never be collected.
-      Send it a little ETH for gas (0.002 ETH is roughly 3,500
-      transactions), or unset ROOTMODE_POT to serve without charging</pre>
-          </div>
-          <p>
-            Send that address <code>0.002 ETH</code> on Base — a few dollars,
-            roughly 3,500 transactions — and start it again. It is a hot key for
-            gas only; your revenue goes to <code>ROOTMODE_PAYOUT</code>, which can
-            be a cold wallet. The node refuses to start charging while the key is
-            empty and warns when it runs low. Let it run dry and paid work still
-            gets done, but its tickets expire uncollected an hour later.
-          </p>
-        </div>
+      </div>
+    </div>
+  </section>
 
-        <div class="stepblk">
-          <h3>Check what it says</h3>
-          <p>
-            On each start it writes a <code>worker.toml</code> from the environment
-            and prints it, then advertises exactly what the box actually serves.
-            A price changed in <code>.env</code> takes effect on restart.
-          </p>
-          <div class="term">
-            <div class="term-bar"><i></i><i></i><i></i><b>docker compose logs -f</b></div>
-            <pre><span class="c">INFO</span> rootmode worker v0.1.0
-<span class="c">INFO</span> peer_id=ef9084b8a01c18be4b75fb7e0b72b7b4d57b5be9…
-<span class="c">INFO</span> listening on ws://0.0.0.0:9944
-<span class="c">INFO</span> caps: [llm]  max_concurrent: 2
-<span class="c">INFO</span>   <span class="g">meta-llama/Llama-3.1-8B-Instruct (llm)</span>
-<span class="c">INFO</span> this node is its own entry point — give a client one of:
-<span class="c">INFO</span>   /ip4/192.168.1.50/tcp/4101/p2p/12D3KooWR3Tjk…</pre>
-          </div>
-        </div>
+  <section id="free">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Or</p>
+        <h2>Serve for free.</h2>
+        <p>
+          Leave the price out. A free node needs no wallet, no ETH, and never touches
+          the chain — clients just pick it as the cheapest option. Add a price later
+          and it starts charging on the next restart.
+        </p>
+      </div>
+      <div class="term">
+        <div class="term-bar"><i></i><i></i><i></i><b>.env</b></div>
+        <pre>ROOTMODE_VLLM=<span class="g">http://127.0.0.1:8000</span>
+<span class="c"># no price, no payout: free, and off-chain</span></pre>
+      </div>
+    </div>
+  </section>
 
-        <div class="stepblk">
-          <h3>Connect a client to it</h3>
-          <p>
-            On the same network, the desktop app finds it on its own — it appears on
-            the peers screen marked <code>discovered</code>. From elsewhere, add
-            <code>ws://&lt;host&gt;:9944</code> by hand, and paste the peer id into the
-            public key field to pin it.
-          </p>
-          <p>
-            To check a node without the desktop app at all:
-          </p>
-          <div class="term">
-            <div class="term-bar"><i></i><i></i><i></i><b>smoke test</b></div>
-            <pre>$ cargo run -p rootmode-worker --example submit -- \
-    ws://127.0.0.1:9944 <span class="g">"what is a peer?"</span></pre>
-          </div>
-        </div>
-
+  <section id="faq" class="band">
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Questions</p>
+        <h2>The ones people actually ask.</h2>
+      </div>
+      <div class="trouble">
+        <details>
+          <summary>Do I need crypto to start?</summary>
+          <p>To serve for free, no. To charge, you need one wallet address on Base to receive USDC (any wallet will do), and about $5 of ETH on Base sent to the gas key your node prints. That ETH covers thousands of jobs.</p>
+        </details>
+        <details>
+          <summary>Where does the money actually go?</summary>
+          <p>90% of every settled job goes to <code>ROOTMODE_PAYOUT</code> as USDC on Base, 10% to the network's treasury. The node's own key only ever holds gas. If you don't set a payout, earnings accrue to that gas key on the volume — the log tells you the address on every start — so set one before it adds up.</p>
+        </details>
+        <details>
+          <summary>What if a client doesn't pay?</summary>
+          <p>They can't not pay. A client's funds are locked in the settlement contract before your GPU does anything, and your node checks that lock first. If the money isn't there, the job is refused before it runs.</p>
+        </details>
+        <details>
+          <summary>How do clients find me?</summary>
+          <p>Your node announces itself to the network on start, through bootstrap peers built into the worker. Clients see what you serve and your price, and choose. On the same LAN the desktop app finds you without any of that.</p>
+        </details>
+        <details>
+          <summary>Can I price models differently?</summary>
+          <p>Yes: <code>ROOTMODE_VLLM_PRICES=model-a=0.40,model-b=0.10</code> overrides the flat price per model. Same for ComfyUI with <code>ROOTMODE_COMFYUI_PRICES</code>.</p>
+        </details>
+        <details>
+          <summary>I'm behind NAT / on Docker Desktop.</summary>
+          <p>Linux with host networking needs nothing. Otherwise set <code>ROOTMODE_P2P_EXTERNAL</code> to the address other peers should dial (<code>/ip4/203.0.113.10/tcp/4101</code>), or peers will find you and then fail to reach you.</p>
+        </details>
+        <details>
+          <summary>How do I stop?</summary>
+          <p><code>docker compose down</code>. You're off the network instantly; there's no notice period and nothing to cancel. Just don't add <code>-v</code>.</p>
+        </details>
+        <details>
+          <summary>What if I lose the volume?</summary>
+          <p>Your peer id changes (clients that pinned you stop recognising the node), the gas key and its ETH are gone, and any bills not yet collected are lost. Back it up like you'd back up a wallet.</p>
+        </details>
       </div>
     </div>
   </section>
@@ -615,60 +649,66 @@ ROOTMODE_VLLM=http://127.0.0.1:8000
     <div class="wrap stack rv">
       <div class="head">
         <p class="eyebrow">Configuration</p>
-        <h2>The settings worth knowing.</h2>
-        <p>
-          Set them in <code>.env</code> next to the compose file. Mount your own
-          <code>worker.toml</code> and set <code>ROOTMODE_CONFIG</code> to its path —
-          then none of these apply.
-        </p>
+        <h2>Every setting, in three groups.</h2>
+        <p>All go in <code>.env</code>. The first group is the quickstart; the other two you may never touch.</p>
       </div>
+
+      <h3>The three lines</h3>
       <div class="tablewrap">
         <table>
-          <thead>
-            <tr><th>Variable</th><th>Default</th><th>What it does</th></tr>
-          </thead>
+          <thead><tr><th>Variable</th><th>Example</th><th>What it does</th></tr></thead>
           <tbody>
-            <tr><td><code>ROOTMODE_VLLM</code></td><td>—</td><td>OpenAI-compatible endpoint for text. Comma-separate if this box has more than one.</td></tr>
-            <tr><td><code>ROOTMODE_VLLM_PRICE</code></td><td>—</td><td>What you charge per million tokens, for every model that server reports. Unset is advertised as free.</td></tr>
-            <tr><td><code>ROOTMODE_VLLM_PRICES</code></td><td>—</td><td>Optional per-model overrides: <code>id=0.40,id=0.10</code></td></tr>
-            <tr><td><code>ROOTMODE_COMFYUI</code></td><td>—</td><td>ComfyUI endpoint for images and video. Pointing at it is enough — every installed checkpoint is advertised.</td></tr>
-            <tr><td><code>ROOTMODE_COMFYUI_PRICE</code></td><td>—</td><td>What you charge per image, for every checkpoint. Unset is advertised as free.</td></tr>
-            <tr><td><code>ROOTMODE_COMFYUI_PRICES</code></td><td>—</td><td>Optional per-checkpoint overrides: <code>sdxl=0.02,krea2-turbo=0.08</code></td></tr>
-            <tr><td><code>ROOTMODE_CURRENCY</code></td><td>USD</td><td>Currency for the prices above</td></tr>
-            <tr><td><code>ROOTMODE_PAYOUT</code></td><td>—</td><td>Address that receives your 90% when a job settles.</td></tr>
-            <tr><td><code>ROOTMODE_POT</code></td><td>—</td><td>RootmodePot contract. Empty means this node is not charging on-chain.</td></tr>
-            <tr><td><code>ROOTMODE_CHAIN_ID</code></td><td>8453</td><td>Settlement chain. Base is 8453.</td></tr>
-            <tr><td><code>ROOTMODE_RPC</code></td><td>—</td><td>JSON-RPC URL for lock checks and transactions. On <code>mainnet.base.org</code> the node fails over to other public Base endpoints when it is rate-limited.</td></tr>
-            <tr><td><code>ROOTMODE_PAY_KEY</code></td><td>—</td><td>Ethereum private key (secp256k1, 32-byte hex) this node signs <code>reserve</code> and <code>settle</code> with. Leave it unset and one is minted on the volume (<code>pay.key</code>). <b>Needs ETH on Base for gas</b> — see <i>Before you charge</i>. Does not have to be the payout address.</td></tr>
-            <tr><td><code>ROOTMODE_PAY_SENDER</code></td><td>—</td><td>Only for a node whose RPC holds an unlocked account. On a public RPC this fails with <code>unknown account</code> and nothing ever settles — use a key.</td></tr>
-            <tr><td><code>ROOTMODE_BOOTSTRAP</code></td><td>—</td><td>Entry points to join, comma-separated</td></tr>
-            <tr><td><code>ROOTMODE_P2P_EXTERNAL</code></td><td>—</td><td>Address to advertise, if not what it binds</td></tr>
+            <tr><td><code>ROOTMODE_VLLM</code></td><td>http://127.0.0.1:8000</td><td>Your text model server. Comma-separate several.</td></tr>
+            <tr><td><code>ROOTMODE_COMFYUI</code></td><td>http://127.0.0.1:8188</td><td>Your ComfyUI, for images. Every installed checkpoint is served.</td></tr>
+            <tr><td><code>ROOTMODE_VLLM_PRICE</code></td><td>0.15</td><td>USD per million tokens, every model. Unset = free.</td></tr>
+            <tr><td><code>ROOTMODE_COMFYUI_PRICE</code></td><td>0.02</td><td>USD per image, every checkpoint. Unset = free.</td></tr>
+            <tr><td><code>ROOTMODE_PAYOUT</code></td><td>0x…</td><td>Where your 90% USDC lands. Unset = the node's own gas key, until you name one.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Optional</h3>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Variable</th><th>Default</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>ROOTMODE_VLLM_PRICES</code></td><td>—</td><td>Per-model prices: <code>id=0.40,id=0.10</code>. Win over the flat price.</td></tr>
+            <tr><td><code>ROOTMODE_COMFYUI_PRICES</code></td><td>—</td><td>Per-checkpoint prices: <code>sdxl=0.02,krea2-turbo=0.08</code></td></tr>
             <tr><td><code>ROOTMODE_LABEL</code></td><td>hostname</td><td>The name clients see</td></tr>
-            <tr><td><code>ROOTMODE_LISTEN</code></td><td>0.0.0.0:9944</td><td>WebSocket address</td></tr>
-            <tr><td><code>ROOTMODE_MAX_CONCURRENT</code></td><td>2</td><td>Jobs to run at once</td></tr>
+            <tr><td><code>ROOTMODE_COUNTRY</code></td><td>—</td><td>Two-letter country code, shown beside the label</td></tr>
+            <tr><td><code>ROOTMODE_MAX_CONCURRENT</code></td><td>2</td><td>Jobs at once</td></tr>
+            <tr><td><code>ROOTMODE_PAY_KEY</code></td><td>minted</td><td>Bring your own gas key (32-byte hex) instead of the one minted on the volume</td></tr>
+            <tr><td><code>ROOTMODE_P2P_EXTERNAL</code></td><td>—</td><td>Address to advertise when behind NAT or published ports</td></tr>
             <tr><td><code>ROOTMODE_REQUIRE_SIGNATURE</code></td><td>false</td><td>Refuse unsigned submissions</td></tr>
             <tr><td><code>ROOTMODE_ALLOW_PEERS</code></td><td>—</td><td>Only these client peer ids may submit</td></tr>
-            <tr><td><code>ROOTMODE_RELAY</code></td><td>true</td><td>Ask for a relay slot — needed behind NAT</td></tr>
-            <tr><td><code>ROOTMODE_DHT_SERVER</code></td><td>false</td><td>Answer DHT queries for others. Set <code>true</code> on a publicly reachable node, or its records live only in the bootstrap's memory.</td></tr>
+            <tr><td><code>ROOTMODE_VLLM_API_KEY</code></td><td>—</td><td>If your model server wants one</td></tr>
+            <tr><td><code>ROOTMODE_COMFYUI_WORKFLOW</code></td><td>built-in graph</td><td>Your own ComfyUI workflow (API format) for pipelines with a shape of their own</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Built in</h3>
+      <p class="sub-note">
+        Compiled into the worker from the network's deploy record, so you never
+        copy them. Shown so nothing is hidden; set one only to point at a different
+        deployment.
+      </p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Variable</th><th>Built-in value</th><th>What it is</th></tr></thead>
+          <tbody>
+            <tr><td><code>ROOTMODE_POT</code></td><td>0x811544168635F23C2F31aD5d9aAD874Bd8A4D5a9</td><td>The settlement contract on Base</td></tr>
+            <tr><td><code>ROOTMODE_CHAIN_ID</code></td><td>8453</td><td>Base</td></tr>
+            <tr><td><code>ROOTMODE_RPC</code></td><td>https://mainnet.base.org</td><td>Fails over to other public Base RPCs on its own</td></tr>
+            <tr><td><code>ROOTMODE_BOOTSTRAP</code></td><td>bootstrap.rootmode.ai</td><td>The network's entry points</td></tr>
           </tbody>
         </table>
       </div>
       <p class="sub-note">
-        A price without a pot is only a sticker. To get paid, set
-        <code>ROOTMODE_POT</code>, <code>ROOTMODE_RPC</code> and
-        <code>ROOTMODE_PAYOUT</code>, and fund the gas key. The client locks
-        funds before the GPU runs; this node posts that lock when it is short,
-        bills the tokens actually used — never less than what the work cost
-        upstream plus your markup — and settles in batches from its own key,
-        so gas stays at a few percent of what you collect. 90% to your payout
-        address, 10% to the network. Every paid job logs one
-        <code>billed</code> line with what the client paid and what the job
-        cost, to reconcile against your provider's statement.
-      </p>
-      <p class="sub-note">
-        Behind NAT, or publishing ports instead of using host networking? Set
-        <code>ROOTMODE_P2P_EXTERNAL</code> to the address other peers should dial —
-        otherwise they discover the node and then can't reach it.
+        Prefer a file? Mount your own <code>worker.toml</code> and set
+        <code>ROOTMODE_CONFIG</code> to its path — then none of the above apply.
+        The full reference is in
+        <a href="https://github.com/rootmodeai/rootmode/blob/main/docs/WORKER.md">docs/WORKER.md</a>.
       </p>
     </div>
   </section>
@@ -683,35 +723,32 @@ ROOTMODE_VLLM=http://127.0.0.1:8000
         <div class="ck">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
           <strong>Nothing a client sends is executed</strong>
-          <span>A job picks a workflow you declared and fills parameters you declared. That is the entire surface — no job field reaches a process spawn.</span>
+          <span>A job picks a model you offer and sends words. No job field reaches a process spawn.</span>
         </div>
         <div class="ck">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
-          <strong>You choose the models on offer</strong>
-          <span>The worker holds none of its own. It advertises what your inference server actually serves, and nothing else can be requested.</span>
+          <strong>You choose what's on offer</strong>
+          <span>The worker advertises what your server actually serves, and nothing else can be requested.</span>
+        </div>
+        <div class="ck">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>You're paid before the GPU runs</strong>
+          <span>The client's funds are locked first. No lock, no job.</span>
         </div>
         <div class="ck">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
           <strong>You can restrict who submits at all</strong>
-          <span>Require signed submissions, or list the exact client peer ids allowed. Everything else is refused before it runs.</span>
-        </div>
-        <div class="ck">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
-          <strong>For images, a prompt and a checkpoint — nothing else</strong>
-          <span>A client picks one of the checkpoints you have installed and sends words. It can't send a graph, add a node, or reach a setting you didn't offer. Export a workflow and even the checkpoint is fixed.</span>
+          <span>Require signed submissions, or list the exact client peer ids allowed.</span>
         </div>
         <div class="ck">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
           <strong>Stop means stop</strong>
-          <span><code>docker compose down</code> and the node is off the network. There's no notice period and nothing to cancel.</span>
+          <span><code>docker compose down</code> and you're off the network. No notice period, nothing to cancel.</span>
         </div>
       </div>
       <div class="note">
         <b>You're responsible for what your node serves.</b>
-        <p>
-          Workers run models the operator chose, on hardware the operator owns. Local
-          law and acceptable use are yours to observe.
-        </p>
+        <p>Workers run models the operator chose, on hardware the operator owns. Local law and acceptable use are yours to observe.</p>
       </div>
     </div>
   </section>
@@ -722,23 +759,11 @@ ROOTMODE_VLLM=http://127.0.0.1:8000
         <p class="eyebrow">Going further</p>
         <h2>When one node becomes several.</h2>
         <p>
-          A lone worker is its own entry point — a client pointed at it discovers what
-          it serves. Once several nodes need to find each other, run a bootstrap node
-          and point them all at it. It's an entry point and a relay for NAT'd nodes,
-          never a registry, never an authority, and never in the path of a job.
+          Nodes find each other through the network's bootstrap peers, which are built
+          in. Running your own is optional: it's an entry point and a relay for NAT'd
+          nodes — never a registry, never in the path of a job.
         </p>
       </div>
-      <div class="term">
-        <div class="term-bar"><i></i><i></i><i></i><b>bootstrap node</b></div>
-        <pre>$ docker build -f docker/Dockerfile.bootstrap -t <span class="p">rootmode-bootstrap</span> .
-$ docker run -d -p 4001:4001 -v rootmode-bootstrap:/var/lib/rootmode \
-    <span class="p">rootmode-bootstrap</span> --announce /ip4/&lt;this host&gt;/tcp/4001</pre>
-      </div>
-      <p class="sub-note">
-        Run several. Any node can be one. A worker joins through
-        <code>ROOTMODE_BOOTSTRAP</code> in <code>.env</code>, or through the entry
-        points compiled into the binary.
-      </p>
       <div class="actions">
         <a class="btn btn-solid" href="/discovery">Discovery &amp; bootstrap</a>
         <a class="btn btn-ghost" href="/protocol">The protocol</a>
