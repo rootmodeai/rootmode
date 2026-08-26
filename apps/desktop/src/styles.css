@@ -265,7 +265,8 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
 
 /* ----------------------------------------------------------------- chat */
 
-.chat { display: grid; grid-template-columns: 240px 1fr; flex: 1; height: 100%; min-height: 0; }
+.chat { display: grid; grid-template-columns: 240px 1fr 252px; flex: 1; height: 100%; min-height: 0; }
+@media (max-width: 960px) { .chat { grid-template-columns: 200px 1fr 220px; } }
 
 .chat-list {
   border-right: 1px solid var(--border);
@@ -839,101 +840,67 @@ td { padding: 10px 10px 10px 0; border-bottom: 1px solid var(--border); vertical
    than a system dropdown wedged under the composer. Quiet until hovered:
    most of the time the default is right and this should not compete with the
    thing you are writing. */
-.picker { position: relative; }
-
-/* The model is the one choice on this screen that changes what comes back,
-   so it looks like a control, not a footnote: bordered, the name in the
-   text colour, the rest quieter beside it. */
-.picker-button {
-  display: inline-flex; align-items: baseline; gap: 8px;
-  max-width: min(520px, 90vw);
-  padding: 6px 12px 6px 12px;
-  border: 1px solid var(--border); border-radius: 999px;
-  background: var(--surface); cursor: pointer;
-  font: inherit; font-size: 12.5px; color: var(--text-2);
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+/* ---- the model rail: tiles beside the conversation ----
+   The one choice that changes what comes back is always on screen, one
+   click each. The name people use first; maker and price quieter; the
+   chosen tile in the accent so it can be found without reading. */
+.model-rail {
+  display: flex; flex-direction: column; min-height: 0; height: 100%;
+  border-left: 1px solid var(--border); background: var(--bg);
 }
-.picker-button:hover, .picker-button:focus-visible {
-  border-color: var(--border-strong); color: var(--text);
+.model-rail-head { padding: 12px 12px 8px; flex: none; display: flex; flex-direction: column; gap: 8px; }
+.model-rail-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
+.model-rail-search {
+  width: 100%; box-sizing: border-box; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  font: inherit; font-size: 12.5px; color: var(--text); outline: none;
 }
-.picker-button.stale { color: var(--bad, #b4423a); border-color: currentColor; }
+.model-rail-search:focus-visible { border-color: var(--accent-border); }
+.model-rail-search::placeholder { color: var(--text-3); }
+.model-rail-tiles { overflow-y: auto; padding: 4px 12px 12px; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.model-rail-empty { padding: 12px 4px; font-size: 12.5px; color: var(--text-3); }
+.model-rail-foot { padding: 8px 12px 10px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-3); flex: none; }
 
-.picker-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); }
-.picker-name { font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
-.picker-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.picker-caret { font-size: 9px; opacity: 0.6; }
-
-.picker-menu {
-  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-  width: min(480px, 84vw); z-index: 40;
-  background: var(--surface);
-  border: 1px solid var(--border-strong); border-radius: 12px;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
-  overflow: hidden;
-  animation: picker-in 0.11s ease-out;
-}
-@keyframes picker-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-
-.picker-search {
-  width: 100%; box-sizing: border-box;
-  padding: 11px 13px; border: 0; border-bottom: 1px solid var(--border);
-  background: transparent; font: inherit; font-size: 13px; color: var(--text);
-  outline: none;
-}
-.picker-search::placeholder { color: var(--text-3); }
-
-.picker-rows { max-height: 360px; overflow-y: auto; padding: 5px; }
-
-/* One row per model: the name people use, then maker and id underneath,
-   the price on the right where a column of prices can be compared. */
-.picker-model { position: relative; border-radius: 8px; }
-.picker-model.active { background: var(--accent-soft); }
-.picker-model:hover { background: var(--surface-2); }
-.picker-model.active:hover { background: var(--accent-soft); }
-
-.picker-row {
-  display: grid; grid-template-columns: 1fr auto; grid-template-areas: "n s" "d s";
-  align-items: baseline; column-gap: 12px; row-gap: 1px;
+.model-tile-wrap { display: flex; flex-direction: column; gap: 0; }
+.model-tile {
+  display: grid; grid-template-columns: 1fr auto; grid-template-areas: "n n" "d s";
+  align-items: baseline; column-gap: 8px; row-gap: 2px;
   width: 100%; text-align: left;
-  padding: 8px 32px 8px 10px; border: 0; border-radius: 8px;
+  padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); cursor: pointer; font: inherit;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.model-tile:hover { border-color: var(--border-strong); }
+.model-tile.active { border-color: var(--accent); background: var(--accent-soft); }
+.model-tile.active.stale { border-color: var(--red); }
+.model-tile.auto { grid-template-areas: "n n" "d d"; margin-bottom: 4px; }
+.model-tile .n { grid-area: n; font-size: 13.5px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-tile .d { grid-area: d; font-size: 11.5px; color: var(--text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-tile .s { grid-area: s; font-size: 11.5px; color: var(--text-2); white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+.model-tile .s.free { color: var(--accent); font-weight: 600; }
+
+.model-tile-more { display: flex; flex-direction: column; gap: 2px; padding: 4px 6px 2px; }
+.model-tile-stale { font-size: 11.5px; color: var(--red); padding: 2px 4px; }
+.model-tile-link {
+  text-align: left; padding: 3px 4px; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: 11.5px; color: var(--text-2); border-radius: 6px;
+}
+.model-tile-link:hover { color: var(--text); background: var(--surface-2); }
+.model-tile-link.quiet { cursor: default; color: var(--text-3); }
+.model-tile-link.quiet:hover { background: none; color: var(--text-3); }
+.model-offer {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  width: 100%; text-align: left; padding: 5px 8px; border: 0; border-radius: 6px;
   background: none; cursor: pointer; font: inherit;
 }
-.picker-row.picker-auto { padding-right: 10px; margin-bottom: 3px; }
-.picker-row.picker-auto:hover { background: var(--surface-2); }
-.picker-row.picker-auto.active { background: var(--accent-soft); }
-.picker-row .n { grid-area: n; font-size: 13.5px; font-weight: 600; color: var(--text);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.picker-row .d { grid-area: d; font-size: 11.5px; color: var(--text-3);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.picker-row .s { grid-area: s; font-size: 11.5px; color: var(--text-2); white-space: nowrap;
-  font-variant-numeric: tabular-nums; }
+.model-offer:hover { background: var(--surface-2); }
+.model-offer.active { background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent-border); }
+.model-offer .p { font-size: 12px; color: var(--text); }
+.model-offer .s { font-size: 11px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-.picker-expand {
-  position: absolute; top: 6px; right: 6px;
-  width: 22px; height: 22px; border: 0; border-radius: 6px;
-  background: none; color: var(--text-3); cursor: pointer; font: inherit; font-size: 11px;
-}
-.picker-expand:hover { background: var(--surface); color: var(--text); }
-
-.picker-offer {
-  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
-  width: calc(100% - 20px); margin-left: 20px; text-align: left;
-  padding: 6px 10px; border: 0; border-radius: 6px;
-  background: none; cursor: pointer; font: inherit;
-}
-.picker-offer:hover { background: var(--surface); }
-.picker-offer.active { background: var(--accent-soft); }
-.picker-offer .p { font-size: 12.5px; color: var(--text); }
-.picker-offer .s { font-size: 11.5px; color: var(--text-3); white-space: nowrap;
-  font-variant-numeric: tabular-nums; }
-
-.picker-foot {
-  padding: 8px 13px; border-top: 1px solid var(--border);
-  font-size: 11px; color: var(--text-3);
-}
 
 /* Used by the picture delete affordance, which borrows the copy-text style. */
 .copy-text.always { opacity: 1; }

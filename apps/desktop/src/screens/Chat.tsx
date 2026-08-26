@@ -14,7 +14,7 @@ import type {
 import { Glider } from "../components/Glider";
 import { DeleteAllChats } from "../components/DeleteAllChats";
 import { MarkdownBody } from "../components/Markdown";
-import { ProviderPicker } from "../components/ProviderPicker";
+import { ModelTiles } from "../components/ModelTiles";
 import { describe, targetFor } from "../lib/models";
 import {
   FundingHint,
@@ -589,14 +589,6 @@ export function Chat() {
               )}
             </div>
             <div className="composer-hint">
-              <ProviderPicker
-                kind="llm"
-                value={chosen}
-                onChange={(choice) => {
-                  setChosen(choice);
-                  if (choice) void setSetting("default_llm_model", choice.model);
-                }}
-              />
               {option && !option.unpriced && option.price > 0 && pot?.client && (
                 <FundingHint
                   capMicros={
@@ -608,6 +600,15 @@ export function Chat() {
           </div>
         </div>
       </section>
+      <ModelTiles
+        kind="llm"
+        rows={providers}
+        value={chosen}
+        onChange={(choice) => {
+          setChosen(choice);
+          if (choice) void setSetting("default_llm_model", choice.model);
+        }}
+      />
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { useEvent } from "../lib/useEvent";
 import type { Conversation, ImageParams, JobPayload, Message, ProviderOption } from "../lib/types";
 import { Glider } from "../components/Glider";
 import { DeleteAllChats } from "../components/DeleteAllChats";
-import { ProviderPicker } from "../components/ProviderPicker";
+import { ModelTiles } from "../components/ModelTiles";
 import { describe, targetFor } from "../lib/models";
 import {
   FundingHint,
@@ -480,7 +480,6 @@ export function Create({ kind }: { kind: "image" | "video" }) {
               )}
             </div>
             <div className="composer-hint">
-              <ProviderPicker kind={kind} value={chosen} onChange={setChosen} />
               {provider && !provider.unpriced && provider.price > 0 && pot?.client && (
                 <FundingHint
                   capMicros={
@@ -492,6 +491,7 @@ export function Create({ kind }: { kind: "image" | "video" }) {
           </div>
         </div>
       </section>
+      <ModelTiles kind={kind} rows={offers} value={chosen} onChange={setChosen} />
     </div>
   );
 }
