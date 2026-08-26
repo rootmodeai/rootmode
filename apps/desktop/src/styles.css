@@ -841,26 +841,31 @@ td { padding: 10px 10px 10px 0; border-bottom: 1px solid var(--border); vertical
    thing you are writing. */
 .picker { position: relative; }
 
+/* The model is the one choice on this screen that changes what comes back,
+   so it looks like a control, not a footnote: bordered, the name in the
+   text colour, the rest quieter beside it. */
 .picker-button {
-  display: inline-flex; align-items: center; gap: 7px;
-  max-width: 380px;
-  padding: 5px 10px 5px 11px;
-  border: 1px solid transparent; border-radius: 999px;
-  background: transparent; cursor: pointer;
+  display: inline-flex; align-items: baseline; gap: 8px;
+  max-width: min(520px, 90vw);
+  padding: 6px 12px 6px 12px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); cursor: pointer;
   font: inherit; font-size: 12.5px; color: var(--text-2);
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .picker-button:hover, .picker-button:focus-visible {
-  background: var(--surface); border-color: var(--border); color: var(--text);
+  border-color: var(--border-strong); color: var(--text);
 }
 .picker-button.stale { color: var(--bad, #b4423a); border-color: currentColor; }
 
-.picker-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); }
+.picker-name { font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.picker-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-caret { font-size: 9px; opacity: 0.6; }
 
 .picker-menu {
   position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-  width: min(440px, 78vw); z-index: 40;
+  width: min(480px, 84vw); z-index: 40;
   background: var(--surface);
   border: 1px solid var(--border-strong); border-radius: 12px;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
@@ -880,22 +885,49 @@ td { padding: 10px 10px 10px 0; border-bottom: 1px solid var(--border); vertical
 }
 .picker-search::placeholder { color: var(--text-3); }
 
-.picker-rows { max-height: 300px; overflow-y: auto; padding: 5px; }
+.picker-rows { max-height: 360px; overflow-y: auto; padding: 5px; }
 
-/* Model, then who serves it, then what it costs — read left to right, with
+/* One row per model: the name people use, then maker and id underneath,
    the price on the right where a column of prices can be compared. */
+.picker-model { position: relative; border-radius: 8px; }
+.picker-model.active { background: var(--accent-soft); }
+.picker-model:hover { background: var(--surface-2); }
+.picker-model.active:hover { background: var(--accent-soft); }
+
 .picker-row {
-  display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 10px;
+  display: grid; grid-template-columns: 1fr auto; grid-template-areas: "n s" "d s";
+  align-items: baseline; column-gap: 12px; row-gap: 1px;
   width: 100%; text-align: left;
-  padding: 9px 10px; border: 0; border-radius: 8px;
+  padding: 8px 32px 8px 10px; border: 0; border-radius: 8px;
   background: none; cursor: pointer; font: inherit;
 }
-.picker-row:hover { background: var(--surface-2); }
-.picker-row.active { background: var(--accent-soft); }
-.picker-row .m { font-size: 13px; color: var(--text); font-weight: 500;
+.picker-row.picker-auto { padding-right: 10px; margin-bottom: 3px; }
+.picker-row.picker-auto:hover { background: var(--surface-2); }
+.picker-row.picker-auto.active { background: var(--accent-soft); }
+.picker-row .n { grid-area: n; font-size: 13.5px; font-weight: 600; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.picker-row .p { font-size: 12px; color: var(--text-2); white-space: nowrap; }
-.picker-row .s { font-size: 11.5px; color: var(--text-3); white-space: nowrap;
+.picker-row .d { grid-area: d; font-size: 11.5px; color: var(--text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-row .s { grid-area: s; font-size: 11.5px; color: var(--text-2); white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+
+.picker-expand {
+  position: absolute; top: 6px; right: 6px;
+  width: 22px; height: 22px; border: 0; border-radius: 6px;
+  background: none; color: var(--text-3); cursor: pointer; font: inherit; font-size: 11px;
+}
+.picker-expand:hover { background: var(--surface); color: var(--text); }
+
+.picker-offer {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  width: calc(100% - 20px); margin-left: 20px; text-align: left;
+  padding: 6px 10px; border: 0; border-radius: 6px;
+  background: none; cursor: pointer; font: inherit;
+}
+.picker-offer:hover { background: var(--surface); }
+.picker-offer.active { background: var(--accent-soft); }
+.picker-offer .p { font-size: 12.5px; color: var(--text); }
+.picker-offer .s { font-size: 11.5px; color: var(--text-3); white-space: nowrap;
   font-variant-numeric: tabular-nums; }
 
 .picker-foot {

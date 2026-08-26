@@ -15,6 +15,7 @@ import { Glider } from "../components/Glider";
 import { DeleteAllChats } from "../components/DeleteAllChats";
 import { MarkdownBody } from "../components/Markdown";
 import { ProviderPicker } from "../components/ProviderPicker";
+import { describe, targetFor } from "../lib/models";
 import {
   FundingHint,
   FundingNotice,
@@ -348,7 +349,7 @@ export function Chat() {
         max_tokens: ANSWER_CEILING,
         temperature: 0.7,
       };
-      const record = await api.submitJob(option.peer_id, payload, chatId);
+      const record = await api.submitJob(targetFor(option, providers).peer_id, payload, chatId);
       setPending({ chatId, jobId: record.job_id });
     } catch (e) {
       const text = errorText(e);
@@ -466,7 +467,7 @@ export function Chat() {
             )}
 
             {messages.length === 0 && !waiting ? (
-              <Welcome provider={option?.peer_label} model={model} />
+              <Welcome provider={option?.peer_label} model={model ? describe(model).name : model} />
             ) : (
               messages.map((m) => {
                 const split =
@@ -482,7 +483,7 @@ export function Chat() {
                   <div className="msg-foot">
                     {m.role === "assistant" && (
                       <div className="meta">
-                        {m.model ?? "unknown model"}
+                        {m.model ? <span title={m.model}>{describe(m.model).name}</span> : "unknown model"}
                         {m.peer ? ` · ${m.peer}` : ""}
                         {m.tokens ? ` · ${m.tokens.toLocaleString()} tokens` : ""}
                         {/* The bill for this exact reply. Absent on free

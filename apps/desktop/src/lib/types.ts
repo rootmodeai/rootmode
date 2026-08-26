@@ -184,6 +184,12 @@ export interface ProviderOption {
   currency: string;
   unpriced: boolean;
   latency_ms: number | null;
+  /**
+   * Set by the picker: true when the user chose this exact provider, false
+   * (or absent) when they chose the model and any provider at its best
+   * price will do. Never sent to the backend.
+   */
+  pinned?: boolean;
 }
 
 export interface DashboardStats {

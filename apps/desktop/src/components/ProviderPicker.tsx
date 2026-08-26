@@ -1,34 +1,62 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-// import { flagOf, countryName } from "../lib/country";   // see below
 import { api } from "../lib/api";
+import { describe, priceLabel, searchTerms } from "../lib/models";
 import type { JobKind, ProviderOption } from "../lib/types";
 
 /**
- * Choosing who runs your work, by hand.
+ * Choosing what answers.
  *
- * The app can pick for you — cheapest provider serving a model, latency
- * breaking ties — and does when you say nothing. This is the other case: you
- * want to look. So it lists every provider offering every model rather than
- * collapsing to the best one, because a list that hides the dearer provider
- * is the app deciding while pretending to ask.
+ * You choose a *model* — Nano Banana, Veo, Claude — by the name people use
+ * for it, with the catalogue id kept small beside it for anyone who wants
+ * it. The app picks the provider: the cheapest, drawn at random among
+ * equals so nobody's node takes all the work. Each model's providers are
+ * one click away for the other case — you have watched a node time out all
+ * morning and would rather pin a different one.
  *
- * Search matches model *or* provider, so "deepseek" finds everyone serving it
- * and "sparky" finds everything one machine offers. Cheapest first throughout,
- * which is the ordering a price is for.
+ * Search matches the name, the maker, the id, and the names people use
+ * ("nano banana" finds the Gemini image models), and every word has to
+ * match, so "google video" narrows rather than widens.
  */
+
+interface ModelRow {
+  model: string;
+  name: string;
+  maker: string | null;
+  kind: JobKind;
+  /** Cheapest first — the order the list arrives in. */
+  offers: ProviderOption[];
+}
+
+function byModel(rows: ProviderOption[]): ModelRow[] {
+  const out: ModelRow[] = [];
+  const seen = new Map<string, ModelRow>();
+  for (const r of rows) {
+    let g = seen.get(r.model);
+    if (!g) {
+      const d = describe(r.model);
+      g = { model: r.model, name: d.name, maker: d.maker, kind: r.kind, offers: [] };
+      seen.set(r.model, g);
+      out.push(g);
+    }
+    g.offers.push(r);
+  }
+  return out;
+}
+
 export function ProviderPicker({
   kind,
   value,
   onChange,
 }: {
   kind: JobKind;
-  /** The chosen pair, or null for "let the app decide". */
+  /** The chosen model (and provider, if pinned), or null for "let the app decide". */
   value: ProviderOption | null;
   onChange: (choice: ProviderOption | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<ProviderOption[]>([]);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
@@ -63,20 +91,19 @@ export function ProviderPicker({
     if (open) searchRef.current?.focus();
   }, [open]);
 
+  const models = useMemo(() => byModel(rows), [rows]);
+
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    // Every word has to appear somewhere, so "deepseek spark" narrows rather
-    // than widening the way an any-word match would.
+    if (!q) return models;
     const words = q.split(/\s+/);
-    return rows.filter((r) => {
-      const haystack =
-        // Country stays searchable by code even while the flag is hidden:
-        // typing "de" costs nothing and matching on it surprises nobody.
-        `${r.model} ${r.peer_label} ${r.peer_country ?? ""}`.toLowerCase();
+    return models.filter((m) => {
+      const haystack = `${searchTerms(m.model)} ${m.offers
+        .map((o) => `${o.peer_label} ${o.peer_country ?? ""}`)
+        .join(" ")}`.toLowerCase();
       return words.every((w) => haystack.includes(w));
     });
-  }, [rows, query]);
+  }, [models, query]);
 
   // A choice whose provider has gone offline is stale; say so rather than
   // failing at send time.
@@ -85,20 +112,28 @@ export function ProviderPicker({
     rows.length > 0 &&
     !rows.some((r) => r.peer_id === value.peer_id && r.model === value.model);
 
-  const label = value
-    ? `${value.model} · ${value.peer_label}`
-    : rows.length > 0
-      ? `Cheapest — ${rows[0].model} · ${rows[0].peer_label}`
-      : "Nobody online";
+  const shown = value ?? rows[0] ?? null;
+  const current = shown ? describe(shown.model) : null;
+  const detail = shown
+    ? [
+        current?.maker,
+        value?.pinned ? value.peer_label : null,
+        priceLabel(shown),
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
 
   return (
     <div className="picker" ref={boxRef}>
       <button
         className={`picker-button${stale ? " stale" : ""}`}
         onClick={() => setOpen((v) => !v)}
-        title={stale ? "That provider has gone offline" : "Choose a model and provider"}
+        title={stale ? "That provider has gone offline" : "Choose a model"}
       >
-        <span className="picker-label">{label}</span>
+        <span className="picker-kicker">{value ? "Model" : "Model · auto"}</span>
+        <span className="picker-name">{current ? current.name : "Nobody online"}</span>
+        {detail && <span className="picker-detail">{detail}</span>}
         <span className="picker-caret">▾</span>
       </button>
 
@@ -108,20 +143,20 @@ export function ProviderPicker({
             ref={searchRef}
             className="picker-search"
             value={query}
-            placeholder="Search a model or a provider…"
+            placeholder="Search a model — Nano Banana, Veo, Claude…"
             onChange={(e) => setQuery(e.target.value)}
           />
 
           <div className="picker-rows">
             <button
-              className={`picker-row${value === null ? " active" : ""}`}
+              className={`picker-row picker-auto${value === null ? " active" : ""}`}
               onClick={() => {
                 onChange(null);
                 setOpen(false);
               }}
             >
-              <span className="m">Let rootmode choose</span>
-              <span className="s">cheapest, then fastest</span>
+              <span className="n">Let rootmode choose</span>
+              <span className="d">the cheapest model on offer, from whoever serves it cheapest</span>
             </button>
 
             {matches.length === 0 ? (
@@ -131,40 +166,72 @@ export function ProviderPicker({
                   : `Nothing matches “${query}”.`}
               </div>
             ) : (
-              matches.map((r) => (
-                <button
-                  key={`${r.peer_id}:${r.model}`}
-                  className={`picker-row${
-                    value?.peer_id === r.peer_id && value?.model === r.model ? " active" : ""
-                  }`}
-                  onClick={() => {
-                    onChange(r);
-                    setOpen(false);
-                  }}
-                >
-                  <span className="m">{r.model}</span>
-                  <span className="p">
-                    {/* Flags are off while the network runs on our own
-                        capacity — see Network.tsx.
-
-                    {flagOf(r.peer_country) && (
-                      <span title={`Says it is in ${countryName(r.peer_country)}`}>
-                        {flagOf(r.peer_country)}{" "}
+              matches.map((m) => {
+                const cheapest = m.offers[0];
+                const active = value?.model === m.model;
+                const isOpen = expanded === m.model;
+                return (
+                  <div className={`picker-model${active ? " active" : ""}`} key={m.model}>
+                    <button
+                      className="picker-row"
+                      onClick={() => {
+                        onChange({ ...cheapest, pinned: false });
+                        setOpen(false);
+                      }}
+                    >
+                      <span className="n">{m.name}</span>
+                      <span className="d">
+                        {[m.maker, m.name !== m.model ? m.model : null]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </span>
-                    )} */}
-                    {r.peer_label}
-                  </span>
-                  <span className="s">
-                    {r.unpriced ? "free" : `${r.price.toFixed(2)} ${r.currency}`}
-                    {r.latency_ms !== null ? ` · ${r.latency_ms} ms` : ""}
-                  </span>
-                </button>
-              ))
+                      <span className="s">
+                        {priceLabel(cheapest)}
+                        {m.offers.length > 1
+                          ? ` · ${m.offers.length} providers`
+                          : ` · ${cheapest.peer_label}`}
+                      </span>
+                    </button>
+                    {m.offers.length > 1 && (
+                      <button
+                        className="picker-expand"
+                        title={isOpen ? "Hide providers" : "Choose the provider yourself"}
+                        onClick={() => setExpanded(isOpen ? null : m.model)}
+                      >
+                        {isOpen ? "▾" : "▸"}
+                      </button>
+                    )}
+                    {isOpen &&
+                      m.offers.map((o) => (
+                        <button
+                          key={o.peer_id}
+                          className={`picker-offer${
+                            value?.pinned && value.peer_id === o.peer_id && value.model === o.model
+                              ? " active"
+                              : ""
+                          }`}
+                          onClick={() => {
+                            onChange({ ...o, pinned: true });
+                            setOpen(false);
+                          }}
+                        >
+                          <span className="p">{o.peer_label}</span>
+                          <span className="s">
+                            {priceLabel(o)}
+                            {o.latency_ms !== null ? ` · ${o.latency_ms} ms` : ""}
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                );
+              })
             )}
           </div>
 
           {matches.length > 1 && (
-            <div className="picker-foot">Cheapest first. Prices are what each operator claims.</div>
+            <div className="picker-foot">
+              Cheapest first. Prices are what each operator claims.
+            </div>
           )}
         </div>
       )}

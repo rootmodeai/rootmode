@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { describe } from "../lib/models";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, errorText } from "../lib/api";
 import { usd, usdExact } from "../components/FundingNotice";
@@ -252,7 +253,7 @@ export function Wallet() {
                     <tr key={s.job_id ?? `row-${i}`}>
                       <td>{formatStamp(s.at)}</td>
                       <td>
-                        {s.model}
+                        <span title={s.model}>{describe(s.model).name}</span>
                         {s.abandoned && (
                           <div className="meta" title="The reply ended before it was billed, so the provider kept the prepaid amount">
                             stopped · prepaid amount kept
@@ -304,7 +305,7 @@ export function Wallet() {
                     <tbody>
                       {usage.map((u) => (
                         <tr key={u.model}>
-                          <td>{u.model}</td>
+                          <td title={u.model}>{describe(u.model).name}</td>
                           <td>
                             <span className="usage-bar" aria-hidden="true">
                               <span style={{ width: `${(u.tokens / maxTokens) * 100}%` }} />

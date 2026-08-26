@@ -6,6 +6,7 @@ import type { Conversation, ImageParams, JobPayload, Message, ProviderOption } f
 import { Glider } from "../components/Glider";
 import { DeleteAllChats } from "../components/DeleteAllChats";
 import { ProviderPicker } from "../components/ProviderPicker";
+import { describe, targetFor } from "../lib/models";
 import {
   FundingHint,
   FundingNotice,
@@ -260,7 +261,7 @@ export function Create({ kind }: { kind: "image" | "video" }) {
               }
               return image;
             })();
-      const record = await api.submitJob(option.peer_id, payload, chatId);
+      const record = await api.submitJob(targetFor(option, offers).peer_id, payload, chatId);
       setPending({ chatId, jobId: record.job_id });
     } catch (e) {
       const text = errorText(e);
@@ -613,7 +614,7 @@ function Picture({
         <summary>Details</summary>
         <div className="body mono" style={{ fontSize: 12, color: "var(--text-2)" }}>
           <div>sha256 {message.sha256 ?? "—"}</div>
-          {message.model && <div>model {message.model}</div>}
+          {message.model && <div title={message.model}>{describe(message.model).name}</div>}
           {message.peer && <div>made by {message.peer}</div>}
         </div>
       </details>
