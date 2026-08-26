@@ -1106,10 +1106,10 @@ button.wipe-all:disabled {
 .fl-head .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .fl-head .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fl-head .ok { margin-left: auto; color: var(--t-picture); font-weight: 700; }
-.fl-head .x { margin-left: auto; border: 0; background: none; color: var(--text-3); cursor: pointer; font: inherit; font-size: 14px; line-height: 1; padding: 0 3px; border-radius: 4px; opacity: 0; }
+.fl-head .x { margin-left: auto; border: 0; background: none; color: var(--text-3); cursor: pointer; font: inherit; font-size: 15px; line-height: 1; padding: 0 4px; border-radius: 4px; opacity: 0.55; }
 .fl-head .ok + .x { margin-left: 4px; }
-.fl-node:hover .fl-head .x { opacity: 1; }
-.fl-head .x:hover { color: var(--text); background: var(--surface-2); }
+.fl-node:hover .fl-head .x, .fl-node.sel .fl-head .x { opacity: 1; }
+.fl-head .x:hover { color: var(--red); background: var(--red-soft); }
 .fl-rows { position: relative; padding: 2px 0 4px; border-top: 1px solid var(--border); }
 .fl-row { height: 22px; display: flex; justify-content: space-between; align-items: center; padding: 0 12px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
 .fl-row .r { margin-left: auto; }

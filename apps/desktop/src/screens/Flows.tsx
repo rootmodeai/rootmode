@@ -514,7 +514,7 @@ function Node({
         <span className="t">{title}</span>
         {state === "done" && <span className="ok">✓</span>}
         {!running && (
-          <button className="x" title="Remove" onClick={onRemove}>
+          <button className="x" title="Remove this node (or select it and press Delete)" aria-label={`Remove ${title}`} onClick={onRemove}>
             ×
           </button>
         )}
