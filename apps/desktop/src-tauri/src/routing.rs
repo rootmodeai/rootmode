@@ -62,7 +62,7 @@ pub fn model_options(peers: &[Peer], kind: JobKind) -> Vec<ModelOption> {
                     .map(|p| p.currency.clone())
                     .unwrap_or_else(|| "USD".to_string()),
                 latency_ms: peer.latency_ms,
-                unpriced: model.price.is_none(),
+                unpriced: model.price.as_ref().map_or(true, |p| p.is_free()),
             };
 
             match options.iter_mut().find(|o| o.model == candidate.model) {
@@ -149,7 +149,7 @@ pub fn provider_options(peers: &[Peer], kind: JobKind) -> Vec<ProviderOption> {
                         .as_ref()
                         .map(|p| p.currency.clone())
                         .unwrap_or_else(|| "USD".to_string()),
-                    unpriced: model.price.is_none(),
+                    unpriced: model.price.as_ref().map_or(true, |p| p.is_free()),
                     latency_ms: peer.latency_ms,
                 })
         })
