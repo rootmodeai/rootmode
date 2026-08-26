@@ -95,7 +95,7 @@ async fn check_gas(config: &rootmode_worker::config::Config) -> rootmode_worker:
         Ok(0) => Err(rootmode_worker::WorkerError::Config(format!(
             "pay key {sender} has no ETH on chain {}: it cannot post reserves or settles, so \
              paid work would never be collected. Send it a little ETH for gas (0.002 ETH is \
-             roughly 3,500 transactions), or unset ROOTMODE_POT to serve without charging",
+             roughly 3,500 transactions), or drop the price to serve without charging",
             payments.chain_id
         ))),
         Ok(wei) if wei < LOW_GAS_WEI => {

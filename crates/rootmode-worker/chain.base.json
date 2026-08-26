@@ -1,0 +1,10 @@
+{
+  "rpc": "https://mainnet.base.org",
+  "chainId": 8453,
+  "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "pot": "0x811544168635F23C2F31aD5d9aAD874Bd8A4D5a9",
+  "feeVault": "0x17Def6df8c13100aD7c88521c05A23a95fcC6B14",
+  "worker": "0x0000000000000000000000000000000000000000",
+  "client": "",
+  "deployBlock": 50493874
+}

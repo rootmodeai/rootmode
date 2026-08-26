@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Deploy FeeVault + RootmodePot on Base. Writes contracts/deployments/base.json
-# and apps/desktop/src-tauri/chain.base.json (baked into the next desktop build).
+# Deploy FeeVault + RootmodePot on Base. Writes contracts/deployments/base.json,
+# apps/desktop/src-tauri/chain.base.json (baked into the next desktop build) and
+# crates/rootmode-worker/chain.base.json (the pot a priced worker settles on
+# unless told otherwise).
 #
 #   BASE_RPC_URL=https://mainnet.base.org PRIVATE_KEY=0x... ./contracts/deploy-base.sh
 #
@@ -51,6 +53,7 @@ BLOCK="$(cast block-number --rpc-url "$RPC")"
 JSON="$(printf '%s' "$JSON" | sed "s/\"client\": \"\"/\"client\": \"\",\n  \"deployBlock\": $BLOCK/")"
 printf '%s\n' "$JSON" > deployments/base.json
 printf '%s\n' "$JSON" > "$ROOT/apps/desktop/src-tauri/chain.base.json"
+printf '%s\n' "$JSON" > "$ROOT/crates/rootmode-worker/chain.base.json"
 
 echo
 echo "Base contracts are live."
@@ -58,4 +61,4 @@ echo "  USDC      $USDC"
 echo "  pot       $POT"
 echo "  fee vault $VAULT"
 echo
-echo "Commit chain.base.json and cut a new desktop tag so clients deposit on Base."
+echo "Commit both chain.base.json files and cut a new tag: clients deposit on, and workers settle on, the new pot."

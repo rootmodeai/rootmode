@@ -437,9 +437,68 @@ impl Config {
         }
 
         config.apply_payment_env();
+        config.apply_network_defaults();
         config.payments.apply_key();
+        config.apply_payout_default();
         config.validate()?;
         Ok(config)
+    }
+
+    /// Whether this node means to be paid: it names a payout, or a backend
+    /// carries a price. A node with neither serves free and never touches
+    /// the chain, whatever else is configured.
+    pub fn charges(&self) -> bool {
+        if !self.worker.payout_address.trim().is_empty() {
+            return true;
+        }
+        self.backends.iter().any(|b| match b {
+            BackendConfig::Vllm(c) => c.price.is_some() || !c.prices.is_empty(),
+            BackendConfig::Comfyui(c) => c.price.is_some() || !c.prices.is_empty(),
+            BackendConfig::Openrouter(_) => true,
+        })
+    }
+
+    /// A priced node settles on the network's pot. The address, chain and a
+    /// public RPC are built into the binary from the same deploy record the
+    /// desktop ships with, so an operator names a price and a wallet and
+    /// nothing else — a contract address is not something to type. Anything
+    /// set explicitly (file or environment) wins, and a node on another
+    /// chain (a local Anvil, a testnet) gets no default at all.
+    fn apply_network_defaults(&mut self) {
+        if !self.charges() {
+            return;
+        }
+        let Some(chain) = bundled_chain() else {
+            return;
+        };
+        if chain.chain_id != self.payments.chain_id {
+            return;
+        }
+        if self.payments.contract.trim().is_empty() {
+            self.payments.contract = chain.pot;
+        }
+        if self.payments.rpc.trim().is_empty() {
+            self.payments.rpc = chain.rpc;
+        }
+    }
+
+    /// With no payout named, earnings go to the node's own settle key — the
+    /// key on its volume that the operator already has to fund for gas. That
+    /// is a working default, not a silent one: it is logged on every start,
+    /// and the docs say to name a wallet of your own before it adds up.
+    fn apply_payout_default(&mut self) {
+        if !self.worker.payout_address.trim().is_empty() || !self.charges() {
+            return;
+        }
+        let sender = self.payments.sender.trim();
+        if sender.is_empty() {
+            return;
+        }
+        self.worker.payout_address = sender.to_string();
+        tracing::warn!(
+            "no ROOTMODE_PAYOUT set: earnings go to this node's own settle key {sender} (on its \
+             volume). Set ROOTMODE_PAYOUT to a wallet you control to send them elsewhere"
+        );
     }
 
     fn apply_payment_env(&mut self) {
@@ -842,6 +901,87 @@ workflow = "{}"
     }
 
     #[test]
+    fn a_priced_node_settles_on_the_networks_pot_without_being_told_the_address() {
+        let d = tmpdir();
+        let p = write(
+            &d,
+            "worker.toml",
+            r#"
+[worker]
+listen = "0.0.0.0:9944"
+identity_file = "worker.key"
+
+[payments]
+key_file = "pay.key"
+
+[[backends]]
+kind = "vllm"
+endpoint = "http://127.0.0.1:8000"
+price = 0.15
+"#,
+        );
+        let config = Config::load(&p).unwrap();
+        assert!(config.charges());
+        assert_eq!(
+            config.payments.contract,
+            bundled_pot().expect("chain.base.json names the pot"),
+            "the pot comes from the bundled deploy record"
+        );
+        assert!(!config.payments.rpc.is_empty(), "and so does an RPC");
+        assert_eq!(config.payments.chain_id, 8453);
+        // No payout named: earnings go to the settle key minted on the volume.
+        assert!(!config.payments.sender.is_empty(), "a pay key was minted");
+        assert_eq!(config.worker.payout_address, config.payments.sender);
+    }
+
+    #[test]
+    fn a_free_node_stays_off_the_chain() {
+        let d = tmpdir();
+        let p = write(
+            &d,
+            "worker.toml",
+            r#"
+[worker]
+listen = "0.0.0.0:9944"
+identity_file = "worker.key"
+
+[[backends]]
+kind = "vllm"
+endpoint = "http://127.0.0.1:8000"
+"#,
+        );
+        let config = Config::load(&p).unwrap();
+        assert!(!config.charges());
+        assert!(config.payments.contract.is_empty(), "no price, no pot");
+        assert!(config.worker.payout_address.is_empty());
+    }
+
+    #[test]
+    fn a_node_on_another_chain_gets_no_default_pot() {
+        let d = tmpdir();
+        let p = write(
+            &d,
+            "worker.toml",
+            r#"
+[worker]
+listen = "0.0.0.0:9944"
+identity_file = "worker.key"
+payout_address = "0x000000000000000000000000000000000000dEaD"
+
+[payments]
+chain_id = 31337
+
+[[backends]]
+kind = "vllm"
+endpoint = "http://127.0.0.1:8000"
+price = 0.15
+"#,
+        );
+        let config = Config::load(&p).unwrap();
+        assert!(config.payments.contract.is_empty(), "Anvil is not Base");
+    }
+
+    #[test]
     fn example_config_is_valid() {
         let d = tmpdir();
         let p = write(&d, "worker.toml", EXAMPLE_CONFIG);
@@ -1134,6 +1274,34 @@ impl PaymentsConfig {
             verifying_contract: contract.to_string(),
         })
     }
+}
+
+/// The live deployment, as written by `contracts/deploy-base.sh`. The
+/// desktop bundles the same file; a pot redeploy updates both in one commit.
+const BUNDLED_CHAIN: &str = include_str!("../chain.base.json");
+
+struct BundledChain {
+    chain_id: u64,
+    pot: String,
+    rpc: String,
+}
+
+fn bundled_chain() -> Option<BundledChain> {
+    let v: serde_json::Value = serde_json::from_str(BUNDLED_CHAIN).ok()?;
+    let pot = v.get("pot")?.as_str()?.trim().to_string();
+    if pot.is_empty() {
+        return None;
+    }
+    Some(BundledChain {
+        chain_id: v.get("chainId")?.as_u64()?,
+        pot,
+        rpc: v.get("rpc")?.as_str()?.trim().to_string(),
+    })
+}
+
+/// The pot address built into this binary, for logs and docs.
+pub fn bundled_pot() -> Option<String> {
+    bundled_chain().map(|c| c.pot)
 }
 
 fn default_chain_id() -> u64 {

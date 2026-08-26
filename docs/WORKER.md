@@ -72,13 +72,13 @@ and set `ROOTMODE_CONFIG` to its path — then none of the variables apply.
 | `ROOTMODE_COMFYUI_PRICE` | — | what you charge per image, for every checkpoint |
 | `ROOTMODE_COMFYUI_PRICES` | — | optional per-id overrides: `sdxl=0.02,krea2-turbo=0.08` |
 | `ROOTMODE_CURRENCY` | `USD` | currency for the prices above |
-| `ROOTMODE_PAYOUT` | — | where the 90% USDC is sent when a job settles |
-| `ROOTMODE_POT` | — | RootmodePot address. Empty = not charging on-chain |
+| `ROOTMODE_PAYOUT` | the node's settle key | where the 90% USDC is sent when a job settles. Unset, earnings accrue to the pay key on the volume (logged on every start) — name a wallet of your own |
+| `ROOTMODE_POT` | built in | RootmodePot address. A node with a price settles on the network's pot; set this only to point at another deployment |
 | `ROOTMODE_CHAIN_ID` | `8453` | settlement chain (Base) |
-| `ROOTMODE_RPC` | — | JSON-RPC URL for lock checks and transactions. On `mainnet.base.org` the node fails over to other public Base endpoints when it is rate-limited |
+| `ROOTMODE_RPC` | built in | JSON-RPC URL for lock checks and transactions. The node fails over to other public Base endpoints when one is rate-limited |
 | `ROOTMODE_PAY_KEY` | — | Ethereum private key (secp256k1, 32-byte hex) this node signs `reserve`/`settle` with. Omit it and one is minted on the volume (`pay.key`). **Needs ETH on Base for gas** — see *Before you charge* |
 | `ROOTMODE_PAY_SENDER` | — | only for a node whose RPC holds an unlocked account (`eth_sendTransaction`). On a public RPC this fails with `unknown account`; use a key instead |
-| `ROOTMODE_BOOTSTRAP` | — | comma-separated bootstrap multiaddrs |
+| `ROOTMODE_BOOTSTRAP` | built in | comma-separated bootstrap multiaddrs; the network's own are compiled in |
 | `ROOTMODE_P2P_EXTERNAL` | — | address to advertise, if not what it binds |
 | `ROOTMODE_LABEL` | hostname | shown to clients |
 | `ROOTMODE_COUNTRY` | — | ISO 3166-1 alpha-2 (`DE`, `GB`), shown beside the label |
@@ -119,8 +119,9 @@ batched, its own `settle` — and each one costs gas, about $0.0014. So a
 charging node needs an Ethereum key with ETH on it, and it needs it **before
 the first paid job**, or that job is served and never collected.
 
-1. Set `ROOTMODE_PAYOUT` (where your USDC goes), `ROOTMODE_POT`,
-   `ROOTMODE_RPC` and start the container.
+1. Set a price (`ROOTMODE_VLLM_PRICE` / `ROOTMODE_COMFYUI_PRICE`) and
+   `ROOTMODE_PAYOUT` (where your USDC goes) and start the container. The
+   pot, the chain and an RPC are built in; nothing else to look up.
 2. On first start it mints `pay.key` on the volume and logs the address:
    ```
    INFO settle signer 0x1fdc…0ba2
@@ -133,8 +134,9 @@ the first paid job**, or that job is served and never collected.
    `pay key … has no ETH` / `is low on ETH`. When the key runs dry, paid
    work still gets done but its tickets expire uncollected an hour later.
 
-Leave `ROOTMODE_POT` empty and none of this applies: the node serves free,
-even if it advertises a price.
+Set no price and none of this applies: the node serves free and never
+touches the chain. A price is the switch — with one, the node settles on the
+network's pot whether or not you name it.
 ## Build from source
 
 ```sh
@@ -562,18 +564,21 @@ start) never contains the hex.
 
 ```toml
 [worker]
-payout_address = "0x…"
+payout_address = "0x…"    # unset: earnings accrue to the settle key on the volume
 
 [payments]
-contract = "0x…"          # RootmodePot
-chain_id = 8453
-rpc      = "https://mainnet.base.org"
+# contract, chain_id and rpc default to the network's live pot on Base —
+# the binary carries the deploy record. Name them only for another
+# deployment (a local Anvil, a testnet).
+# contract = "0x…"
+# chain_id = 8453
+# rpc      = "https://mainnet.base.org"
 # sender is derived from ROOTMODE_PAY_KEY when that is set
 ```
 
-In Docker: `ROOTMODE_PAYOUT`, `ROOTMODE_POT`, `ROOTMODE_RPC`,
-`ROOTMODE_PAY_KEY` in `.env`. Leave `ROOTMODE_POT` empty and the node serves
-without charging, even if it advertised a price.
+In Docker: a price and `ROOTMODE_PAYOUT` in `.env` (`ROOTMODE_PAY_KEY` if
+you would rather bring a key than have one minted). Set no price and the
+node serves without charging.
 
 If `ROOTMODE_PAY_KEY` is unset and `ROOTMODE_PAY_SENDER` is set, the RPC is
 asked to sign (`eth_sendTransaction`). That only works against your own node
