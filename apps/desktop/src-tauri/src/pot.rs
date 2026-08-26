@@ -575,9 +575,10 @@ fn worst_case_micros(price: f64, kind: JobKind) -> Micros {
 }
 
 /// Lock enough 1M-token slices to cover this job and return the signed bond.
-/// If the on-chain reserve is short, also return a signed `reserve()` for the
-/// **worker** to post (it already pays gas). The stream starts immediately;
-/// `pay_invoice` later captures the actual bill.
+/// If the on-chain reserve is short — or the channel's caps trail the
+/// account's — also return a signed `reserve()` for the **worker** to post
+/// (it already pays gas). The stream starts immediately; `pay_invoice` later
+/// captures the actual bill.
 pub async fn issue_ticket(
     state: &AppState,
     job_id: Uuid,
@@ -606,32 +607,48 @@ pub async fn issue_ticket(
     // every job after it is rejected with a message nobody can act on.
     let ch = channel_with_retry(&cfg, client, worker_payout).await?;
     let mut job_cap = job_lock_micros(&price, kind, payload).min(cap).max(1);
-    // The contract checks each settle against the caps snapshotted into the
-    // channel at its first reserve — raising the account's limits later does
-    // not raise them. A lock above the channel's cap would settle as OverCap.
-    if ch.max_per_job > 0 {
+    // The contract checks each settle against the caps on the channel, not
+    // the account's live limits. They follow the account in one direction
+    // while the channel is open: a reserve that raises the lock lifts them
+    // to the account's (lowering waits for a close). So a channel capped
+    // below the account gets a raise posted with this job, and the job is
+    // checked against the cap that raise leaves behind — provided there is
+    // unlocked balance to raise with. A lock above the channel's cap would
+    // settle as OverCap.
+    let raises_cap = ch.max_per_job > 0 && cap > ch.max_per_job && st.balance_micros > 0;
+    let channel_cap = if raises_cap { cap } else { ch.max_per_job };
+    if channel_cap > 0 {
         // A picture or clip is one bill at its advertised price; clamped
         // under that price it cannot be paid for, and the worker would be
         // left with the cost. Say so before anything is sent.
-        if kind != JobKind::Llm && chunk > ch.max_per_job {
+        if kind != JobKind::Llm && chunk > channel_cap {
             return Err(AppError::Invalid(format!(
                 "This {} costs ${:.2}, more than the ${:.2} per-job cap on your payment channel. \
-                 Your account allows ${:.2}; the channel takes that limit when it is reopened.",
+                 Your account allows ${:.2}; the channel takes that limit on its next reserve, \
+                 which needs unlocked balance in your pot.",
                 if kind == JobKind::Video { "clip" } else { "picture" },
                 chunk as f64 / 1_000_000.0,
-                ch.max_per_job as f64 / 1_000_000.0,
+                channel_cap as f64 / 1_000_000.0,
                 cap as f64 / 1_000_000.0,
             )));
         }
-        job_cap = job_cap.min(ch.max_per_job);
+        job_cap = job_cap.min(channel_cap);
     }
     // First signature covers as many 1M-token slices as the job needs, so
     // a normal reply never stops to wait for another ticket.
     let need = job_cap;
     let _ = chunk;
-    let reserve =
-        sign_reserve_if_needed(state, &cfg, client, worker_payout, ch, need, st.balance_micros)
-            .await?;
+    let reserve = sign_reserve_if_needed(
+        state,
+        &cfg,
+        client,
+        worker_payout,
+        ch,
+        need,
+        st.balance_micros,
+        raises_cap,
+    )
+    .await?;
 
     let _gate = gate().lock().await;
     let cached = cached_cumulative(worker_payout);
@@ -713,6 +730,7 @@ fn lock_micros(price: &Price, kind: JobKind, payload: &JobPayload) -> Micros {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn sign_reserve_if_needed(
     state: &AppState,
     cfg: &ChainConfig,
@@ -721,6 +739,7 @@ async fn sign_reserve_if_needed(
     ch: ChannelSnap,
     need: u64,
     free: u64,
+    raise_caps: bool,
 ) -> Result<Option<rootmode_core::ReservePost>> {
     let remaining = ch.remaining();
     // Lock a few jobs' worth at a time, not exactly this job's need. Raised
@@ -729,8 +748,15 @@ async fn sign_reserve_if_needed(
     // reads the channel last finds itself a few thousand micros short and
     // refuses with "no remaining reserve". Unused lock returns on close.
     let want = need.saturating_mul(RESERVE_HEADROOM_JOBS).max(RESERVE_HEADROOM_FLOOR);
-    let extra = if remaining < need.saturating_mul(2) || remaining < RESERVE_HEADROOM_FLOOR / 2 {
-        want.saturating_sub(remaining).min(free)
+    let short = remaining < need.saturating_mul(2) || remaining < RESERVE_HEADROOM_FLOOR / 2;
+    let extra = if short || raise_caps {
+        // The channel's caps only move on a reserve that actually raises
+        // the lock; the contract refuses one that does not. So when the
+        // caps are what needs raising, the lock goes up by at least a
+        // micro even if it is not short.
+        want.saturating_sub(remaining)
+            .max(if raise_caps { 1 } else { 0 })
+            .min(free)
     } else {
         0
     };
@@ -1696,9 +1722,10 @@ struct ChannelSnap {
     reserved: u64,
     paid: u64,
     earned: u64,
-    /// Per-job cap snapshotted into the channel at its first reserve. The
-    /// contract settles against this, not the account's live limit — a lock
-    /// signed above it can never settle. 0 means no channel yet.
+    /// Per-job cap on the channel. The contract settles against this, not
+    /// the account's live limit — a lock signed above it can never settle.
+    /// It rises to the account's on a reserve that raises the lock, and
+    /// starts afresh after a close. 0 means no channel yet.
     max_per_job: u64,
 }
 
