@@ -269,9 +269,18 @@ impl Worker {
                 );
                 Ok(())
             }
-            None if self.config.payments.require_auth && !holdback => Err(WorkerError::Rejected(
-                "this node requires a signed spending authorisation with each job".into(),
-            )),
+            None if self.config.payments.require_auth && !holdback => {
+                // No ticket, and none was due: the node lists this model at
+                // no charge, so there is nothing to sign for. Only a model
+                // nobody here priced is refused — an operator who turned
+                // billing on never serves for free what they did not list.
+                match self.listed_price(&submit.payload) {
+                    Some(price) if price.is_free() => Ok(()),
+                    _ => Err(WorkerError::Rejected(
+                        "this node requires a signed spending authorisation with each job".into(),
+                    )),
+                }
+            }
             None => Ok(()),
         }
     }
@@ -368,6 +377,13 @@ impl Worker {
     }
 
     fn advertised_price(&self, payload: &JobPayload) -> Price {
+        self.listed_price(payload).unwrap_or_default()
+    }
+
+    /// The price this node lists for the job's model — `None` when the
+    /// model is not in the catalogue at all (an unpriced model is `Some`
+    /// of a free price; that distinction is what `require_auth` turns on).
+    fn listed_price(&self, payload: &JobPayload) -> Option<Price> {
         let model = match payload {
             JobPayload::Llm(p) => p.model_id.as_deref().or(p.model_hash.as_deref()),
             JobPayload::Image(p) => p.checkpoint_id.as_deref().or(p.model_hash.as_deref()),
@@ -379,13 +395,13 @@ impl Worker {
                 .iter()
                 .find(|m| m.id == model || model.starts_with(&m.id) || m.id.starts_with(model))
             {
-                return found.price.clone().unwrap_or_default().round_protocol();
+                return Some(found.price.clone().unwrap_or_default().round_protocol());
             }
         }
         if models.len() == 1 {
-            return models[0].price.clone().unwrap_or_default().round_protocol();
+            return Some(models[0].price.clone().unwrap_or_default().round_protocol());
         }
-        Price::default()
+        None
     }
 
     fn bill_micros(&self, payload: &JobPayload, result: &JobResult) -> u64 {
@@ -2181,6 +2197,71 @@ mod tests {
             .unwrap_or_default();
         assert!(err.contains("1M-token chunk"), "{err}");
         assert_eq!(worker.channels.owed(), 0);
+    }
+
+    /// A node that charges for its other models can still list one for
+    /// free — OpenRouter's `:free` tier, say. The client locks nothing for
+    /// a $0 price, so no ticket arrives, and `require_auth` must not read
+    /// that as a client dodging a bill.
+    #[tokio::test]
+    async fn a_free_model_on_a_paying_node_is_served_without_a_ticket() {
+        let mut cfg = priced_config();
+        cfg.payments.require_auth = true;
+        let worker = Worker::new(
+            cfg,
+            Identity::generate(),
+            crate::backends::testing::registry_priced(JobKind::Llm, 0.0),
+        );
+        let messages = collect(
+            &worker,
+            JobSubmit::new(Uuid::new_v4(), "client", payload()),
+        )
+        .await;
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, WorkerMessage::JobResult(_))),
+            "free is free: {:?}",
+            statuses(&messages)
+        );
+        assert_eq!(worker.channels.owed(), 0);
+    }
+
+    /// The other side of that coin: with billing on, a model this node
+    /// never listed is not quietly served for nothing.
+    #[tokio::test]
+    async fn an_unlisted_model_on_a_paying_node_still_needs_a_ticket() {
+        let mut cfg = priced_config();
+        cfg.payments.require_auth = true;
+        let worker = Worker::new(
+            cfg,
+            Identity::generate(),
+            crate::backends::testing::registry_priced_many(
+                JobKind::Llm,
+                &[("stub", 20.0), ("gratis", 0.0)],
+            ),
+        );
+        let mut params = match payload() {
+            JobPayload::Llm(p) => p,
+            _ => unreachable!(),
+        };
+        params.model_id = Some("ghost".into());
+        let messages = collect(
+            &worker,
+            JobSubmit::new(Uuid::new_v4(), "client", JobPayload::Llm(params)),
+        )
+        .await;
+        assert!(
+            !messages
+                .iter()
+                .any(|m| matches!(m, WorkerMessage::JobResult(_))),
+            "nobody priced it, nobody serves it"
+        );
+        let err = statuses(&messages)
+            .into_iter()
+            .find_map(|(_, e)| e)
+            .unwrap_or_default();
+        assert!(err.contains("signed spending authorisation"), "{err}");
     }
 
     #[tokio::test]

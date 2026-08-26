@@ -398,6 +398,26 @@ pub mod testing {
         )])
     }
 
+    /// A stub listing several models at their own prices.
+    pub fn registry_priced_many(kind: JobKind, models: &[(&str, f64)]) -> Registry {
+        use rootmode_core::Price;
+        Registry::from_backends(vec![(
+            Arc::new(StubBackend {
+                kind,
+                reply: "ok".into(),
+            }) as Arc<dyn Backend>,
+            models
+                .iter()
+                .map(|(id, amount)| ModelDescriptor {
+                    id: (*id).into(),
+                    sha256: None,
+                    kind,
+                    price: Some(Price::new(*amount)),
+                })
+                .collect(),
+        )])
+    }
+
     /// A stub that advertises a price, so holdback tests have something to bill.
     pub fn registry_priced(kind: JobKind, amount: f64) -> Registry {
         use rootmode_core::Price;
