@@ -265,10 +265,22 @@ impl ListedVideo {
 }
 
 /// Output images are metered in tokens, and how many a picture costs is the
-/// provider's business (Gemini bills 1,290 for a 1024×1024; GPT image models
-/// vary with size and quality). The advertised per-image price is the
-/// client's lock, so it must cover the dear case: assume this many.
+/// provider's business: Gemini bills about 1,100 for a 1024×1024, OpenAI's
+/// image models around 5,400 (a GPT Image Mini picture came to 5,367). The
+/// advertised per-image price is the client's lock and the bill's ceiling,
+/// so it must cover the dear case for that family — a ceiling under cost
+/// is a picture sold at a loss.
 const IMAGE_OUTPUT_TOKENS: f64 = 2_000.0;
+const OPENAI_IMAGE_OUTPUT_TOKENS: f64 = 6_000.0;
+
+fn image_output_tokens(model_id: &str) -> f64 {
+    let id = model_id.to_ascii_lowercase();
+    if id.starts_with("openai/") || id.contains("gpt-") {
+        OPENAI_IMAGE_OUTPUT_TOKENS
+    } else {
+        IMAGE_OUTPUT_TOKENS
+    }
+}
 
 /// Per *token*, as decimal strings — so `"0.0000025"` is $2.50 per million.
 #[derive(Deserialize, Default)]
@@ -290,13 +302,13 @@ impl Pricing {
     /// A flat per-image price, after markup, for a model that answers with
     /// pictures. `None` when the catalogue names no output-image rate: a
     /// picture that costs something must not be advertised as free.
-    fn per_image(&self, markup: f64) -> Option<Price> {
+    fn per_image(&self, model_id: &str, markup: f64) -> Option<Price> {
         let markup = if markup > 0.0 { markup } else { 1.0 };
         let per_token: f64 = self.image_output.trim().parse().ok()?;
         if per_token <= 0.0 {
             return None;
         }
-        Some(Price::new(per_token * IMAGE_OUTPUT_TOKENS * markup))
+        Some(Price::new(per_token * image_output_tokens(model_id) * markup))
     }
 
     fn per_million_token(raw: &str) -> Option<f64> {
@@ -432,7 +444,7 @@ impl Backend for OpenRouterBackend {
                 continue;
             }
             let (kind, price) = if listed.makes_images() {
-                match listed.pricing.per_image(self.config.markup) {
+                match listed.pricing.per_image(&listed.id, self.config.markup) {
                     Some(p) => (JobKind::Image, Some(p)),
                     None => {
                         tracing::warn!("'{want}' makes images but lists no output-image rate — not advertising it");
@@ -872,9 +884,17 @@ mod tests {
             "pricing":{"prompt":"0.0000005","completion":"0.000003","image_output":"0.00006"},
             "architecture":{"output_modalities":["image","text"]}}"#).unwrap();
         assert!(listed.makes_images());
-        let price = listed.pricing.per_image(1.15).unwrap();
+        let price = listed.pricing.per_image(&listed.id, 1.15).unwrap();
         // 0.00006 × 2000 tokens × 1.15 = 0.138 → rounded up to the cent
         assert_eq!(price.amount, 0.14);
+        // OpenAI's image models spend far more tokens on a picture: a GPT
+        // Image Mini picture cost 5,367 of them, so its family is priced at
+        // 6,000 — 0.000008 × 6000 × 1.15 = 0.0552 → 0.06, not the 0.02 that
+        // sold pictures at a loss.
+        let mini: super::Listed = serde_json::from_str(r#"{"id":"openai/gpt-5-image-mini",
+            "pricing":{"prompt":"0.0000025","completion":"0.00001","image_output":"0.000008"},
+            "architecture":{"output_modalities":["image","text"]}}"#).unwrap();
+        assert_eq!(mini.pricing.per_image(&mini.id, 1.15).unwrap().amount, 0.06);
         let router: super::Listed = serde_json::from_str(r#"{"id":"openrouter/auto",
             "pricing":{"prompt":"-1","completion":"-1"},
             "architecture":{"output_modalities":["text","image"]}}"#).unwrap();
