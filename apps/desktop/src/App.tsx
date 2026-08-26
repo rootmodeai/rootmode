@@ -21,7 +21,7 @@ export type Screen = "chat" | "image" | "video" | "network" | "connect" | "walle
 // someone who wants it gets there; everyone else never needs to know it
 // exists.
 const NAV: Array<{ key: Screen; label: string; icon: (props: { size?: number }) => JSX.Element }> = [
-  { key: "chat", label: "Chat", icon: ChatIcon },
+  { key: "chat", label: "Text", icon: ChatIcon },
   { key: "image", label: "Images", icon: ImagesIcon },
   { key: "video", label: "Videos", icon: VideoIcon },
   { key: "connect", label: "Use it elsewhere", icon: ConnectIcon },
