@@ -42,6 +42,11 @@ pub struct Channel {
     #[serde(default)]
     pub settled: Micros,
     pub updated_at: i64,
+    /// The settlement contract the tickets were signed for. A ticket only
+    /// ever settles on the contract whose domain signed it, so an entry is
+    /// meaningful to a node configured for that contract and no other.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub contract: String,
 }
 
 impl Channel {
@@ -54,6 +59,10 @@ impl Channel {
 /// The open channels, kept in memory and mirrored to a file.
 pub struct Channels {
     path: PathBuf,
+    /// The contract this node settles on. Part of every channel id, so a
+    /// client/payout pair on one contract never shares a ledger entry with
+    /// the same pair on another.
+    contract: String,
     open: RwLock<BTreeMap<String, Channel>>,
 }
 
@@ -61,24 +70,66 @@ impl Channels {
     /// Load whatever a previous run left behind. A missing or unreadable file
     /// is an empty ledger, not a failure to start: a node that will not boot
     /// because of its billing file is a node that stops earning entirely.
-    pub fn load(path: impl AsRef<Path>) -> Self {
+    ///
+    /// Entries signed for another contract are left behind: nothing in them
+    /// can settle here, and carried over they poison the ledger — a client's
+    /// first ticket on the new contract starts from zero and never rises
+    /// above what the old one banked. Entries from before contracts were
+    /// recorded are kept while their ticket can still settle, and dropped
+    /// once it has expired.
+    pub fn load(path: impl AsRef<Path>, contract: &str) -> Self {
         let path = path.as_ref().to_path_buf();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let mut left_behind = 0u32;
+        let mut left_owed: Micros = 0;
         let open = std::fs::read_to_string(&path)
             .ok()
             .and_then(|text| serde_json::from_str::<Vec<Channel>>(&text).ok())
             .map(|list| {
                 list.into_iter()
+                    .filter(|c| {
+                        let keep = if c.contract.is_empty() {
+                            c.spend.as_ref().map_or(true, |t| t.deadline >= now)
+                        } else {
+                            c.contract.eq_ignore_ascii_case(contract)
+                        };
+                        if !keep {
+                            left_behind += 1;
+                            left_owed = left_owed.saturating_add(c.owed());
+                        }
+                        keep
+                    })
                     .map(|c| (c.channel_id.clone(), c))
                     .collect::<BTreeMap<_, _>>()
             })
             .unwrap_or_default();
+        if left_behind > 0 {
+            tracing::warn!(
+                left_behind,
+                owed_micros = left_owed,
+                "payment channel(s) from another contract or with expired tickets left behind"
+            );
+        }
         if !open.is_empty() {
             tracing::info!("{} open payment channel(s)", open.len());
         }
-        Self {
+        let channels = Self {
             path,
+            contract: contract.to_string(),
             open: RwLock::new(open),
+        };
+        if left_behind > 0 {
+            channels.write(&channels.open.read().unwrap_or_else(|e| e.into_inner()));
         }
+        channels
+    }
+
+    /// The ledger key for a client/payout pair on this node's contract.
+    pub fn id_for(&self, client: &str, worker: &str) -> String {
+        channel_id(client, worker, &self.contract.to_lowercase())
     }
 
     /// Check an authorisation and record it, returning what this job earns.
@@ -124,6 +175,7 @@ impl Channels {
             spend_sig: existing.and_then(|c| c.spend_sig.clone()),
             settled: existing.map(|c| c.settled).unwrap_or(0),
             updated_at: now,
+            contract: self.contract.clone(),
         };
         open.insert(auth.channel_id.clone(), updated);
         self.write(&open);
@@ -148,7 +200,7 @@ impl Channels {
         ticket
             .check(domain, sig, app_key, now.max(0) as u64)
             .map_err(|e| e.to_string())?;
-        let id = channel_id(&ticket.client, &ticket.worker_payout, "pot");
+        let id = self.id_for(&ticket.client, &ticket.worker_payout);
         let mut open = self.open.write().unwrap_or_else(|e| e.into_inner());
         let existing = open.get(&id);
         if let Some(channel) = existing {
@@ -204,6 +256,7 @@ impl Channels {
             spend_sig: Some(sig.to_string()),
             settled: existing.map(|c| c.settled).unwrap_or(0),
             updated_at: now,
+            contract: self.contract.clone(),
         };
         open.insert(id, updated);
         self.write(&open);
@@ -212,7 +265,7 @@ impl Channels {
 
     /// Highest cumulative already signed for this client/worker pair.
     pub fn authorised_for(&self, client: &str, worker: &str) -> Micros {
-        let id = channel_id(client, worker, "pot");
+        let id = self.id_for(client, worker);
         self.open
             .read()
             .unwrap_or_else(|e| e.into_inner())
@@ -281,8 +334,10 @@ mod tests {
     use k256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey};
     use rootmode_core::payments::{address_of, channel_id, metadata_hash};
 
+    const CONTRACT: &str = "0x1234567890abcdef1234567890abcdef12345678";
+
     fn domain() -> Domain {
-        Domain::base("0x1234567890abcdef1234567890abcdef12345678")
+        Domain::base(CONTRACT)
     }
 
     fn signed(key: &SigningKey, client: &str, cumulative: Micros) -> SpendingAuth {
@@ -312,7 +367,7 @@ mod tests {
         let key = SigningKey::from_bytes(&[9u8; 32].into()).unwrap();
         let client = address_of(key.verifying_key());
         let path = temp();
-        let channels = Channels::load(&path);
+        let channels = Channels::load(&path, CONTRACT);
 
         assert_eq!(channels.accept(&signed(&key, &client, 1_000_000), &domain(), 1).unwrap(), 1_000_000);
         // The second job is billed for what it added, not for the total.
@@ -330,12 +385,12 @@ mod tests {
         let client = address_of(key.verifying_key());
         let path = temp();
 
-        let channels = Channels::load(&path);
+        let channels = Channels::load(&path, CONTRACT);
         channels.accept(&signed(&key, &client, 2_000_000), &domain(), 1).unwrap();
         drop(channels);
 
         // A worker that forgets what it is owed has worked for free.
-        let reopened = Channels::load(&path);
+        let reopened = Channels::load(&path, CONTRACT);
         assert_eq!(reopened.owed(), 2_000_000);
         assert_eq!(reopened.redeemable().len(), 1);
         assert!(reopened.redeemable()[0].latest.sig.is_some(), "the signature is what settles");
@@ -356,7 +411,7 @@ mod tests {
             address_of(other.verifying_key()),
         );
         let path = temp();
-        let channels = Channels::load(&path);
+        let channels = Channels::load(&path, CONTRACT);
         channels.accept(&signed(&owner, &owner_addr, 1_000_000), &domain(), 1).unwrap();
 
         // Properly signed, by the wrong person, on somebody else's channel.
@@ -365,6 +420,36 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("belongs to"), "{err}");
         assert_eq!(channels.owed(), 1_000_000, "the owner's balance is untouched");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_ledger_from_another_contract_is_left_behind() {
+        let key = SigningKey::from_bytes(&[13u8; 32].into()).unwrap();
+        let client = address_of(key.verifying_key());
+        let path = temp();
+
+        let channels = Channels::load(&path, CONTRACT);
+        channels.accept(&signed(&key, &client, 4_000_000), &domain(), 1).unwrap();
+        drop(channels);
+
+        // The node moves to a new pot. What the old one banked cannot settle
+        // there, and must not set the bar a fresh client's tickets have to
+        // clear: keyed by contract, the pair starts from nothing.
+        let moved = Channels::load(&path, "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd");
+        assert_eq!(moved.owed(), 0);
+        assert!(moved.redeemable().is_empty());
+        assert_eq!(moved.authorised_for(&client, "worker"), 0);
+        assert_ne!(
+            moved.id_for(&client, "worker"),
+            Channels::load(&temp(), CONTRACT).id_for(&client, "worker"),
+            "ids differ per contract"
+        );
+
+        // Back on the original contract, the entry is gone for good: the
+        // move rewrote the file. A node does not straddle two contracts.
+        let back = Channels::load(&path, CONTRACT);
+        assert_eq!(back.owed(), 0);
         std::fs::remove_file(&path).ok();
     }
 }

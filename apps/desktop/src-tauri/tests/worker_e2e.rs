@@ -346,7 +346,7 @@ async fn a_paying_client_is_served_and_the_worker_banks_the_authorisation() {
     // process that wrote it.
     let mut reopened = None;
     for _ in 0..40 {
-        let channels = Channels::load(&ledger);
+        let channels = Channels::load(&ledger, CONTRACT);
         if channels.owed() > 0 {
             reopened = Some(channels);
             break;

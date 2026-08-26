@@ -147,7 +147,10 @@ impl Worker {
         Self {
             identity,
             registry,
-            channels: Arc::new(Channels::load(&config.payments.channels_file)),
+            channels: Arc::new(Channels::load(
+                &config.payments.channels_file,
+                config.payments.contract.trim(),
+            )),
             permits,
             conn_permits: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
             job_permits: Arc::new(Semaphore::new(MAX_INFLIGHT_JOBS)),
@@ -501,28 +504,6 @@ impl Worker {
             has_reserve = submit.reserve.is_some(),
             "priced lock check"
         );
-        // A picture or clip is one fixed bill at its advertised price. If
-        // that single bill is above the per-job cap snapshotted into the
-        // payer's channel, the settle would revert OverCap — the work done
-        // and the cost borne, nothing collected — so refuse it here, before
-        // the backend is called. Text is NOT checked this way: its bond is a
-        // prepaid 1M-token chunk and its ticket is cumulative across a shared
-        // channel, so `need` is neither the reply's cost nor a single settle;
-        // the reply meters in small per-token deltas the contract gates on
-        // its own, and lumping it in here refused ordinary chats with a
-        // wild figure.
-        if state.max_per_job > 0 && submit.payload.kind() != rootmode_core::JobKind::Llm {
-            let flat = (self.advertised_price(&submit.payload).amount * 1_000_000.0).round() as u64;
-            if flat > state.max_per_job {
-                return Err(WorkerError::Rejected(format!(
-                    "this {} costs ${:.2} but the payer's channel allows ${:.2} per job; nothing above that can settle. \
-                     Raise the limit in your pot and reopen the channel",
-                    if submit.payload.kind() == rootmode_core::JobKind::Video { "clip" } else { "picture" },
-                    flat as f64 / 1_000_000.0,
-                    state.max_per_job as f64 / 1_000_000.0
-                )));
-            }
-        }
         // Post a raise whenever the payer signed one above the current lock,
         // not only once the lock is already short. The client tops up with
         // headroom for several jobs; waiting until a job cannot fit means
@@ -585,6 +566,31 @@ impl Worker {
                         )));
                     }
                 }
+            }
+        }
+        // A picture or clip is one fixed bill at its advertised price. If
+        // that single bill is above the per-job cap on the payer's channel,
+        // the settle would revert OverCap — the work done and the cost
+        // borne, nothing collected — so refuse it here, before the backend
+        // is called. Checked after the reserve above has been posted and the
+        // channel read back: a reserve that raises the lock also lifts the
+        // channel's caps to the account's, so the cap that matters is the
+        // one this job's own raise leaves behind. Text is NOT checked this
+        // way: its bond is a prepaid 1M-token chunk and its ticket is
+        // cumulative across a shared channel, so `need` is neither the
+        // reply's cost nor a single settle; the reply meters in small
+        // per-token deltas the contract gates on its own, and lumping it in
+        // here refused ordinary chats with a wild figure.
+        if state.max_per_job > 0 && submit.payload.kind() != rootmode_core::JobKind::Llm {
+            let flat = (self.advertised_price(&submit.payload).amount * 1_000_000.0).round() as u64;
+            if flat > state.max_per_job {
+                return Err(WorkerError::Rejected(format!(
+                    "this {} costs ${:.2} but the payer's channel allows ${:.2} per job; nothing above that can settle. \
+                     Raise the limit in your pot; the channel takes it on its next reserve",
+                    if submit.payload.kind() == rootmode_core::JobKind::Video { "clip" } else { "picture" },
+                    flat as f64 / 1_000_000.0,
+                    state.max_per_job as f64 / 1_000_000.0
+                )));
             }
         }
         if state.remaining < need {
@@ -1416,11 +1422,7 @@ impl Worker {
         if !self.can_settle() {
             return;
         }
-        let id = rootmode_core::payments::channel_id(
-            &pay.ticket.client,
-            &pay.ticket.worker_payout,
-            "pot",
-        );
+        let id = self.channels.id_for(&pay.ticket.client, &pay.ticket.worker_payout);
         if self.worth_settling(job_id, &pay.ticket).await {
             self.settle_ticket(job_id, &id, pay).await;
         }
