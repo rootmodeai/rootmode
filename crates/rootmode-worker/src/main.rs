@@ -216,6 +216,20 @@ async fn run(cli: Cli) -> rootmode_worker::Result<()> {
             let models = worker.models();
             tracing::info!(peer_id = %worker.peer_id(), "rootmode worker v{}", env!("CARGO_PKG_VERSION"));
             tracing::info!("listening on ws://{addr}");
+            {
+                let c = worker.config();
+                if c.charges() {
+                    tracing::info!(
+                        "settling on pot {} (chain {}) via {} — payout {}",
+                        c.payments.contract,
+                        c.payments.chain_id,
+                        c.payments.rpc,
+                        c.worker.payout_address
+                    );
+                } else {
+                    tracing::info!("serving free — no price set, nothing goes on-chain");
+                }
+            }
             tracing::info!(
                 "caps: [{}]  max_concurrent: {}",
                 worker.registry().caps().join(", "),
