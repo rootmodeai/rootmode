@@ -42,6 +42,17 @@ export function VideoIcon({ size = 16 }: Props) {
   );
 }
 
+export function FlowsIcon({ size = 16 }: Props) {
+  return (
+    <svg width={size} height={size} {...base} aria-hidden="true">
+      <rect x="2" y="3" width="6" height="6" rx="1.5" />
+      <rect x="16" y="9" width="6" height="6" rx="1.5" />
+      <rect x="2" y="15" width="6" height="6" rx="1.5" />
+      <path d="M8 6h3a3 3 0 013 3v0M8 18h3a3 3 0 003-3v0M14 12h2" />
+    </svg>
+  );
+}
+
 export function CreateIcon({ size = 16 }: Props) {
   return (
     <svg width={size} height={size} {...base} aria-hidden="true">

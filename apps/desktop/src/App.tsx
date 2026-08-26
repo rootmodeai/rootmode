@@ -4,16 +4,17 @@ import { api } from "./lib/api";
 import { Boot } from "./screens/Boot";
 import { Chat } from "./screens/Chat";
 import { Create } from "./screens/Create";
+import { Flows } from "./screens/Flows";
 import { Network } from "./screens/Network";
 import { Connect } from "./screens/Connect";
 import { Settings } from "./screens/Settings";
 import { Wallet } from "./screens/Wallet";
 import type { NetworkStatus, UpdateInfo } from "./lib/types";
 import { Glider } from "./components/Glider";
-import { ChatIcon, ImagesIcon, VideoIcon, ConnectIcon, WalletIcon, SettingsIcon } from "./components/NavIcons";
+import { ChatIcon, ImagesIcon, VideoIcon, FlowsIcon, ConnectIcon, WalletIcon, SettingsIcon } from "./components/NavIcons";
 import { NavModels } from "./components/NavModels";
 
-export type Screen = "chat" | "image" | "video" | "network" | "connect" | "wallet" | "settings";
+export type Screen = "chat" | "image" | "video" | "flows" | "network" | "connect" | "wallet" | "settings";
 
 // "Providers" has no tab of its own — it's an advanced, under-the-hood view,
 // and a dedicated nav entry for it reads as something everyone is meant to
@@ -24,6 +25,7 @@ const NAV: Array<{ key: Screen; label: string; icon: (props: { size?: number }) 
   { key: "chat", label: "Text", icon: ChatIcon },
   { key: "image", label: "Images", icon: ImagesIcon },
   { key: "video", label: "Videos", icon: VideoIcon },
+  { key: "flows", label: "Flows", icon: FlowsIcon },
   { key: "connect", label: "Use it elsewhere", icon: ConnectIcon },
   { key: "wallet", label: "Wallet", icon: WalletIcon },
   { key: "settings", label: "Settings", icon: SettingsIcon },
@@ -185,6 +187,9 @@ function Shell() {
         </div>
         <div className="screen" hidden={screen !== "video"}>
           <Create kind="video" />
+        </div>
+        <div className="screen" hidden={screen !== "flows"}>
+          <Flows />
         </div>
         {screen === "network" && <Network />}
         {screen === "connect" && <Connect />}
