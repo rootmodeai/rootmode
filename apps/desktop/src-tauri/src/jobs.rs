@@ -4,10 +4,11 @@
 //! happens on a tokio task and reaches the frontend as events, so no job ever
 //! blocks the UI.
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use rootmode_core::{
-    protocol::ClientMessage, JobDelta, JobPayload, JobStatus, JobSubmit, WorkerMessage,
+    protocol::ClientMessage, JobDelta, JobKind, JobPayload, JobStatus, JobSubmit, WorkerMessage,
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
@@ -111,8 +112,6 @@ pub async fn submit(
         )));
     }
 
-    let transport = transport_for(&state, &peer).await?;
-
     let ts = now();
     let record = JobRecord {
         job_id: Uuid::new_v4(),
@@ -132,30 +131,136 @@ pub async fn submit(
     state.db.insert_job(&record)?;
     let _ = app.emit(EVENT_JOB_UPDATE, &record);
 
-    let mut submit_msg = JobSubmit::new(record.job_id, state.identity().peer_id(), payload.clone());
+    // Who gets the job if this provider produces nothing. Decided now, from
+    // the network as it was when the user chose, so a retry is not steered
+    // by whatever a failure did to the peer list.
+    let fallbacks = state
+        .db
+        .list_peers()
+        .map(|peers| crate::routing::fallbacks(&peers, kind, &record.model, &peer.id))
+        .unwrap_or_default();
+
+    let job_id = record.job_id;
+    let app = app.clone();
+    // Registered before the job starts, so a Stop click that arrives in the
+    // instant between "queued" and the first real message still has
+    // something to notify.
+    let (stop, stop_asked, _running) = state.track_job(job_id);
+
+    tauri::async_runtime::spawn(async move {
+        let _running = _running;
+        let mut peer = peer;
+        let mut payload = payload;
+        let mut next = fallbacks.into_iter();
+        loop {
+            let why = match attempt(&app, &state, job_id, &peer, &payload, stop.clone()).await {
+                Outcome::Settled => break,
+                Outcome::Nothing(why) => why,
+            };
+            // Whatever was locked for that provider is let go; whether it
+            // kept anything is for the chain to say.
+            crate::pot::abandon_job(&state, job_id);
+            if stop_asked.load(Ordering::SeqCst) {
+                fail(&app, &state, job_id, &why);
+                break;
+            }
+            let Some((alternate, model)) = next.find_map(|f| {
+                state
+                    .db
+                    .get_peer(&f.peer_id)
+                    .ok()
+                    .flatten()
+                    .map(|p| (p, f.model))
+            }) else {
+                fail(&app, &state, job_id, &why);
+                break;
+            };
+            log::info!(
+                "job {job_id}: {} gave nothing ({why}); trying {} instead",
+                peer.label,
+                alternate.label
+            );
+            payload = for_model(payload, &model);
+            if let Err(e) = state.db.reassign_job(job_id, &alternate.id, &payload) {
+                fail(&app, &state, job_id, &e.to_string());
+                break;
+            }
+            emit_job(&app, &state, job_id);
+            peer = alternate;
+        }
+    });
+
+    Ok(record)
+}
+
+/// How one provider's try at a job ended.
+enum Outcome {
+    /// The job reached a recorded terminal state — done, or failed after
+    /// the provider had already said something the user saw.
+    Settled,
+    /// The provider produced nothing: a failure or silence before a single
+    /// token. Nothing about this try was shown or kept, and the job is
+    /// still open; somebody else can have it.
+    Nothing(String),
+}
+
+/// The same request, asked of a different model — the case where a free
+/// provider stands in for another free provider.
+fn for_model(payload: JobPayload, model: &str) -> JobPayload {
+    match payload {
+        JobPayload::Llm(mut p) if p.model_id.is_some() && p.model_id.as_deref() != Some(model) => {
+            p.model_id = Some(model.to_string());
+            JobPayload::Llm(p)
+        }
+        other => other,
+    }
+}
+
+/// One provider's try: lock funds if it charges, stream what it sends,
+/// persist what the user should see. A failure before the first token is
+/// reported as [`Outcome::Nothing`] rather than written to the job, so the
+/// caller can hand the job on without the user ever seeing a spinner turn
+/// into an error and back.
+async fn attempt(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    job_id: Uuid,
+    peer: &Peer,
+    payload: &JobPayload,
+    stop: Arc<tokio::sync::Notify>,
+) -> Outcome {
+    let transport = match transport_for(state, peer).await {
+        Ok(t) => t,
+        Err(e) => return Outcome::Nothing(e.to_string()),
+    };
+    let kind = payload.kind();
+    let model = payload.model_label();
+
+    let mut submit_msg = JobSubmit::new(job_id, state.identity().peer_id(), payload.clone());
     if let Some(price) = peer
         .models
         .iter()
-        .find(|m| m.id == record.model || record.model.starts_with(&m.id))
+        .find(|m| m.id == model || model.starts_with(&m.id))
         .and_then(|m| m.price.as_ref())
         .filter(|p| p.amount > 0.0)
     {
-        if let Ok(st) = crate::pot::status(&state).await {
-            if let (Some(client), Some(_cfg)) = (st.client.as_deref(), crate::pot::load_chain_config(&state)) {
+        if let Ok(st) = crate::pot::status(state).await {
+            if let (Some(client), Some(_cfg)) = (st.client.as_deref(), crate::pot::load_chain_config(state)) {
+                // A wallet that cannot lock funds is the user's to see; no
+                // other provider fixes it, so it is final, not retried.
                 let payout = match crate::pot::named_payout(peer.payout.as_deref()) {
                     Ok(p) => p,
                     Err(e) => {
-                        let msg = format!("could not lock funds for this job: {e}");
-                        fail(app, &state, record.job_id, &msg);
-                        return Err(AppError::Invalid(msg));
+                        fail(app, state, job_id, &format!("could not lock funds for this job: {e}"));
+                        return Outcome::Settled;
                     }
                 };
                 match crate::pot::issue_ticket(
-                    &state,
-                    record.job_id,
+                    state,
+                    job_id,
                     price.clone(),
                     kind,
-                    &payload,
+                    payload,
                     client,
                     &payout,
                     &peer.label,
@@ -164,8 +269,7 @@ pub async fn submit(
                 {
                     Ok((bond, reserve)) => {
                         log::info!(
-                            "priced job {} payout={payout} reserve={}",
-                            record.job_id,
+                            "priced job {job_id} payout={payout} reserve={}",
                             reserve.is_some()
                         );
                         submit_msg.payer = Some(client.to_string());
@@ -173,95 +277,116 @@ pub async fn submit(
                         submit_msg.reserve = reserve;
                     }
                     Err(e) => {
-                        let msg = format!("could not lock funds for this job: {e}");
-                        fail(app, &state, record.job_id, &msg);
-                        return Err(AppError::Invalid(msg));
+                        fail(app, state, job_id, &format!("could not lock funds for this job: {e}"));
+                        return Outcome::Settled;
                     }
                 }
             }
         }
     }
-    let job_id = record.job_id;
-    let app = app.clone();
-    // Registered before the job starts, so a Stop click that arrives in the
-    // instant between "queued" and the first real message still has
-    // something to notify.
-    let (stop, _running) = state.track_job(job_id);
 
-    tauri::async_runtime::spawn(async move {
-        let _running = _running;
-        let (tx, mut rx) = mpsc::unbounded_channel::<WorkerMessage>();
-        let (pay_tx, pay_rx) = mpsc::unbounded_channel::<ClientMessage>();
-        let runner = {
-            let transport = transport.clone();
-            tauri::async_runtime::spawn(async move {
-                transport.run_job(submit_msg, tx, stop, pay_rx).await
-            })
-        };
+    let (tx, mut rx) = mpsc::unbounded_channel::<WorkerMessage>();
+    let (pay_tx, pay_rx) = mpsc::unbounded_channel::<ClientMessage>();
+    let runner = {
+        let transport = transport.clone();
+        tauri::async_runtime::spawn(async move { transport.run_job(submit_msg, tx, stop, pay_rx).await })
+    };
 
-        let mut terminal = false;
-        let mut last_meta: Option<serde_json::Value> = None;
-        while let Some(msg) = rx.recv().await {
-            if let WorkerMessage::JobResult(r) = &msg {
-                last_meta = Some(r.meta.clone());
+    let mut terminal = false;
+    // Whether anything reached the user. Once it has, what follows is this
+    // job's verdict; before it, a failure is only this provider's.
+    let mut spoke = false;
+    let mut last_meta: Option<serde_json::Value> = None;
+    let mut nothing: Option<String> = None;
+    while let Some(msg) = rx.recv().await {
+        match &msg {
+            WorkerMessage::JobDelta(d) if d.job_id == job_id && !d.is_empty() => spoke = true,
+            WorkerMessage::JobStatus(s)
+                if s.job_id == job_id && matches!(s.status, JobStatus::Failed) && !spoke =>
+            {
+                nothing = Some(
+                    s.error
+                        .clone()
+                        .unwrap_or_else(|| "the provider failed without saying why".into()),
+                );
+                break;
             }
-            if let WorkerMessage::JobInvoice(inv) = &msg {
-                match crate::pot::pay_invoice(&state, job_id, inv).await {
-                    Ok(pay) => {
-                        if pay_tx.send(ClientMessage::JobPay(pay)).is_err() {
-                            fail(&app, &state, job_id, "could not send payment to the worker");
-                            terminal = true;
-                        }
-                    }
-                    Err(e) => {
-                        fail(&app, &state, job_id, &e.to_string());
+            // An empty answer is not an answer either.
+            WorkerMessage::JobResult(r)
+                if r.job_id == job_id
+                    && !spoke
+                    && r.kind == JobKind::Llm
+                    && r.text.as_deref().unwrap_or("").trim().is_empty()
+                    && r.tool_calls.is_empty() =>
+            {
+                nothing = Some("the provider returned no answer".into());
+                break;
+            }
+            _ => {}
+        }
+        if let WorkerMessage::JobResult(r) = &msg {
+            last_meta = Some(r.meta.clone());
+        }
+        if let WorkerMessage::JobInvoice(inv) = &msg {
+            match crate::pot::pay_invoice(state, job_id, inv).await {
+                Ok(pay) => {
+                    if pay_tx.send(ClientMessage::JobPay(pay)).is_err() {
+                        fail(app, state, job_id, "could not send payment to the worker");
                         terminal = true;
                     }
                 }
-            }
-            match handle_message(&app, &state, job_id, msg) {
-                Ok(is_terminal) => terminal |= is_terminal,
                 Err(e) => {
-                    fail(&app, &state, job_id, &e.to_string());
+                    fail(app, state, job_id, &e.to_string());
                     terminal = true;
                 }
             }
         }
-
-        // After the stream: a real worker has already invoiced (and
-        // pay_invoice marked the job paid). Mock peers never invoice, so
-        // this is what bills them.
-        match crate::pot::settle_job(&state, job_id, last_meta.as_ref()).await {
-            Ok(Some(tx)) => log::info!("pot settled {tx}"),
-            Ok(None) => {}
-            Err(e) => log::warn!("pot settle: {e}"),
-        }
-
-        match runner.await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) if !terminal => fail(&app, &state, job_id, &e.to_string()),
-            Ok(Err(_)) => {}
-            Err(e) if !terminal => fail(&app, &state, job_id, &format!("worker task failed: {e}")),
-            Err(_) => {}
-        }
-
-        // A peer that closed cleanly without a terminal status still leaves a
-        // job hanging; do not show a spinner nobody will resolve.
-        if !terminal {
-            if let Ok(Some(job)) = state.db.get_job(job_id) {
-                if !job.status.is_terminal() {
-                    fail(
-                        &app,
-                        &state,
-                        job_id,
-                        "peer ended the stream without a final status",
-                    );
-                }
+        match handle_message(app, state, job_id, msg) {
+            Ok(is_terminal) => terminal |= is_terminal,
+            Err(e) => {
+                fail(app, state, job_id, &e.to_string());
+                terminal = true;
             }
         }
-    });
+    }
+    if let Some(why) = nothing {
+        runner.abort();
+        return Outcome::Nothing(why);
+    }
 
-    Ok(record)
+    // The stream is over, so the runner is too; this only reads how.
+    let ended = match runner.await {
+        Ok(Ok(())) => None,
+        Ok(Err(e)) => Some(e.to_string()),
+        Err(e) => Some(format!("worker task failed: {e}")),
+    };
+    if !terminal {
+        // A peer that closed cleanly without a terminal status still leaves a
+        // job hanging; do not show a spinner nobody will resolve.
+        let open = state
+            .db
+            .get_job(job_id)
+            .ok()
+            .flatten()
+            .map_or(false, |job| !job.status.is_terminal());
+        let why = ended.or_else(|| open.then(|| "peer ended the stream without a final status".to_string()));
+        if let Some(why) = why {
+            if !spoke {
+                return Outcome::Nothing(why);
+            }
+            fail(app, state, job_id, &why);
+        }
+    }
+
+    // After the stream: a real worker has already invoiced (and
+    // pay_invoice marked the job paid). Mock peers never invoice, so
+    // this is what bills them.
+    match crate::pot::settle_job(state, job_id, last_meta.as_ref()).await {
+        Ok(Some(tx)) => log::info!("pot settled {tx}"),
+        Ok(None) => {}
+        Err(e) => log::warn!("pot settle: {e}"),
+    }
+    Outcome::Settled
 }
 
 /// What persisting one worker message changed.

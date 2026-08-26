@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use uuid::Uuid;
@@ -39,7 +40,7 @@ pub struct AppState {
     /// button reach a job it has no other handle on: the socket, the
     /// tokio task, all of it live inside a spawned future the UI never
     /// sees.
-    running: RwLock<HashMap<Uuid, Arc<tokio::sync::Notify>>>,
+    running: RwLock<HashMap<Uuid, (Arc<tokio::sync::Notify>, Arc<AtomicBool>)>>,
 }
 
 impl AppState {
@@ -59,19 +60,28 @@ impl AppState {
     /// Register a job as stoppable, for the life of this guard. Dropping it
     /// — on any return path of the task that holds it — is what keeps this
     /// registry from outliving the jobs it describes.
-    pub fn track_job(self: &Arc<Self>, job_id: Uuid) -> (Arc<tokio::sync::Notify>, RunningGuard) {
+    ///
+    /// The flag says whether Stop was ever pressed for this job — a
+    /// `Notify` wakes whoever is waiting at the time and remembers nothing,
+    /// and a job handed to a second provider needs to know.
+    pub fn track_job(
+        self: &Arc<Self>,
+        job_id: Uuid,
+    ) -> (Arc<tokio::sync::Notify>, Arc<AtomicBool>, RunningGuard) {
         let notify = Arc::new(tokio::sync::Notify::new());
+        let asked = Arc::new(AtomicBool::new(false));
         self.running
             .write()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(job_id, notify.clone());
-        (notify, RunningGuard { state: self.clone(), job_id })
+            .insert(job_id, (notify.clone(), asked.clone()));
+        (notify, asked, RunningGuard { state: self.clone(), job_id })
     }
 
     /// Ask a running job to stop. A no-op if it already finished — the same
     /// harmless race the worker's own `job.cancel` handling accepts.
     pub fn stop_job(&self, job_id: Uuid) {
-        if let Some(notify) = self.running.read().unwrap_or_else(|e| e.into_inner()).get(&job_id) {
+        if let Some((notify, asked)) = self.running.read().unwrap_or_else(|e| e.into_inner()).get(&job_id) {
+            asked.store(true, Ordering::SeqCst);
             notify.notify_waiters();
         }
     }

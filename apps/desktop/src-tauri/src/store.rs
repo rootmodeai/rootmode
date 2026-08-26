@@ -567,6 +567,25 @@ impl Db {
         Ok(())
     }
 
+    /// Hand a job that has produced nothing yet to another provider. Back
+    /// to queued, error cleared: nothing about the first try was shown, and
+    /// nothing about it is kept.
+    pub fn reassign_job(&self, job_id: Uuid, peer_id: &str, payload: &JobPayload) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            r#"UPDATE jobs SET peer_id = ?2, payload = ?3, status = 'queued', progress = 0,
+                               error = NULL, updated_at = ?4
+               WHERE job_id = ?1"#,
+            params![
+                job_id.to_string(),
+                peer_id,
+                serde_json::to_string(payload)?,
+                now()
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Any job left mid-flight by a crash or quit is not resumable — the
     /// connection that owned it is gone. Mark it failed at startup rather
     /// than showing a spinner that will never resolve.

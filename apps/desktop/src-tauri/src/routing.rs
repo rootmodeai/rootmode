@@ -5,6 +5,7 @@
 //! never hidden: the provider and the price it advertised are shown with the
 //! answer, and you can pin a provider if you would rather decide yourself.
 
+use rand::Rng;
 use rootmode_core::JobKind;
 use serde::Serialize;
 
@@ -173,6 +174,69 @@ pub fn provider_for(peers: &[Peer], kind: JobKind, model: &str) -> Option<ModelO
     model_options(peers, kind)
         .into_iter()
         .find(|o| o.model == model)
+}
+
+/// Who to try next when the first choice fails before saying anything.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Fallback {
+    pub peer_id: String,
+    pub peer_label: String,
+    pub model: String,
+}
+
+/// Providers worth trying, in order, after `first_peer_id` gave nothing.
+///
+/// The same model first, at the same price or less — cheapest, ties at
+/// random — so a retry never costs more than the offer the user saw. When
+/// the first choice was free, any other free provider of the kind follows,
+/// on whatever model it serves: a free tier that is out of quota answers
+/// from another free tier, not with an error. Money never enters silently
+/// — a free choice is never retried on a paid one — and a swap of model
+/// happens only between free text providers.
+pub fn fallbacks(peers: &[Peer], kind: JobKind, model: &str, first_peer_id: &str) -> Vec<Fallback> {
+    let first_price = peers
+        .iter()
+        .find(|p| p.id == first_peer_id)
+        .and_then(|p| p.models.iter().find(|m| m.kind == kind && serves(m, model)))
+        .map(|m| m.amount())
+        .unwrap_or(0.0);
+    let mut rng = rand::thread_rng();
+    let mut same: Vec<(f64, u32, Fallback)> = Vec::new();
+    let mut other_free: Vec<(u32, Fallback)> = Vec::new();
+    for peer in peers.iter().filter(|p| p.status == "online" && p.id != first_peer_id) {
+        for m in peer.models.iter().filter(|m| m.kind == kind) {
+            let price = m.amount();
+            let fallback = Fallback {
+                peer_id: peer.id.clone(),
+                peer_label: peer.label.clone(),
+                model: m.id.clone(),
+            };
+            if serves(m, model) {
+                if price <= first_price {
+                    same.push((price, rng.gen(), fallback));
+                }
+            } else if first_price <= 0.0 && price <= 0.0 && kind == JobKind::Llm {
+                other_free.push((rng.gen(), fallback));
+            }
+        }
+    }
+    same.sort_by(|a, b| {
+        a.0.partial_cmp(&b.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.1.cmp(&b.1))
+    });
+    other_free.sort_by_key(|f| f.0);
+    same.into_iter()
+        .map(|s| s.2)
+        .chain(other_free.into_iter().map(|f| f.1))
+        .collect()
+}
+
+/// The same loose match the job pipeline uses to price a request: a model
+/// asked for by a longer name still belongs to the provider listing the
+/// shorter one.
+fn serves(m: &rootmode_core::ModelDescriptor, model: &str) -> bool {
+    m.id == model || model.starts_with(&m.id)
 }
 
 #[cfg(test)]
@@ -377,5 +441,60 @@ mod tests {
     fn nothing_online_means_nothing_on_offer() {
         assert!(model_options(&[], JobKind::Llm).is_empty());
         assert!(provider_for(&[], JobKind::Llm, "llama").is_none());
+    }
+
+    fn labels(f: Vec<Fallback>) -> Vec<String> {
+        f.into_iter().map(|f| f.peer_label).collect()
+    }
+
+    #[test]
+    fn a_retry_never_costs_more_than_the_first_choice() {
+        let peers = vec![
+            peer("first", None, vec![model("llama", Some(1.0))]),
+            peer("dearer", None, vec![model("llama", Some(2.0))]),
+            peer("same", None, vec![model("llama", Some(1.0))]),
+            peer("cheaper", None, vec![model("llama", Some(0.5))]),
+            peer("other", None, vec![model("mistral", Some(0.1))]),
+        ];
+        assert_eq!(
+            labels(fallbacks(&peers, JobKind::Llm, "llama", "id-first")),
+            vec!["cheaper", "same"],
+            "same model, no dearer, cheapest first; a paid choice never changes model"
+        );
+    }
+
+    #[test]
+    fn a_free_choice_moves_to_another_free_model_but_never_to_a_paid_one() {
+        let peers = vec![
+            peer("first", None, vec![model("gemma", Some(0.0))]),
+            peer("paid-gemma", None, vec![model("gemma", Some(0.3))]),
+            peer("free-inkling", None, vec![model("inkling", None)]),
+            peer("paid-glm", None, vec![model("glm", Some(0.1))]),
+        ];
+        assert_eq!(
+            labels(fallbacks(&peers, JobKind::Llm, "gemma", "id-first")),
+            vec!["free-inkling"]
+        );
+    }
+
+    #[test]
+    fn a_free_twin_of_the_same_model_comes_before_other_free_models() {
+        let peers = vec![
+            peer("first", None, vec![model("gemma", None)]),
+            peer("free-inkling", None, vec![model("inkling", None)]),
+            peer("free-gemma", None, vec![model("gemma", None)]),
+        ];
+        assert_eq!(
+            labels(fallbacks(&peers, JobKind::Llm, "gemma", "id-first")),
+            vec!["free-gemma", "free-inkling"]
+        );
+    }
+
+    #[test]
+    fn offline_peers_and_the_first_choice_itself_are_not_fallbacks() {
+        let mut down = peer("down", None, vec![model("llama", Some(0.1))]);
+        down.status = "offline".into();
+        let peers = vec![peer("first", None, vec![model("llama", Some(1.0))]), down];
+        assert!(fallbacks(&peers, JobKind::Llm, "llama", "id-first").is_empty());
     }
 }

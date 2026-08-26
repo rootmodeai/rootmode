@@ -620,86 +620,170 @@ async fn submit(
         .get_peer(&choice.peer_id)?
         .ok_or_else(|| AppError::NotFound(format!("peer {}", choice.peer_id)))?;
 
-    // Ask for the model that was actually chosen, not the name the client
-    // sent — after a substitution those differ, and the worker would reject a
-    // model it has never heard of.
-    let mut params = request.params;
-    params.model_id = Some(served.clone());
+    // Who gets the request if this provider produces nothing: the same
+    // model no dearer, then — for a free choice — any other free provider.
+    let alternates = crate::routing::fallbacks(&peers, JobKind::Llm, &served, &peer.id);
+    let params = request.params;
 
-    // The gateway builds its own submission rather than going through
-    // `jobs::submit`, so it has to apply the same floor — sharing the function
-    // rather than the code path.
-    let payload = crate::jobs::with_workable_ceiling(JobPayload::Llm(params));
-    payload.validate()?;
-
-    let transport = crate::jobs::transport_for(state, &peer).await?;
-    let job_id = Uuid::new_v4();
-    let mut submit = JobSubmit::new(job_id, state.identity().peer_id(), payload.clone());
-    if let Some(price) = peer
-        .models
-        .iter()
-        .find(|m| m.id == served)
-        .and_then(|m| m.price.clone())
-        .filter(|p| p.amount > 0.0)
-    {
-        if let Ok(st) = crate::pot::status(state).await {
-            if let (Some(client), Some(_cfg)) = (st.client.as_deref(), crate::pot::load_chain_config(state)) {
-                submit.payer = Some(client.to_string());
-                let (bond, reserve) = crate::pot::issue_ticket(
-                    state,
-                    job_id,
-                    price,
-                    JobKind::Llm,
-                    &payload,
-                    client,
-                    &crate::pot::named_payout(peer.payout.as_deref())?,
-                    &peer.label,
-                )
-                .await?;
-                submit.bond = Some(bond);
-                submit.reserve = reserve;
-            }
-        }
-    }
-
-    let (worker_tx, mut worker_rx) = mpsc::unbounded_channel::<WorkerMessage>();
     let (client_tx, client_rx) = mpsc::unbounded_channel::<WorkerMessage>();
-    let (pay_tx, pay_rx) = mpsc::unbounded_channel::<ClientMessage>();
     let runner = {
-        let transport = transport.clone();
         let state = state.clone();
-        // An HTTP client has no way to press Stop, so nothing here ever
-        // notifies this — it exists only because `run_job` takes one.
-        let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+        let first = (peer, served.clone());
         tauri::async_runtime::spawn(async move {
-            let drive = tauri::async_runtime::spawn(async move {
-                transport
-                    .run_job(submit, worker_tx, stop, pay_rx)
-                    .await
-            });
-            while let Some(msg) = worker_rx.recv().await {
-                if let WorkerMessage::JobInvoice(inv) = &msg {
-                    match crate::pot::pay_invoice(&state, job_id, inv).await {
-                        Ok(pay) => {
-                            let _ = pay_tx.send(ClientMessage::JobPay(pay));
+            let mut tries = std::iter::once(first)
+                .chain(alternates.into_iter().filter_map(|f| {
+                    state
+                        .db
+                        .get_peer(&f.peer_id)
+                        .ok()
+                        .flatten()
+                        .map(|p| (p, f.model))
+                }))
+                .peekable();
+            let mut last = String::from("no provider could run this request");
+            while let Some((peer, model)) = tries.next() {
+                // Ask for the model that was actually chosen, not the name the
+                // client sent — after a substitution those differ, and the
+                // worker would reject a model it has never heard of.
+                let mut params = params.clone();
+                params.model_id = Some(model.clone());
+
+                // The gateway builds its own submission rather than going
+                // through `jobs::submit`, so it has to apply the same floor —
+                // sharing the function rather than the code path.
+                let payload = crate::jobs::with_workable_ceiling(JobPayload::Llm(params));
+                payload.validate()?;
+
+                let transport = match crate::jobs::transport_for(&state, &peer).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        last = e.to_string();
+                        continue;
+                    }
+                };
+                let job_id = Uuid::new_v4();
+                let mut submit = JobSubmit::new(job_id, state.identity().peer_id(), payload.clone());
+                if let Some(price) = peer
+                    .models
+                    .iter()
+                    .find(|m| m.id == model)
+                    .and_then(|m| m.price.clone())
+                    .filter(|p| p.amount > 0.0)
+                {
+                    if let Ok(st) = crate::pot::status(&state).await {
+                        if let (Some(client), Some(_cfg)) =
+                            (st.client.as_deref(), crate::pot::load_chain_config(&state))
+                        {
+                            submit.payer = Some(client.to_string());
+                            // A wallet that cannot lock funds is final: no
+                            // other provider fixes it.
+                            let (bond, reserve) = crate::pot::issue_ticket(
+                                &state,
+                                job_id,
+                                price,
+                                JobKind::Llm,
+                                &payload,
+                                client,
+                                &crate::pot::named_payout(peer.payout.as_deref())?,
+                                &peer.label,
+                            )
+                            .await?;
+                            submit.bond = Some(bond);
+                            submit.reserve = reserve;
                         }
-                        Err(e) => log::warn!("gateway pay: {e}"),
                     }
                 }
-                if client_tx.send(msg).is_err() {
-                    break;
+
+                let (worker_tx, mut worker_rx) = mpsc::unbounded_channel::<WorkerMessage>();
+                let (pay_tx, pay_rx) = mpsc::unbounded_channel::<ClientMessage>();
+                // An HTTP client has no way to press Stop, so nothing here
+                // ever notifies this — it exists only because `run_job`
+                // takes one.
+                let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+                let drive = {
+                    let transport = transport.clone();
+                    tauri::async_runtime::spawn(async move {
+                        transport.run_job(submit, worker_tx, stop, pay_rx).await
+                    })
+                };
+
+                // Whether anything reached the client. Before it has, a
+                // failure is this provider's, not the request's: it is
+                // held back, and the next provider gets the request.
+                let mut spoke = false;
+                let mut withheld: Option<(String, WorkerMessage)> = None;
+                while let Some(msg) = worker_rx.recv().await {
+                    if let WorkerMessage::JobInvoice(inv) = &msg {
+                        match crate::pot::pay_invoice(&state, job_id, inv).await {
+                            Ok(pay) => {
+                                let _ = pay_tx.send(ClientMessage::JobPay(pay));
+                            }
+                            Err(e) => log::warn!("gateway pay: {e}"),
+                        }
+                    }
+                    match &msg {
+                        WorkerMessage::JobDelta(d) if !d.is_empty() => spoke = true,
+                        WorkerMessage::JobStatus(s)
+                            if matches!(s.status, rootmode_core::JobStatus::Failed) && !spoke =>
+                        {
+                            let why = s
+                                .error
+                                .clone()
+                                .unwrap_or_else(|| "the provider failed without saying why".into());
+                            withheld = Some((why, msg));
+                            break;
+                        }
+                        WorkerMessage::JobResult(r)
+                            if !spoke
+                                && r.text.as_deref().unwrap_or("").trim().is_empty()
+                                && r.tool_calls.is_empty() =>
+                        {
+                            withheld = Some(("the provider returned no answer".into(), msg));
+                            break;
+                        }
+                        _ => {}
+                    }
+                    if client_tx.send(msg).is_err() {
+                        break;
+                    }
                 }
+                let out = if withheld.is_some() {
+                    drive.abort();
+                    Ok(())
+                } else {
+                    match drive.await {
+                        Ok(r) => r,
+                        Err(e) => Err(AppError::Net(format!("provider task failed: {e}"))),
+                    }
+                };
+                // The chat pipeline clears its lock in `settle_job`; the
+                // gateway has no settle step. A job the client paid needs
+                // nothing more; one that ended unbilled is recorded with its
+                // bond, so the settlement scan can show whether the worker
+                // kept the chunk.
+                crate::pot::abandon_job(&state, job_id);
+
+                let why = match (&withheld, &out) {
+                    (Some((why, _)), _) => why.clone(),
+                    (None, Err(e)) if !spoke => e.to_string(),
+                    (None, _) => return out,
+                };
+                if tries.peek().is_none() {
+                    // Nobody left: the failure reaches the client exactly as
+                    // it would have without a retry.
+                    if let Some((_, msg)) = withheld {
+                        let _ = client_tx.send(msg);
+                    }
+                    return out;
+                }
+                log::info!(
+                    "gateway: {} gave nothing ({why}); trying {} instead",
+                    peer.label,
+                    tries.peek().map(|(p, _)| p.label.as_str()).unwrap_or("?")
+                );
+                last = why;
             }
-            let out = match drive.await {
-                Ok(r) => r,
-                Err(e) => Err(AppError::Net(format!("provider task failed: {e}"))),
-            };
-            // The chat pipeline clears its lock in `settle_job`; the gateway
-            // has no settle step. A job the client paid needs nothing more;
-            // one that ended unbilled is recorded with its bond, so the
-            // settlement scan can show whether the worker kept the chunk.
-            crate::pot::abandon_job(&state, job_id);
-            out
+            Err(AppError::Net(last))
         })
     };
 
