@@ -1134,3 +1134,18 @@ button.wipe-all:disabled {
 .res { border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; font-size: 12px; background: var(--surface-2); color: var(--text-2); white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
 .res.media { padding: 4px; display: flex; flex-direction: column; gap: 4px; }
 .res.media img, .res.media video { display: block; width: 100%; border-radius: 5px; }
+
+.flows-sched { position: relative; }
+.flows-sched .btn.on { border-color: var(--accent); color: var(--accent); }
+.flows-sched-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 300px;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14); display: flex; flex-direction: column; gap: 8px; font-size: 12.5px;
+}
+.flows-sched-pop .row { display: flex; align-items: center; gap: 8px; }
+.flows-sched-pop .row span { min-width: 88px; color: var(--text-2); }
+.flows-sched-pop .row.toggle span { min-width: 0; }
+.flows-sched-pop input[type="time"], .flows-sched-pop input[type="datetime-local"] {
+  flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 12px;
+}
+.flows-sched-pop .note { font-size: 11.5px; color: var(--text-3); line-height: 1.4; }

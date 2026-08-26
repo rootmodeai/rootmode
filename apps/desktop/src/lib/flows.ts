@@ -41,6 +41,60 @@ export interface FlowEdge {
 export interface Flow {
   nodes: FlowNode[];
   edges: FlowEdge[];
+  /** When to run it by itself, while the app is open. */
+  schedule?: Schedule;
+}
+
+/**
+ * A run the app starts on its own. Only while the app is open — there is
+ * no daemon, and the wallet is on this machine — so a time that passes
+ * while it is closed is missed, not caught up.
+ */
+export interface Schedule {
+  enabled: boolean;
+  /** "once": at `at` (local ISO datetime). "daily": every day at `time` (HH:MM). */
+  mode: "once" | "daily";
+  at?: string;
+  time?: string;
+  /** Epoch millis of the last run this schedule started, so a minute is
+   * never run twice. */
+  lastRun?: number;
+}
+
+/** The next moment this schedule fires, or null when it never will. */
+export function nextRun(s: Schedule | undefined, now = Date.now()): Date | null {
+  if (!s || !s.enabled) return null;
+  if (s.mode === "once") {
+    if (!s.at) return null;
+    const t = new Date(s.at);
+    return Number.isNaN(t.getTime()) || t.getTime() <= now ? null : t;
+  }
+  if (!s.time) return null;
+  const [h, m] = s.time.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  const t = new Date(now);
+  t.setSeconds(0, 0);
+  t.setHours(h, m, 0, 0);
+  if (t.getTime() <= now) t.setDate(t.getDate() + 1);
+  return t;
+}
+
+/** True when the schedule is due now and has not fired for this moment. */
+export function due(s: Schedule | undefined, now = Date.now()): boolean {
+  if (!s || !s.enabled) return false;
+  const minute = 60_000;
+  if (s.mode === "once") {
+    if (!s.at) return false;
+    const t = new Date(s.at).getTime();
+    return Number.isFinite(t) && now >= t && now < t + 2 * minute && (s.lastRun ?? 0) < t;
+  }
+  if (!s.time) return false;
+  const [h, m] = s.time.split(":").map(Number);
+  const d = new Date(now);
+  if (d.getHours() !== h || d.getMinutes() !== m) return false;
+  const start = new Date(now);
+  start.setSeconds(0, 0);
+  return (s.lastRun ?? 0) < start.getTime();
 }
 
 /** Port names and what they carry, per node type. */

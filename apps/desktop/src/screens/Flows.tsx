@@ -11,6 +11,9 @@ import {
   starterFlow,
   Stopped,
   offerFor,
+  nextRun,
+  due,
+  type Schedule,
   type Flow,
   type FlowNode,
   type NodeOutput,
@@ -68,6 +71,7 @@ export function Flows() {
   const [running, setRunning] = useState(false);
   const [temp, setTemp] = useState<Temp | null>(null);
   const [paths, setPaths] = useState<{ d: string; t: PortType; i: number; live: boolean }[]>([]);
+  const [showSchedule, setShowSchedule] = useState(false);
   const handleRef = useRef<RunHandle | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const worldRef = useRef<HTMLDivElement | null>(null);
@@ -341,7 +345,34 @@ export function Flows() {
     handleRef.current?.stop();
   }
 
+  // The timer. Checked every twenty seconds; a due minute runs the flow
+  // once, and a once-only schedule switches itself off afterwards.
+  const runRef = useRef<() => Promise<void>>(async () => undefined);
+  runRef.current = run;
+  useEffect(() => {
+    const tick = () => {
+      const f = flowRef.current;
+      if (!f.schedule || running || !due(f.schedule)) return;
+      const now = Date.now();
+      setFlow((prev) => ({
+        ...prev,
+        schedule: prev.schedule
+          ? { ...prev.schedule, lastRun: now, enabled: prev.schedule.mode === "daily" }
+          : prev.schedule,
+      }));
+      setStatus("Started by the timer");
+      void runRef.current();
+    };
+    const t = setInterval(tick, 20_000);
+    tick();
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+
   const est = useMemo(() => estimate(flow, offers), [flow, offers]);
+  const next = nextRun(flow.schedule);
+  const setSchedule = (patch: Partial<Schedule>) =>
+    setFlow((f) => ({ ...f, schedule: { enabled: false, mode: "daily", ...(f.schedule ?? {}), ...patch } }));
   const nothingOnOffer = KINDS.every((k) => offers[k].length === 0);
 
   return (
@@ -407,6 +438,61 @@ export function Flows() {
           </span>
           <span className="sp" />
           <span className="hint">{status}</span>
+          <span className="flows-sched">
+            <button
+              className={`btn sm${flow.schedule?.enabled ? " on" : ""}`}
+              onClick={() => setShowSchedule((v) => !v)}
+              title="Run this flow by itself at a set time, while the app is open"
+            >
+              {next ? `Timer · ${fmtNext(next)}` : "Timer"}
+            </button>
+            {showSchedule && (
+              <div className="flows-sched-pop">
+                <label className="row">
+                  <input
+                    type="radio"
+                    name="sched-mode"
+                    checked={(flow.schedule?.mode ?? "daily") === "daily"}
+                    onChange={() => setSchedule({ mode: "daily" })}
+                  />
+                  <span>Every day at</span>
+                  <input
+                    type="time"
+                    value={flow.schedule?.time ?? "09:00"}
+                    onChange={(e) => setSchedule({ mode: "daily", time: e.target.value })}
+                  />
+                </label>
+                <label className="row">
+                  <input
+                    type="radio"
+                    name="sched-mode"
+                    checked={flow.schedule?.mode === "once"}
+                    onChange={() => setSchedule({ mode: "once" })}
+                  />
+                  <span>Once at</span>
+                  <input
+                    type="datetime-local"
+                    value={flow.schedule?.at ?? ""}
+                    onChange={(e) => setSchedule({ mode: "once", at: e.target.value })}
+                  />
+                </label>
+                <label className="row toggle">
+                  <input
+                    type="checkbox"
+                    checked={!!flow.schedule?.enabled}
+                    onChange={(e) => setSchedule({ enabled: e.target.checked })}
+                  />
+                  <span>{flow.schedule?.enabled ? "On" : "Off"}</span>
+                </label>
+                <div className="note">
+                  {next
+                    ? `Next run ${next.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}.`
+                    : "Set a time and switch it on."}{" "}
+                  Runs only while rootmode is open; each run locks and pays like a run you start yourself.
+                </div>
+              </div>
+            )}
+          </span>
           <button className="btn sm" onClick={fit}>Fit</button>
           <button
             className="btn sm"
@@ -472,6 +558,17 @@ export function Flows() {
       </section>
     </div>
   );
+}
+
+function fmtNext(d: Date): string {
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (sameDay) return time;
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (d.toDateString() === tomorrow.toDateString()) return `tomorrow ${time}`;
+  return d.toLocaleDateString([], { day: "numeric", month: "short" }) + " " + time;
 }
 
 function Node({
