@@ -241,7 +241,7 @@
           <path d="M5 12.5l4.5 4.5L19 7"/>
         </svg>
       </div>
-      <h2>Deposited</h2>
+      <h2 id="doneTitle">Deposited</h2>
       <p id="doneHint">Your pot is funded.</p>
       <div class="actions">
         <button id="again">Deposit again</button>
@@ -545,7 +545,8 @@ function showStage(active, steps) {
   $("track").className = "track " + (one ? "one" : active >= 2 ? "s2" : "s1");
 }
 
-function showDone() {
+function showDone(title) {
+  $("doneTitle").textContent = title || "Deposited";
   $("home").hidden = true;
   $("stage").hidden = true;
   $("done").hidden = false;
@@ -752,13 +753,25 @@ $("withdraw").onclick = async () => {
   try {
     await switchIfNeeded();
     log("");
+    // withdrawAll() on an account with nothing unlocked is a real
+    // transaction that moves nothing: gas spent, wallet unchanged, and the
+    // page looking as if it did nothing. Read first, and say which wallet
+    // was checked — the money is often in the other one.
+    const [from] = await eth("eth_requestAccounts");
+    const acc = await eth("eth_call", [{ to: pot, data: "0x5e5c06e2" + addr(from) }, "latest"]);
+    const free = toBig(String(acc || "").replace(/^0x/, "").slice(0, 64));
+    if (free === 0n) {
+      throw new Error("Nothing to withdraw: " + from + " has no unlocked funds in this pot. " +
+        "If you deposited from another wallet, switch to it and try again.");
+    }
     showStage(1, [{ title: "Withdraw", body: "Confirm in your wallet. Only unlocked funds come back." }]);
     await send(pot, "0x853828b6");
     await refreshBal();
-    log("Unlocked funds withdrawn. Reserved funds stay locked until the worker settles or the channel is closed.", "ok");
+    $("doneHint").textContent = (Number(free) / 1e6).toFixed(2) + " USDC is back in your wallet. " +
+      "Reserved funds stay locked until the worker settles or the channel is closed.";
+    showDone("Withdrawn");
   } catch (e) {
     log(e.message || String(e), "bad");
-  } finally {
     showForm();
   }
 };
