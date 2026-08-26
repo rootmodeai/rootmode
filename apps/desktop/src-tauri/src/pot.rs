@@ -134,6 +134,11 @@ struct LatestTicket {
     sig: Vec<u8>,
     /// What the chain has already paid this worker from this client.
     on_chain_paid: u64,
+    /// The pot the ticket was signed against. A cumulative only means
+    /// anything on that contract: carried onto another pot it sets a floor
+    /// no fresh channel can reach, and every job is refused for a lock the
+    /// size of the old history.
+    pot: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -141,6 +146,8 @@ struct DiskTicket {
     ticket: SpendTicket,
     sig: String,
     on_chain_paid: u64,
+    #[serde(default)]
+    pot: String,
 }
 
 fn jobs() -> &'static Mutex<HashMap<Uuid, PendingJob>> {
@@ -186,6 +193,7 @@ fn persist(app_data: &Path) {
             ticket: t.ticket.clone(),
             sig: hex::encode(&t.sig),
             on_chain_paid: t.on_chain_paid,
+            pot: t.pot.clone(),
         })
         .collect();
     if let Ok(bytes) = serde_json::to_vec(&snapshot) {
@@ -200,6 +208,15 @@ fn restore(app_data: &Path) {
     let Ok(list) = serde_json::from_slice::<Vec<DiskTicket>>(&raw) else {
         return;
     };
+    // Tickets signed for another pot are left behind: they cannot settle
+    // here, and their cumulative is not a floor for this one. Rows from
+    // before the pot was recorded are trusted only while their ticket can
+    // still settle — past its deadline it is history on some pot or other.
+    let pot = load_chain_config_at(app_data).map(|c| c.pot).unwrap_or_default();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let mut g = latest().lock().unwrap_or_else(|e| e.into_inner());
     for row in list {
         let Ok(sig) = hex::decode(row.sig.trim_start_matches("0x")) else {
@@ -208,12 +225,20 @@ fn restore(app_data: &Path) {
         if sig.len() != 65 {
             continue;
         }
+        if row.pot.is_empty() {
+            if row.ticket.deadline < now {
+                continue;
+            }
+        } else if !row.pot.eq_ignore_ascii_case(&pot) {
+            continue;
+        }
         g.insert(
             worker_key(&row.ticket.worker_payout),
             LatestTicket {
                 ticket: row.ticket,
                 sig,
                 on_chain_paid: row.on_chain_paid,
+                pot: if row.pot.is_empty() { pot.clone() } else { row.pot },
             },
         );
     }
@@ -651,7 +676,7 @@ pub async fn issue_ticket(
     .await?;
 
     let _gate = gate().lock().await;
-    let cached = cached_cumulative(worker_payout);
+    let cached = cached_cumulative(&cfg, worker_payout);
     let authorised = cached.max(ch.paid.max(ch.earned));
     let cumulative = authorised.saturating_add(need);
     let signed = sign_latest(&state.app_data, &cfg, client, worker_payout, cumulative)?;
@@ -963,6 +988,7 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
                     ticket: signed.0.clone(),
                     sig: signed.1.clone(),
                     on_chain_paid: on_chain,
+                    pot: cfg.pot.clone(),
                 },
             );
         persist(&state.app_data);
@@ -1115,6 +1141,7 @@ pub async fn settle_job(
                 ticket: signed.0,
                 sig: signed.1,
                 on_chain_paid: on_chain,
+                pot: cfg.pot.clone(),
             },
         );
     persist(&state.app_data);
@@ -1165,11 +1192,14 @@ fn record_job_cost(
     }
 }
 
-fn cached_cumulative(worker: &str) -> u64 {
+/// The highest cumulative this app has signed for `worker` on the configured
+/// pot. A ticket cached for another pot counts for nothing here.
+fn cached_cumulative(cfg: &ChainConfig, worker: &str) -> u64 {
     latest()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(&worker_key(worker))
+        .filter(|t| t.pot.eq_ignore_ascii_case(&cfg.pot))
         .map(|t| t.ticket.cumulative)
         .unwrap_or(0)
 }
@@ -1197,7 +1227,7 @@ async fn channel_with_retry(cfg: &ChainConfig, client: &str, worker: &str) -> Re
 }
 
 async fn authorised_so_far(cfg: &ChainConfig, client: &str, worker: &str) -> Result<(u64, u64)> {
-    let cached = cached_cumulative(worker);
+    let cached = cached_cumulative(cfg, worker);
     let ch = channel_with_retry(cfg, client, worker).await?;
     let on_chain = ch.paid.max(ch.earned);
     Ok((cached.max(on_chain), on_chain))
