@@ -65,9 +65,10 @@ struct Channel:
     # Highest spend ticket recorded. Close may only return reserved - earned.
     # Billed work stays the worker's even if they have not collected yet.
     earned: uint256
-    # Per-job and per-day caps, snapshotted at the first reserve. Settlement is
-    # checked against these, not the account's live limits, so lowering the
-    # limits after work is delivered cannot block settle and reclaim the lock.
+    # Per-job and per-day caps. Settlement is checked against these, not the
+    # account's live limits, so lowering the limits after work is delivered
+    # cannot block settle and reclaim the lock. They rise to the account's on
+    # any reserve, and start afresh from it after a close (see `reserve`).
     # Appended last so the on-chain word layout the worker reads is unchanged.
     maxPerJob: uint256
     maxPerDay: uint256

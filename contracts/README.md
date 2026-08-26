@@ -10,8 +10,10 @@ key** signs — a forked client cannot skip that by editing JavaScript. The
 **worker** submits the `settle` transaction (and pays its gas) with its own
 Ethereum key, so it does not need the client online to *collect* — but the
 amount is still authorised by the client's app-key ticket, which the contract
-verifies. The caps a job is checked against are frozen at `reserve`, so
-lowering them afterwards cannot block a settle for work already delivered.
+verifies. The caps a job is checked against live on the channel, not the account:
+lowering the account's limits cannot block a settle for work already
+delivered. They rise to the account's on any `reserve`, and a `close` lets
+them start afresh from the account, lower included.
 
 ```
 deposit → reserve (lock) → stream against prepaid slices → capture actual
