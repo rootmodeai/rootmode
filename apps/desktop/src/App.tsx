@@ -11,6 +11,7 @@ import { Wallet } from "./screens/Wallet";
 import type { NetworkStatus, UpdateInfo } from "./lib/types";
 import { Glider } from "./components/Glider";
 import { ChatIcon, ImagesIcon, VideoIcon, ConnectIcon, WalletIcon, SettingsIcon } from "./components/NavIcons";
+import { NavModels } from "./components/NavModels";
 
 export type Screen = "chat" | "image" | "video" | "network" | "connect" | "wallet" | "settings";
 
@@ -49,6 +50,9 @@ function Gate() {
 
 function Shell() {
   const [screen, setScreen] = useState<Screen>("chat");
+  // The section whose models are unfolded in the navigation. Follows the
+  // screen you open; clicking the open section again folds them away.
+  const [unfolded, setUnfolded] = useState<Screen | null>("chat");
   const { peers, bootError } = useStore();
   const [status, setStatus] = useState<NetworkStatus | null>(null);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
@@ -94,18 +98,34 @@ function Shell() {
         </div>
 
         <nav className="nav">
-          {NAV.map((item) => (
-            <button
-              key={item.key}
-              aria-current={screen === item.key}
-              onClick={() => setScreen(item.key)}
-            >
-              <span className="icon">
-                <item.icon />
-              </span>
-              {item.label}
-            </button>
-          ))}
+          {NAV.map((item) => {
+            const work = item.key === "chat" || item.key === "image" || item.key === "video";
+            const open = work && unfolded === item.key;
+            return (
+              <div key={item.key} className={`nav-section${open ? " open" : ""}`}>
+                <button
+                  aria-current={screen === item.key}
+                  aria-expanded={work ? open : undefined}
+                  onClick={() => {
+                    setScreen(item.key);
+                    if (work) setUnfolded(open && screen === item.key ? null : item.key);
+                  }}
+                >
+                  <span className="icon">
+                    <item.icon />
+                  </span>
+                  {item.label}
+                  {work && <span className="nav-caret">{open ? "▾" : "▸"}</span>}
+                </button>
+                {open && (
+                  <NavModels
+                    kind={item.key === "chat" ? "llm" : item.key === "image" ? "image" : "video"}
+                    onPick={() => setScreen(item.key)}
+                  />
+                )}
+              </div>
+            );
+          })}
         </nav>
 
         <div className="rail-foot">

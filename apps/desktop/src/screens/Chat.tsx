@@ -14,7 +14,7 @@ import type {
 import { Glider } from "../components/Glider";
 import { DeleteAllChats } from "../components/DeleteAllChats";
 import { MarkdownBody } from "../components/Markdown";
-import { ModelTiles } from "../components/ModelTiles";
+import { useChoice, usePick } from "../lib/choice";
 import { describe, targetFor } from "../lib/models";
 import {
   FundingHint,
@@ -90,7 +90,18 @@ export function Chat() {
   // fastest. Refreshed as providers come and go.
   const [providers, setProviders] = useState<ProviderOption[]>([]);
   /// null means "let rootmode choose", which is the default and the right one.
-  const [chosen, setChosen] = useState<ProviderOption | null>(null);
+  const [chosen] = useChoice("llm");
+  const picked = usePick("llm");
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Chosen by hand: remembered for next time, and the cursor goes where
+  // the next thing happens.
+  useEffect(() => {
+    if (chosen) void setSetting("default_llm_model", chosen.model);
+  }, [chosen, setSetting]);
+  useEffect(() => {
+    if (picked) draftRef.current?.focus();
+  }, [picked]);
 
   useEffect(() => {
     let cancelled = false;
@@ -551,6 +562,7 @@ export function Chat() {
             )}
             <div className="composer-box">
               <textarea
+                ref={draftRef}
                 rows={1}
                 value={draft}
                 placeholder={
@@ -600,15 +612,6 @@ export function Chat() {
           </div>
         </div>
       </section>
-      <ModelTiles
-        kind="llm"
-        rows={providers}
-        value={chosen}
-        onChange={(choice) => {
-          setChosen(choice);
-          if (choice) void setSetting("default_llm_model", choice.model);
-        }}
-      />
     </div>
   );
 }

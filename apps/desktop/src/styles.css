@@ -265,8 +265,7 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
 
 /* ----------------------------------------------------------------- chat */
 
-.chat { display: grid; grid-template-columns: 240px 1fr 252px; flex: 1; height: 100%; min-height: 0; }
-@media (max-width: 960px) { .chat { grid-template-columns: 200px 1fr 220px; } }
+.chat { display: grid; grid-template-columns: 240px 1fr; flex: 1; height: 100%; min-height: 0; }
 
 .chat-list {
   border-right: 1px solid var(--border);
@@ -840,66 +839,55 @@ td { padding: 10px 10px 10px 0; border-bottom: 1px solid var(--border); vertical
    than a system dropdown wedged under the composer. Quiet until hovered:
    most of the time the default is right and this should not compete with the
    thing you are writing. */
-/* ---- the model rail: tiles beside the conversation ----
-   The one choice that changes what comes back is always on screen, one
-   click each. The name people use first; maker and price quieter; the
-   chosen tile in the accent so it can be found without reading. */
-.model-rail {
-  display: flex; flex-direction: column; min-height: 0; height: 100%;
-  border-left: 1px solid var(--border); background: var(--bg);
+/* ---- models nested in the navigation ----
+   Open Chat, Images or Videos and its models unfold beneath it: the name
+   people use, the price at the right, the chosen one in the accent. Small
+   and indented, so the section stays the thing you clicked. */
+.nav-section { display: flex; flex-direction: column; }
+.nav-caret { margin-left: auto; font-size: 9px; opacity: 0.55; }
+.nav-models { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 6px 12px; }
+.nav-models-search {
+  margin: 2px 0 4px 10px; padding: 5px 8px; box-sizing: border-box; width: calc(100% - 10px);
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
+  font: inherit; font-size: 12px; color: var(--text); outline: none;
 }
-.model-rail-head { padding: 12px 12px 8px; flex: none; display: flex; flex-direction: column; gap: 8px; }
-.model-rail-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
-.model-rail-search {
-  width: 100%; box-sizing: border-box; padding: 7px 10px;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
-  font: inherit; font-size: 12.5px; color: var(--text); outline: none;
+.nav-models-search:focus-visible { border-color: var(--accent-border); }
+.nav-models-search::placeholder { color: var(--text-3); }
+.nav-models-empty { padding: 6px 10px; font-size: 12px; color: var(--text-3); }
+.nav-model-wrap { display: flex; flex-direction: column; }
+.nav .nav-model {
+  display: flex; align-items: baseline; gap: 8px; justify-content: space-between;
+  width: 100%; padding: 5px 8px 5px 10px; border-radius: 7px;
+  border: 0; border-left: 2px solid var(--border-strong); background: none;
+  font: inherit; font-size: 12.5px; color: var(--text-2); cursor: pointer; text-align: left;
+  box-shadow: none; font-weight: 400;
 }
-.model-rail-search:focus-visible { border-color: var(--accent-border); }
-.model-rail-search::placeholder { color: var(--text-3); }
-.model-rail-tiles { overflow-y: auto; padding: 4px 12px 12px; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
-.model-rail-empty { padding: 12px 4px; font-size: 12.5px; color: var(--text-3); }
-.model-rail-foot { padding: 8px 12px 10px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-3); flex: none; }
-
-.model-tile-wrap { display: flex; flex-direction: column; gap: 0; }
-.model-tile {
-  display: grid; grid-template-columns: 1fr auto; grid-template-areas: "n n" "d s";
-  align-items: baseline; column-gap: 8px; row-gap: 2px;
-  width: 100%; text-align: left;
-  padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px;
-  background: var(--surface); cursor: pointer; font: inherit;
-  transition: border-color 0.12s ease, background 0.12s ease;
+.nav .nav-model:hover { background: var(--surface-3); color: var(--text); }
+.nav .nav-model.active { border-left-color: var(--accent); background: var(--surface); color: var(--text); font-weight: 550; }
+.nav .nav-model.active.stale { border-left-color: var(--red); }
+.nav .nav-model.auto .s { color: var(--text-3); }
+.nav-model .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-model .s { flex: none; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.nav-model .s.free { color: var(--accent); font-weight: 600; }
+.nav-model-more { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 4px 12px; }
+.nav-model-stale { font-size: 11px; color: var(--red); padding: 2px 6px; }
+.nav .nav-model-link {
+  width: auto; padding: 3px 6px; border: 0; border-radius: 6px; background: none; box-shadow: none;
+  font: inherit; font-size: 11.5px; color: var(--text-3); cursor: pointer; text-align: left; font-weight: 400;
 }
-.model-tile:hover { border-color: var(--border-strong); }
-.model-tile.active { border-color: var(--accent); background: var(--accent-soft); }
-.model-tile.active.stale { border-color: var(--red); }
-.model-tile.auto { grid-template-areas: "n n" "d d"; margin-bottom: 4px; }
-.model-tile .n { grid-area: n; font-size: 13.5px; font-weight: 600; color: var(--text);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-tile .d { grid-area: d; font-size: 11.5px; color: var(--text-3);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-tile .s { grid-area: s; font-size: 11.5px; color: var(--text-2); white-space: nowrap;
-  font-variant-numeric: tabular-nums; }
-.model-tile .s.free { color: var(--accent); font-weight: 600; }
-
-.model-tile-more { display: flex; flex-direction: column; gap: 2px; padding: 4px 6px 2px; }
-.model-tile-stale { font-size: 11.5px; color: var(--red); padding: 2px 4px; }
-.model-tile-link {
-  text-align: left; padding: 3px 4px; border: 0; background: none; cursor: pointer;
-  font: inherit; font-size: 11.5px; color: var(--text-2); border-radius: 6px;
-}
-.model-tile-link:hover { color: var(--text); background: var(--surface-2); }
-.model-tile-link.quiet { cursor: default; color: var(--text-3); }
-.model-tile-link.quiet:hover { background: none; color: var(--text-3); }
-.model-offer {
+.nav .nav-model-link:hover { color: var(--text); background: var(--surface-3); }
+.nav .nav-model-link.quiet { cursor: default; }
+.nav .nav-model-link.quiet:hover { background: none; color: var(--text-3); }
+.nav .nav-offer {
   display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
-  width: 100%; text-align: left; padding: 5px 8px; border: 0; border-radius: 6px;
-  background: none; cursor: pointer; font: inherit;
+  width: 100%; padding: 4px 6px; border: 0; border-radius: 6px; background: none; box-shadow: none;
+  font: inherit; font-size: 12px; color: var(--text-2); cursor: pointer; text-align: left; font-weight: 400;
 }
-.model-offer:hover { background: var(--surface-2); }
-.model-offer.active { background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent-border); }
-.model-offer .p { font-size: 12px; color: var(--text); }
-.model-offer .s { font-size: 11px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.nav .nav-offer:hover { background: var(--surface-3); color: var(--text); }
+.nav .nav-offer.active { color: var(--text); box-shadow: inset 0 0 0 1px var(--accent-border); }
+.nav-offer .s { font-size: 11px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.rail { overflow-y: auto; }
 
 
 /* Used by the picture delete affordance, which borrows the copy-text style. */

@@ -5,7 +5,7 @@ import { useEvent } from "../lib/useEvent";
 import type { Conversation, ImageParams, JobPayload, Message, ProviderOption } from "../lib/types";
 import { Glider } from "../components/Glider";
 import { DeleteAllChats } from "../components/DeleteAllChats";
-import { ModelTiles } from "../components/ModelTiles";
+import { useChoice, usePick } from "../lib/choice";
 import { describe, targetFor } from "../lib/models";
 import {
   FundingHint,
@@ -52,10 +52,13 @@ export function Create({ kind }: { kind: "image" | "video" }) {
 
   const [offers, setOffers] = useState<ProviderOption[]>([]);
   /// null means "let rootmode choose" — cheapest, then fastest.
-  const [chosen, setChosen] = useState<ProviderOption | null>(null);
+  const [chosen] = useChoice(kind);
+  const picked = usePick(kind);
+  useEffect(() => {
+    if (picked) draftRef.current?.focus();
+  }, [picked]);
 
   useEffect(() => {
-    setChosen(null);
     const load = () =>
       void api
         .availableProviders(kind)
@@ -307,7 +310,6 @@ export function Create({ kind }: { kind: "image" | "video" }) {
               setMessages([]);
               setError(null);
               setFunding(null);
-              setChosen(null);
             }}
           >
             {kind === "video" ? "+ New video" : "+ New image"}
@@ -369,7 +371,6 @@ export function Create({ kind }: { kind: "image" | "video" }) {
             setMessages([]);
             setError(null);
             setFunding(null);
-            setChosen(null);
             void loadChats();
           }}
         />
@@ -491,7 +492,6 @@ export function Create({ kind }: { kind: "image" | "video" }) {
           </div>
         </div>
       </section>
-      <ModelTiles kind={kind} rows={offers} value={chosen} onChange={setChosen} />
     </div>
   );
 }
