@@ -712,15 +712,21 @@ pub async fn issue_ticket(
     ))
 }
 
+/// What this job can cost at most, which is what its bond has to cover.
+///
+/// For text that is the prompt at the input rate plus `max_tokens` at the
+/// output rate — the way the bill is computed, and the ceiling the worker
+/// clamps the answer to. It used to be rounded up to whole million-token
+/// slices at the dearest rate: on a $15-per-million model a 16k-token reply
+/// bonded $17, the cap clipped that to $10, and the reserve's four jobs of
+/// headroom locked $40 for a two-cent answer.
 fn job_lock_micros(price: &Price, kind: JobKind, payload: &JobPayload) -> Micros {
     match payload {
         JobPayload::Llm(params) => {
             let prompt = TokenUsage::measure(params, None, None, &[]).prompt;
-            let tokens = prompt.saturating_add(params.max_tokens as u64);
-            let chunks = tokens
-                .div_ceil(rootmode_core::TOKEN_CHUNK)
-                .max(1);
-            chunks.saturating_mul(price.chunk_micros()).max(1)
+            price
+                .charge_llm_micros(prompt, params.max_tokens as u64, 0)
+                .max(1)
         }
         _ => lock_micros(price, kind, payload).max(1),
     }
@@ -1950,4 +1956,33 @@ async fn rpc_once(url: &str, method: &str, params: serde_json::Value) -> Result<
         return Err(AppError::Net(err.to_string()));
     }
     Ok(v.get("result").cloned().unwrap_or(serde_json::Value::Null))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_text_job_bonds_what_its_answer_can_cost_not_a_million_token_slice() {
+        // kimi-k3 as the fleet lists it: $3/M in, $15/M out, marked up 15%.
+        let price = Price {
+            amount: 17.25,
+            input: Some(3.45),
+            output: Some(17.25),
+            ..Price::default()
+        };
+        let payload: JobPayload = serde_json::from_value(serde_json::json!({
+            "kind": "llm",
+            "model_id": "kimi-k3",
+            "messages": [{"role": "user", "content": "what is a peer?"}],
+            "max_tokens": 16384,
+            "temperature": 0.7
+        }))
+        .unwrap();
+        let lock = job_lock_micros(&price, JobKind::Llm, &payload);
+        // 16,384 × $17.25/M = $0.283 for the answer, plus a few tokens of prompt.
+        assert!(lock > 280_000 && lock < 320_000, "lock was ${:.3}", lock as f64 / 1e6);
+        // Not the $17.25 a whole million-token slice at the top rate would be.
+        assert!(lock < price.chunk_micros() / 50);
+    }
 }
