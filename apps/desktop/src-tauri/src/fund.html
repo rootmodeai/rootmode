@@ -634,10 +634,21 @@ async function refreshBal() {
   if (pot && worker) {
     const acc = await eth("eth_call", [{ to: pot, data: "0x5e5c06e2" + addr(from) }, "latest"]);
     const lock = await eth("eth_call", [{ to: pot, data: "0xdb20266f" + addr(from) + addr(worker) }, "latest"]);
-    const free = Number(toBig(String(acc || "").replace(/^0x/, "").slice(0, 64))) / 1e6;
+    const words = String(acc || "").replace(/^0x/, "");
+    const free = Number(toBig(words.slice(0, 64))) / 1e6;
     const locked = Number(toBig(lock)) / 1e6;
     $("balhint").textContent = `wallet ${n.toFixed(2)} · pot free ${free.toFixed(2)} · locked ${locked.toFixed(2)}`;
+    // The limits fields start at a default, and "Save limits" writes both.
+    // Filled with what the account has, a person raising one cap does not
+    // quietly lower the other back to the default.
+    const maxJob = Number(toBig(words.slice(64, 128))) / 1e6;
+    const maxDay = Number(toBig(words.slice(128, 192))) / 1e6;
+    if (maxJob > 0 && !$("maxJob").dataset.touched) $("maxJob").value = String(maxJob);
+    if (maxDay > 0 && !$("maxDay").dataset.touched) $("maxDay").value = String(maxDay);
   }
+}
+for (const id of ["maxJob", "maxDay"]) {
+  $(id).addEventListener("input", () => { $(id).dataset.touched = "1"; });
 }
 
 const depositStep = [
