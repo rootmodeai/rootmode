@@ -999,7 +999,7 @@
       '<div class="tile"><p class="k">App installs</p><p class="v">' + full(installs.total || 0) +
         '</p><p class="n">' + full(usersToday) + " active today" + (usersPrev ? " · " + delta(usersToday, usersPrev) : "") + "</p></div>",
       '<div class="tile"><p class="k">Downloads</p><p class="v">' + full(gh.total || dls.total || 0) +
-        '</p><p class="n">' + (gh.total ? "real downloads via GitHub · " + full(dls.total || 0) + " from the site button" : "from the site button") + "</p></div>",
+        '</p><p class="n">GitHub ' + full(gh.total || 0) + " / Site " + full(dls.total || 0) + "</p></div>",
     ].join("");
   }
 
