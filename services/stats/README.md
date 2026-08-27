@@ -18,6 +18,8 @@ a full member of the network. It exists so the explorer can show a number.
 | What a worker charged | Who asked (client peer ids) |
 | A worker's label, models, capabilities | Conversations, of any kind |
 | A country, from the connection or the operator | The address itself |
+| Installs: a random id the desktop made up, its version and OS, once a day with its update check (off in Settings) | What any install did |
+| Downloads: which installer the Download button sent a visitor to | Who the visitor was |
 
 The address a report arrives from is resolved to a country and dropped. If
 `ROOTMODE_IP_SALT` is set, a salted one-way hash is kept so repeat reports can
@@ -39,6 +41,8 @@ The container ships the site as well as the API, so a single VPS serves both:
 | `/report` | workers post here (`/v1/report` is the same handler) |
 | `/stats.json` | the explorer reads here (`/v1/stats.json` likewise) |
 | `/healthz` | liveness |
+| `/download`, `/download/<os>` | redirect to the installer, and one download counted |
+| `/version` | the newest release; an install that identifies itself in headers is counted |
 
 Because the page and its numbers share an origin, the explorer's fetch is not
 a cross-origin request at all — no CORS to configure, no second host, no second

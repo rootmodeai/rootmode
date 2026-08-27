@@ -110,3 +110,46 @@ def latest_version(repo: str | None = None) -> dict | None:
     body = {"version": ver, "tag": tag, "url": "https://rootmode.ai/download"}
     _version_cache = (now, body)
     return body
+
+
+_COUNTS_TTL = 600
+_counts_cache: tuple[float, list[tuple[str, str, int]]] | None = None
+
+
+def release_counts(repo: str | None = None) -> list[tuple[str, str, int]] | None:
+    """(tag, asset, download_count) for every asset of the last releases.
+
+    GitHub's own counter: every fetch of the file, from the site's redirect
+    or anywhere else. None if GitHub will not say.
+    """
+    global _counts_cache
+    import json
+    import time
+    import urllib.error
+    import urllib.request
+
+    now = time.time()
+    if _counts_cache and now - _counts_cache[0] < _COUNTS_TTL:
+        return _counts_cache[1]
+    name = _repo(repo)
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{name}/releases?per_page=30",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "rootmode"},
+    )
+    token = os.environ.get("ROOTMODE_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.load(resp)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        return None
+    rows: list[tuple[str, str, int]] = []
+    for rel in data if isinstance(data, list) else []:
+        tag = str(rel.get("tag_name") or "").strip()
+        for asset in rel.get("assets") or []:
+            name_ = str(asset.get("name") or "")
+            if tag and name_:
+                rows.append((tag, name_, int(asset.get("download_count") or 0)))
+    _counts_cache = (now, rows)
+    return rows

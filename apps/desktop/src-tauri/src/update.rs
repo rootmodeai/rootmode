@@ -10,6 +10,17 @@ const GITHUB: &str = "https://api.github.com/repos/rootmodeai/rootmode/releases/
 const DOWNLOAD: &str = "https://rootmode.ai/download";
 pub const SETTING_SKIPPED: &str = "skipped_update";
 
+/// What this install says about itself when it asks for the newest version,
+/// so installs can be counted: a random id it made up, and its platform.
+/// Sent as headers, never in the URL, so it lands in no access log. Nothing
+/// about what the app was used for is ever part of it.
+#[derive(Debug, Clone)]
+pub struct Hello {
+    pub install: String,
+    pub os: String,
+    pub arch: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateInfo {
     pub current: String,
@@ -62,14 +73,22 @@ fn tag_to_version(body: &VersionBody) -> Option<String> {
     }
 }
 
-async fn fetch_json(url: &str) -> Result<VersionBody> {
-    let text = reqwest::Client::builder()
+async fn fetch_json(url: &str, hello: Option<&Hello>) -> Result<VersionBody> {
+    let mut req = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .build()
         .map_err(|e| AppError::Net(e.to_string()))?
         .get(url)
         .header("User-Agent", "rootmode-desktop")
-        .header("Accept", "application/json")
+        .header("Accept", "application/json");
+    if let Some(h) = hello {
+        req = req
+            .header("X-Rootmode-Install", h.install.as_str())
+            .header("X-Rootmode-Version", CURRENT)
+            .header("X-Rootmode-OS", h.os.as_str())
+            .header("X-Rootmode-Arch", h.arch.as_str());
+    }
+    let text = req
         .send()
         .await
         .map_err(|e| AppError::Net(e.to_string()))?
@@ -81,10 +100,12 @@ async fn fetch_json(url: &str) -> Result<VersionBody> {
     serde_json::from_str(&text).map_err(|e| AppError::Net(e.to_string()))
 }
 
-pub async fn lookup() -> Result<UpdateInfo> {
-    let body = match fetch_json(SITE).await {
+pub async fn lookup(hello: Option<&Hello>) -> Result<UpdateInfo> {
+    // The hello goes to the site only; GitHub is a fallback for the version
+    // and learns nothing about the install.
+    let body = match fetch_json(SITE, hello).await {
         Ok(b) => b,
-        Err(_) => fetch_json(GITHUB).await?,
+        Err(_) => fetch_json(GITHUB, None).await?,
     };
     let latest = tag_to_version(&body);
     let url = if body.url.is_empty() {

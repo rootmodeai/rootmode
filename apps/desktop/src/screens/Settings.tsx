@@ -109,6 +109,25 @@ export function Settings() {
       </div>
 
       <div className="card">
+        <h2>Counting this install</h2>
+        <label className="row" style={{ gap: 9 }}>
+          <input
+            type="checkbox"
+            checked={settings.heartbeat}
+            style={{ width: "auto" }}
+            onChange={(e) => void save("heartbeat", String(e.target.checked))}
+          />
+          <span>Let rootmode count this install</span>
+        </label>
+        <p style={{ color: "var(--text-2)", fontSize: 13.5, margin: "8px 0 0" }}>
+          The daily update check carries a random id this app made up, its version and your
+          operating system, so the explorer can show how many installs are in use. Nothing
+          about what you do here — no prompts, no models, no address kept. Off, the check
+          carries nothing.
+        </p>
+      </div>
+
+      <div className="card">
         <h2>Finding providers</h2>
         <label className="row" style={{ gap: 9 }}>
           <input

@@ -503,6 +503,54 @@
         </details>
       </div>
 
+      <div class="panel">
+        <div class="panel-head">
+          <h2>People using the app, per day</h2>
+          <div class="ranges" role="group" aria-label="Time range for app installs">
+            <button type="button" data-range="7"  aria-pressed="false">7D</button>
+            <button type="button" data-range="30" aria-pressed="true">30D</button>
+            <button type="button" data-range="90" aria-pressed="false">90D</button>
+            <button type="button" data-range="0"  aria-pressed="false">ALL</button>
+          </div>
+          <p class="why">Copies of the desktop app that checked for an update that day, split by whether it was their first time. An install counts itself with a random id and its version — nothing about what it did — and can switch that off in Settings.</p>
+        </div>
+        <div class="legend">
+          <span><i style="background:var(--s-in)"></i> Returning</span>
+          <span><i style="background:var(--s-out)"></i> New install</span>
+        </div>
+        <figure>
+          <svg class="chart" id="users-chart" viewBox="0 0 720 260" role="img"
+               aria-labelledby="users-title"><title id="users-title">App installs active per day</title></svg>
+          <div class="tip" id="users-tip" role="status"></div>
+        </figure>
+        <details class="data">
+          <summary>Show the numbers</summary>
+          <div class="tablewrap"><table id="users-table"></table></div>
+        </details>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Downloads per day</h2>
+          <div class="ranges" role="group" aria-label="Time range for downloads">
+            <button type="button" data-range="7"  aria-pressed="false">7D</button>
+            <button type="button" data-range="30" aria-pressed="true">30D</button>
+            <button type="button" data-range="90" aria-pressed="false">90D</button>
+            <button type="button" data-range="0"  aria-pressed="false">ALL</button>
+          </div>
+          <p class="why">Visitors the Download button sent to an installer. GitHub keeps its own count of files actually fetched; the tile above shows that too.</p>
+        </div>
+        <figure>
+          <svg class="chart" id="dl-chart" viewBox="0 0 720 260" role="img"
+               aria-labelledby="dl-title"><title id="dl-title">Installer downloads per day</title></svg>
+          <div class="tip" id="dl-tip" role="status"></div>
+        </figure>
+        <details class="data">
+          <summary>Show the numbers</summary>
+          <div class="tablewrap"><table id="dl-table"></table></div>
+        </details>
+      </div>
+
     </div>
   </section>
 
@@ -558,6 +606,16 @@
         worker that stays quiet still serves jobs and simply does not appear
         here, so <b>counts are a floor, never a census</b> — real traffic is
         higher than this page can show.
+      </p>
+      <p class="sub" style="font-size:14.5px">
+        <b>Installs and downloads are the one thing counted on the other side.</b>
+        When the desktop app checks for an update — once a day, as it always
+        did — it can say which install it is: a random id it made up for
+        itself, its version and operating system. That is the whole of it: no
+        prompt, no model, no address kept, and a switch in Settings turns it
+        off, after which the check carries nothing. A download is a visitor the
+        Download button sent to an installer; GitHub's own count of files
+        fetched sits beside it.
       </p>
       <p class="sub" style="font-size:14.5px">
         Each report is signed with the worker's own key, so an invented node
@@ -656,12 +714,23 @@
         peers_new: fresh,
         // What the answering workers charged, at their own prices.
         revenue: Math.round(((base + out) / 1e6) * (0.11 + rnd() * 0.05) * 100) / 100,
+        // People: app installs alive that day, and installer downloads.
+        installs_returning: Math.round((30 + 900 * ramp) * weekend * (0.85 + rnd() * 0.3)),
+        installs_new: Math.round((6 + 40 * ramp) * (0.5 + rnd())),
+        downloads: Math.round((9 + 55 * ramp) * (0.5 + rnd())),
       });
     }
+    var installsAll = days.reduce(function (a, d) { return a + d.installs_new; }, 0);
+    var downloadsAll = days.reduce(function (a, d) { return a + d.downloads; }, 0);
     return {
       updated: new Date().toISOString(),
       sample: true,
       days: days,
+      growth: {
+        installs: { total: installsAll, active_7d: Math.round(installsAll * 0.55), active_30d: Math.round(installsAll * 0.8) },
+        downloads: { total: downloadsAll },
+        github: { total: Math.round(downloadsAll * 1.3) },
+      },
       models: [
         { id: "glm-5.2", tokens: 1.42e9 },
         { id: "kimi-k3", tokens: 1.11e9 },
@@ -682,8 +751,8 @@
 
   var DATA = sample();
   // One per range group, in the order the panels appear.
-  var KEYS = ["tokens", "cum", "peers", "rev", "reqs"];
-  var RANGE = { tokens: 30, cum: 0, peers: 30, rev: 30, reqs: 30 };
+  var KEYS = ["tokens", "cum", "peers", "rev", "reqs", "users", "dl"];
+  var RANGE = { tokens: 30, cum: 0, peers: 30, rev: 30, reqs: 30, users: 30, dl: 30 };
 
   // ---------------------------------------------------------------- charts
   function slice(n) { return n > 0 ? DATA.days.slice(-n) : DATA.days; }
@@ -899,6 +968,10 @@
     var revenueAll = days.reduce(function (a, d) { return a + (d.revenue || 0); }, 0);
     var revenue30 = days.slice(-30).reduce(function (a, d) { return a + (d.revenue || 0); }, 0);
     var online = DATA.workers.filter(function (w) { return w.online; }).length;
+    var g = DATA.growth || {};
+    var installs = (g.installs || {}), dls = (g.downloads || {}), gh = (g.github || {});
+    var usersToday = (today.installs_returning || 0) + (today.installs_new || 0);
+    var usersPrev = (prev.installs_returning || 0) + (prev.installs_new || 0);
 
     function money(v) {
       return "$" + (v >= 1000 ? compact(v) : v.toFixed(2));
@@ -923,6 +996,10 @@
         '</p><p class="n">' + delta(today.requests, prev.requests) + "</p></div>",
       '<div class="tile"><p class="k">Workers seen</p><p class="v">' + DATA.workers.length +
         '</p><p class="n">' + online + " answering now</p></div>",
+      '<div class="tile"><p class="k">App installs</p><p class="v">' + full(installs.total || 0) +
+        '</p><p class="n">' + full(usersToday) + " active today" + (usersPrev ? " · " + delta(usersToday, usersPrev) : "") + "</p></div>",
+      '<div class="tile"><p class="k">Downloads</p><p class="v">' + full(dls.total || 0) +
+        '</p><p class="n">' + (gh.total ? full(gh.total) + " files fetched from GitHub" : "from the Download button") + "</p></div>",
     ].join("");
   }
 
@@ -969,6 +1046,10 @@
       { labels: { revenue: "Earned" }, money: true, solo: true });
     drawBars("reqs-chart", "reqs-tip", ["requests"], RANGE.reqs,
       { labels: { requests: "Requests" }, solo: true });
+    drawBars("users-chart", "users-tip", ["installs_returning", "installs_new"], RANGE.users,
+      { labels: { installs_returning: "Returning", installs_new: "New install" } });
+    drawBars("dl-chart", "dl-tip", ["downloads"], RANGE.dl,
+      { labels: { downloads: "Downloads" }, solo: true });
 
     fillTable("tokens-table", slice(RANGE.tokens),
       [{ key: "tokens_in", label: "In" }, { key: "tokens_out", label: "Out" }]);
@@ -976,6 +1057,9 @@
       [{ key: "peers_returning", label: "Returning" }, { key: "peers_new", label: "New" }]);
     fillTable("rev-table", slice(RANGE.rev), [{ key: "revenue", label: "Earned (USD)", money: true }]);
     fillTable("reqs-table", slice(RANGE.reqs), [{ key: "requests", label: "Requests" }]);
+    fillTable("users-table", slice(RANGE.users),
+      [{ key: "installs_returning", label: "Returning" }, { key: "installs_new", label: "New" }]);
+    fillTable("dl-table", slice(RANGE.dl), [{ key: "downloads", label: "Downloads" }]);
 
     // The cumulative table is derived, so it is built rather than sliced.
     var running = 0;
@@ -1036,6 +1120,16 @@
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (live) {
       if (live && Array.isArray(live.days) && live.days.length) {
+        // The people side arrives as its own list of days; fold it into the
+        // main one by date so every chart reads from a single row per day.
+        var byDate = {};
+        ((live.growth || {}).days || []).forEach(function (d) { byDate[d.date] = d; });
+        live.days.forEach(function (d) {
+          var g = byDate[d.date] || {};
+          d.downloads = g.downloads || 0;
+          d.installs_new = g.installs_new || 0;
+          d.installs_returning = Math.max(0, (g.installs_active || 0) - (g.installs_new || 0));
+        });
         DATA = live;
         DATA.sample = live.sample === true;
       }

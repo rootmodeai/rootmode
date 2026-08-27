@@ -743,7 +743,8 @@ pub fn dashboard_stats(state: St<'_>) -> Result<DashboardStats> {
 
 #[tauri::command]
 pub async fn check_update(state: St<'_>) -> Result<crate::update::UpdateInfo> {
-    let mut info = crate::update::lookup().await?;
+    let hello = state.hello();
+    let mut info = crate::update::lookup(hello.as_ref()).await?;
     if info.available {
         if let (Ok(Some(skipped)), Some(latest)) = (
             state.db.get_setting(crate::update::SETTING_SKIPPED),

@@ -37,6 +37,49 @@ CREATE TABLE IF NOT EXISTS reports (
 CREATE INDEX IF NOT EXISTS reports_day ON reports (day);
 CREATE INDEX IF NOT EXISTS reports_peer_day ON reports (peer_id, day);
 
+-- Growth: who fetched the app, and how many copies are alive.
+--
+-- A download is a visitor sent to an installer by /download: the platform
+-- the redirect chose, the day, a country. Nothing that names the visitor.
+CREATE TABLE IF NOT EXISTS downloads (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          INTEGER NOT NULL,
+    day         TEXT NOT NULL,
+    platform    TEXT NOT NULL,          -- macos-arm64 | windows-x64 | … | other
+    source      TEXT NOT NULL,          -- 'button' (/download) | 'named' (/download/<os>)
+    country     TEXT
+);
+CREATE INDEX IF NOT EXISTS downloads_day ON downloads (day);
+
+-- An install is a copy of the desktop app that said hello while checking
+-- for an update: a random id it made up for itself, its version, its OS.
+-- The person can switch this off in Settings, and then the check carries
+-- nothing and nothing is written here.
+CREATE TABLE IF NOT EXISTS installs (
+    install_id  TEXT PRIMARY KEY,
+    first_seen  INTEGER NOT NULL,
+    last_seen   INTEGER NOT NULL,
+    version     TEXT NOT NULL DEFAULT '',
+    os          TEXT NOT NULL DEFAULT '',
+    arch        TEXT NOT NULL DEFAULT '',
+    country     TEXT
+);
+CREATE TABLE IF NOT EXISTS heartbeats (
+    day         TEXT NOT NULL,
+    install_id  TEXT NOT NULL,
+    PRIMARY KEY (day, install_id)
+);
+
+-- What GitHub says each release asset has been downloaded, once a day, so
+-- the number on the release page becomes a curve.
+CREATE TABLE IF NOT EXISTS release_downloads (
+    day         TEXT NOT NULL,
+    tag         TEXT NOT NULL,
+    asset       TEXT NOT NULL,
+    count       INTEGER NOT NULL,
+    PRIMARY KEY (day, tag, asset)
+);
+
 CREATE TABLE IF NOT EXISTS workers (
     peer_id     TEXT PRIMARY KEY,
     label       TEXT NOT NULL DEFAULT '',
@@ -110,6 +153,139 @@ class Store:
                 (report.peer_id, report.label, country, country_src, ip_hash,
                  json.dumps(report.caps), json.dumps(report.models), now, now),
             )
+
+    # ------------------------------------------------------------- growth
+
+    def record_download(self, *, platform: str, source: str, country: str | None, now: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO downloads (at, day, platform, source, country) VALUES (?,?,?,?,?)",
+                (now, _today(now), platform, source, country),
+            )
+
+    def record_heartbeat(self, *, install_id: str, version: str, os: str, arch: str,
+                         country: str | None, now: int) -> bool:
+        """Note that this install is alive today. True the first time it is ever seen."""
+        with self.connect() as conn:
+            known = conn.execute(
+                "SELECT 1 FROM installs WHERE install_id = ?", (install_id,)
+            ).fetchone() is not None
+            conn.execute(
+                """INSERT INTO installs (install_id, first_seen, last_seen, version, os, arch, country)
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(install_id) DO UPDATE SET
+                     last_seen = excluded.last_seen,
+                     version   = excluded.version,
+                     os        = excluded.os,
+                     arch      = excluded.arch,
+                     country   = COALESCE(excluded.country, installs.country)""",
+                (install_id, now, now, version, os, arch, country),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO heartbeats (day, install_id) VALUES (?, ?)",
+                (_today(now), install_id),
+            )
+            return not known
+
+    def record_release_counts(self, rows: list[tuple[str, str, int]], now: int) -> None:
+        """Today's snapshot of GitHub's per-asset counts; a later one the same day replaces it."""
+        day = _today(now)
+        with self.connect() as conn:
+            for tag, asset, count in rows:
+                conn.execute(
+                    "INSERT OR REPLACE INTO release_downloads (day, tag, asset, count) VALUES (?,?,?,?)",
+                    (day, tag, asset, int(count)),
+                )
+
+    def growth(self, *, days: int = 90, now: int | None = None) -> dict:
+        """The founder's numbers: downloads, installs, and who is still here."""
+        now = now or int(datetime.now(timezone.utc).timestamp())
+        first = (datetime.fromtimestamp(now, timezone.utc) - timedelta(days=days - 1)).date()
+        since = first.isoformat()
+
+        with self.connect() as conn:
+            dl_day = {r["day"]: int(r["n"]) for r in conn.execute(
+                "SELECT day, COUNT(*) AS n FROM downloads WHERE day >= ? GROUP BY day", (since,))}
+            dl_total = int(conn.execute("SELECT COUNT(*) AS n FROM downloads").fetchone()["n"])
+            dl_platform = [(r["platform"], int(r["n"])) for r in conn.execute(
+                "SELECT platform, COUNT(*) AS n FROM downloads WHERE at >= ? GROUP BY platform ORDER BY n DESC",
+                (now - 30 * 86_400,))]
+            dl_country = [(r["country"], int(r["n"])) for r in conn.execute(
+                "SELECT country, COUNT(*) AS n FROM downloads WHERE at >= ? AND country IS NOT NULL "
+                "GROUP BY country ORDER BY n DESC LIMIT 12", (now - 30 * 86_400,))]
+
+            new_day = {r["day"]: int(r["n"]) for r in conn.execute(
+                "SELECT strftime('%Y-%m-%d', first_seen, 'unixepoch') AS day, COUNT(*) AS n "
+                "FROM installs WHERE first_seen >= ? GROUP BY day",
+                (int(datetime.combine(first, datetime.min.time(), tzinfo=timezone.utc).timestamp()),))}
+            active_day = {r["day"]: int(r["n"]) for r in conn.execute(
+                "SELECT day, COUNT(*) AS n FROM heartbeats WHERE day >= ? GROUP BY day", (since,))}
+            installs_total = int(conn.execute("SELECT COUNT(*) AS n FROM installs").fetchone()["n"])
+
+            def active_since(secs: int) -> int:
+                return int(conn.execute(
+                    "SELECT COUNT(*) AS n FROM installs WHERE last_seen >= ?", (now - secs,)
+                ).fetchone()["n"])
+
+            def breakdown(col: str) -> list[tuple[str, int]]:
+                return [(r[col] or "?", int(r["n"])) for r in conn.execute(
+                    f"SELECT {col}, COUNT(*) AS n FROM installs WHERE last_seen >= ? "
+                    f"GROUP BY {col} ORDER BY n DESC LIMIT 12", (now - 30 * 86_400,))]
+
+            active_24h, active_7d, active_30d = active_since(86_400), active_since(7 * 86_400), active_since(30 * 86_400)
+            by_version, by_os, by_country = breakdown("version"), breakdown("os"), breakdown("country")
+
+            latest_day = conn.execute("SELECT MAX(day) AS d FROM release_downloads").fetchone()["d"]
+            gh_assets = [(r["tag"], r["asset"], int(r["count"])) for r in conn.execute(
+                "SELECT tag, asset, count FROM release_downloads WHERE day = ? ORDER BY tag DESC, asset",
+                (latest_day,))] if latest_day else []
+            gh_day = {r["day"]: int(r["n"]) for r in conn.execute(
+                "SELECT day, SUM(count) AS n FROM release_downloads WHERE day >= ? GROUP BY day", (since,))}
+
+        out_days = []
+        prev_gh = None
+        for i in range(days):
+            d = (first + timedelta(days=i)).isoformat()
+            gh = gh_day.get(d)
+            out_days.append({
+                "date": d,
+                "downloads": dl_day.get(d, 0),
+                "installs_new": new_day.get(d, 0),
+                "installs_active": active_day.get(d, 0),
+                # GitHub's counter is cumulative; the day's figure is its rise
+                # since the previous snapshot, or null where none was taken.
+                "github_downloads": (gh - prev_gh) if (gh is not None and prev_gh is not None) else None,
+            })
+            if gh is not None:
+                prev_gh = gh
+
+        return {
+            "updated": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+            "days": out_days,
+            "downloads": {
+                "total": dl_total,
+                "last_7d": sum(dl_day.get((first + timedelta(days=i)).isoformat(), 0)
+                               for i in range(max(0, days - 7), days)),
+                "by_platform_30d": [{"platform": p, "count": n} for p, n in dl_platform],
+                "by_country_30d": [{"country": c, "count": n} for c, n in dl_country],
+            },
+            "github": {
+                "snapshot_day": latest_day,
+                "total": sum(c for _, _, c in gh_assets),
+                "assets": [{"tag": t, "asset": a, "count": c} for t, a, c in gh_assets],
+            },
+            "installs": {
+                "total": installs_total,
+                "new_7d": sum(new_day.get((first + timedelta(days=i)).isoformat(), 0)
+                              for i in range(max(0, days - 7), days)),
+                "active_24h": active_24h,
+                "active_7d": active_7d,
+                "active_30d": active_30d,
+                "by_version_30d": [{"version": v, "count": n} for v, n in by_version],
+                "by_os_30d": [{"os": o, "count": n} for o, n in by_os],
+                "by_country_30d": [{"country": c, "count": n} for c, n in by_country],
+            },
+        }
 
     def reports_since(self, peer_id: str, since: int) -> int:
         """How many reports this node has filed lately, for rate limiting."""

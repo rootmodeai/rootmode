@@ -23,6 +23,11 @@ pub const SETTING_SIGN_JOBS: &str = "sign_jobs";
 pub const SETTING_BOOTSTRAP: &str = "bootstrap";
 pub const SETTING_DISCOVERY: &str = "discovery";
 pub const SETTING_MOCK_WORKER: &str = "mock_worker";
+/// Whether the update check says which install it is, so installs can be
+/// counted. "false" switches it off; anything else is on.
+pub const SETTING_HEARTBEAT: &str = "heartbeat";
+/// A random id this install made up for itself the first time it was asked.
+pub const SETTING_INSTALL_ID: &str = "install_id";
 pub use crate::gateway::{
     SETTING_GATEWAY, SETTING_GATEWAY_MODEL, SETTING_GATEWAY_PORT, SETTING_GATEWAY_SUBSTITUTE,
 };
@@ -183,6 +188,35 @@ impl AppState {
         *self.p2p.lock().await = None;
     }
 
+    pub fn heartbeat_enabled(&self) -> bool {
+        !matches!(
+            self.db.get_setting(SETTING_HEARTBEAT).ok().flatten().as_deref(),
+            Some("false")
+        )
+    }
+
+    /// What the update check says about this install: a random id, made
+    /// once and kept, plus the version and platform. None when the person
+    /// switched it off — then the check carries nothing at all.
+    pub fn hello(&self) -> Option<crate::update::Hello> {
+        if !self.heartbeat_enabled() {
+            return None;
+        }
+        let id = match self.db.get_setting(SETTING_INSTALL_ID).ok().flatten() {
+            Some(id) if !id.trim().is_empty() => id,
+            _ => {
+                let id = uuid::Uuid::new_v4().simple().to_string();
+                let _ = self.db.set_setting(SETTING_INSTALL_ID, &id);
+                id
+            }
+        };
+        Some(crate::update::Hello {
+            install: id,
+            os: std::env::consts::OS.to_string(),
+            arch: std::env::consts::ARCH.to_string(),
+        })
+    }
+
     pub fn settings(&self) -> Result<Settings> {
         Ok(Settings {
             download_dir: self.download_dir().to_string_lossy().into_owned(),
@@ -211,6 +245,7 @@ impl AppState {
                 .get_setting(SETTING_GATEWAY_PORT)?
                 .and_then(|s| s.trim().parse().ok())
                 .unwrap_or(crate::gateway::DEFAULT_PORT),
+            heartbeat: self.heartbeat_enabled(),
             app_data_dir: self.app_data.to_string_lossy().into_owned(),
             db_path: self.db.path().to_string_lossy().into_owned(),
             key_path: identity_store::key_path(&self.app_data)
@@ -220,7 +255,8 @@ impl AppState {
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
-        const ALLOWED: [&str; 13] = [
+        const ALLOWED: [&str; 14] = [
+            SETTING_HEARTBEAT,
             SETTING_DOWNLOAD_DIR,
             SETTING_DEFAULT_PEER,
             SETTING_DEFAULT_LLM,
@@ -305,6 +341,8 @@ pub struct Settings {
     /// local HTTP endpoint.
     pub gateway: bool,
     pub gateway_port: u16,
+    /// Whether the update check identifies this install so it can be counted.
+    pub heartbeat: bool,
     pub app_data_dir: String,
     pub db_path: String,
     pub key_path: String,

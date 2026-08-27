@@ -153,6 +153,7 @@ export interface Settings {
   entry_points: number;
   gateway: boolean;
   gateway_port: number;
+  heartbeat: boolean;
   app_data_dir: string;
   db_path: string;
   key_path: string;

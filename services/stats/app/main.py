@@ -10,9 +10,12 @@ It shares a process and a domain with the site: `rootmode.ai` serves the pages,
 `rootmode.ai/report` takes reports, `rootmode.ai/stats.json` feeds the explorer.
 One box, one certificate, no cross-origin anything.
 
-* **Only workers talk to it.** A client never reports anything, so no prompt,
-  no answer, and no client peer id passes through here. What is collected is
-  what a machine served, by a machine that chose to say so.
+* **Workers report; installs only say hello.** A client never reports what it
+  did, so no prompt, no answer, and no client peer id passes through here.
+  What is collected is what a machine served, by a machine that chose to say
+  so — and, from the desktop's daily update check, that an install exists:
+  a random id it made up, its version and OS, nothing more, and off in its
+  Settings.
 * **Reports are signed.** A peer id is an ed25519 public key, so the collector
   can tell a real node's numbers from an invented one's without an account,
   an API key, or a registry.
@@ -36,7 +39,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .canonical import verify
-from .download import download_url, latest_version, named_url
+from .download import NAMED, download_url, latest_version, named_url, platform_for, release_counts
 from .geo import client_ip, country_of, fingerprint
 from .models import MAX_BODY_BYTES, Report
 from .store import Store
@@ -140,7 +143,16 @@ def stats(response: Response, days: int = 120):
     # Cached briefly: the page is public and the numbers move on a 5-minute
     # cadence at best, so there is nothing to gain from computing this per hit.
     response.headers["Cache-Control"] = "public, max-age=60"
-    return store.stats(days=days)
+    doc = store.stats(days=days)
+    # Downloads and installs ride along, so the explorer shows the people
+    # side as well as the machine side. GitHub's own per-asset counts are
+    # snapshotted here too, once a day, cached so the API is not hammered.
+    repo = os.environ.get("ROOTMODE_GITHUB_REPO") or None
+    rows = release_counts(repo)
+    if rows:
+        store.record_release_counts(rows, int(time.time()))
+    doc["growth"] = store.growth(days=days)
+    return doc
 
 
 @app.get("/report")
@@ -162,17 +174,50 @@ def healthz():
     return {"ok": True}
 
 
+def _count_download(request: Request, platform: str, source: str) -> None:
+    """One more person sent to an installer. The address becomes a country and is gone."""
+    now = int(time.time())
+    ip = client_ip(request.headers, request.client.host if request.client else None)
+    country = country_of(ip)
+    store.record_download(platform=platform, source=source, country=country, now=now)
+
+
 @app.get("/download")
 def download(request: Request):
     """Send the visitor the installer for their OS. No picker."""
     repo = os.environ.get("ROOTMODE_GITHUB_REPO") or None
     ua = request.headers.get("user-agent", "")
+    _count_download(request, platform_for(ua) or "other", "button")
     return RedirectResponse(download_url(ua, repo), status_code=302)
 
 
+# What the desktop says about itself while asking for the newest version.
+# Headers, not the query string, so nothing about an install is written into
+# an access log. Absent — the person switched it off — nothing is recorded.
+_HELLO_ID = "x-rootmode-install"
+_HELLO_VERSION = "x-rootmode-version"
+_HELLO_OS = "x-rootmode-os"
+_HELLO_ARCH = "x-rootmode-arch"
+
+
+def _clean_hello(value: str | None, limit: int) -> str:
+    value = (value or "").strip()
+    return "".join(c for c in value if c.isalnum() or c in ".-_")[:limit]
+
+
 @app.get("/version")
-def version():
+def version(request: Request):
     """What the desktop compares itself against. None if GitHub is silent."""
+    install = _clean_hello(request.headers.get(_HELLO_ID), 64)
+    if len(install) >= 16:
+        now = int(time.time())
+        ip = client_ip(request.headers, request.client.host if request.client else None)
+        country = country_of(ip)
+        ver = _clean_hello(request.headers.get(_HELLO_VERSION), 32)
+        os_ = _clean_hello(request.headers.get(_HELLO_OS), 16)
+        arch = _clean_hello(request.headers.get(_HELLO_ARCH), 16)
+        store.record_heartbeat(install_id=install, version=ver, os=os_, arch=arch,
+                               country=country, now=now)
     repo = os.environ.get("ROOTMODE_GITHUB_REPO") or None
     body = latest_version(repo)
     if body is None:
@@ -181,11 +226,12 @@ def version():
 
 
 @app.get("/download/{os_name}")
-def download_named(os_name: str):
+def download_named(os_name: str, request: Request):
     repo = os.environ.get("ROOTMODE_GITHUB_REPO") or None
     url = named_url(os_name, repo)
     if url is None:
         return JSONResponse({"detail": "not found"}, status_code=404)
+    _count_download(request, NAMED[os_name], "named")
     return RedirectResponse(url, status_code=302)
 
 

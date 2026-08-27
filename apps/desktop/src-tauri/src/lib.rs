@@ -120,6 +120,22 @@ pub fn run() {
                 });
             }
 
+            // An app left open for days still counts as one that is in use:
+            // the update check runs once a day from here as well as on
+            // launch. It is the same request the window makes, no more.
+            {
+                let state = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
+                        let hello = state.hello();
+                        if let Err(e) = crate::update::lookup(hello.as_ref()).await {
+                            log::debug!("daily update check: {e}");
+                        }
+                    }
+                });
+            }
+
             // Discovery runs by default and needs no configuration: peers on
             // this network announce themselves and we react to that, rather
             // than polling and making the user wait for the next tick.
