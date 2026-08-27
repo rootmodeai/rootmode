@@ -256,6 +256,15 @@ impl ListedVideo {
         self.pricing_skus.clone().unwrap_or_default()
     }
 
+    /// Whether silence is something this model sells. The lock is computed
+    /// from the silent SKU where there is one, so that is the shape to ask
+    /// for — but a model with no such SKU (Sora: one rate, audio built in)
+    /// refuses the switch outright: "generate_audio cannot be set to false".
+    /// Asked for nothing, it makes its clip at the one price it has.
+    fn silent_is_priced(&self) -> bool {
+        self.skus().keys().any(|k| k.contains("without_audio"))
+    }
+
     /// Flat price for one clip of this node's shape, after markup.
     fn per_clip(&self, markup: f64) -> Option<Price> {
         let markup = if markup > 0.0 { markup } else { 1.0 };
@@ -645,8 +654,10 @@ impl OpenRouterBackend {
             "model": listed.id,
             "prompt": params.prompt,
             "duration": listed.duration(),
-            "generate_audio": false,
         });
+        if listed.silent_is_priced() {
+            body["generate_audio"] = serde_json::json!(false);
+        }
         if let Some(r) = listed.resolution() {
             body["resolution"] = serde_json::json!(r);
         }
@@ -876,6 +887,25 @@ mod tests {
         assert_eq!(sparse.duration(), 5);
         assert_eq!(sparse.resolution(), None);
         assert_eq!(sparse.per_clip(1.15).unwrap().amount, 0.65); // 0.56 × 1.15
+    }
+
+    #[test]
+    fn silence_is_asked_for_only_where_it_is_sold() {
+        // Veo prices audio and silence apart: the lock is the silent rate,
+        // so the request says so.
+        let veo: super::ListedVideo = serde_json::from_str(r#"{"id":"google/veo-3.1-lite",
+            "pricing_skus":{"duration_seconds_with_audio":"0.08","duration_seconds_without_audio":"0.05"}}"#).unwrap();
+        assert!(veo.silent_is_priced());
+        // Sora has one rate with audio built in and rejects the switch:
+        // "Sora does not support audio generation control. generate_audio
+        // cannot be set to false." So it is not sent.
+        let sora: super::ListedVideo = serde_json::from_str(r#"{"id":"openai/sora-2-pro",
+            "supported_durations":[4,8,12,16,20],"generate_audio":true,
+            "pricing_skus":{"duration_seconds_720p":"0.30","duration_seconds_1080p":"0.50"}}"#).unwrap();
+        assert!(!sora.silent_is_priced());
+        // And its lock is the 8-second clip at the 720p rate: 0.30 × 8 × 1.15.
+        assert_eq!(sora.duration(), 8);
+        assert_eq!(sora.per_clip(1.15).unwrap().amount, 2.76);
     }
 
     #[test]
