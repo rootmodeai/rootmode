@@ -12,8 +12,11 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const dir = new URL("../dist/assets", import.meta.url).pathname;
+// fileURLToPath, not .pathname: on Windows the latter gives "/D:/..." and
+// the build there died looking for "D:\D:\...".
+const dir = fileURLToPath(new URL("../dist/assets", import.meta.url));
 
 const forbidden = [
   // Regex lookbehind — Safari 16.4.
