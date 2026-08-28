@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { StoreProvider, useStore } from "./lib/store";
 import { api } from "./lib/api";
+import { diag } from "./lib/diag";
 import { Boot } from "./screens/Boot";
 import { Chat } from "./screens/Chat";
 import { Create } from "./screens/Create";
@@ -41,11 +42,28 @@ export default function App() {
 
 /** Nothing is shown until the app knows whether it can do anything. */
 function Gate() {
-  const { ready } = useStore();
+  const { ready, bootError } = useStore();
   const [entered, setEntered] = useState(false);
+  // Stable on purpose: Boot restarts its search — and its give-up timer —
+  // whenever this changes, and the store re-renders Gate every ten seconds
+  // as the peer list is re-read. A fresh closure each time meant the
+  // "Continue anyway" button could never arrive.
+  const enter = useCallback(() => setEntered(true), []);
+
+  // The page's own account of its boot, for the log file: mounted, got its
+  // first answers from the backend, moved past the boot screen.
+  useEffect(() => {
+    diag("info", "react mounted; boot screen showing");
+  }, []);
+  useEffect(() => {
+    if (ready) diag(bootError ? "error" : "info", `store ready${bootError ? `, boot error: ${bootError}` : ""}`);
+  }, [ready, bootError]);
+  useEffect(() => {
+    if (entered) diag("info", "entered the main shell");
+  }, [entered]);
 
   if (!ready || !entered) {
-    return <Boot onReady={() => setEntered(true)} />;
+    return <Boot onReady={enter} />;
   }
   return <Shell />;
 }

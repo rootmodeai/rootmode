@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, errorText } from "../lib/api";
 import { useStore } from "../lib/store";
 
@@ -15,6 +15,12 @@ export function Settings() {
   const [downloadDir, setDownloadDir] = useState<string | null>(null);
   const [updateLine, setUpdateLine] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [logPath, setLogPath] = useState<string | null>(null);
+
+  // The one path someone will be asked for when the app misbehaves.
+  useEffect(() => {
+    void api.logPath().then(setLogPath).catch(() => undefined);
+  }, []);
 
   if (!settings) return null;
   const dir = downloadDir ?? settings.download_dir;
@@ -285,6 +291,12 @@ export function Settings() {
             <div>{settings.app_data_dir}</div>
             <div>{settings.db_path}</div>
             <div>{settings.key_path}</div>
+            {logPath && (
+              <div>
+                {logPath}
+                <span style={{ color: "var(--text-3)" }}> — this run's log; send it with a bug report</span>
+              </div>
+            )}
           </div>
         </details>
       </div>

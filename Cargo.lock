@@ -4975,6 +4975,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "dirs",
  "futures-util",
  "hex",
  "k256",

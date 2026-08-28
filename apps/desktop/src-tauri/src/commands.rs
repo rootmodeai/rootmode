@@ -776,3 +776,26 @@ pub async fn open_update(app: AppHandle, url: Option<String>) -> Result<()> {
         .map_err(|e| AppError::Invalid(e.to_string()))?;
     Ok(())
 }
+
+// ------------------------------------------------------------- diagnostics
+
+/// A line from the window, written into the same log as everything else. A
+/// frontend that fails to draw is invisible from Rust otherwise; this is how
+/// "the page never mounted" and "React threw" reach the file someone can
+/// send us.
+#[tauri::command]
+pub fn client_log(level: String, message: String) {
+    let at = crate::diag::uptime_ms();
+    match level.as_str() {
+        "error" => tracing::error!(target: "frontend", "[+{at}ms] {message}"),
+        "warn" => tracing::warn!(target: "frontend", "[+{at}ms] {message}"),
+        "debug" => tracing::debug!(target: "frontend", "[+{at}ms] {message}"),
+        _ => tracing::info!(target: "frontend", "[+{at}ms] {message}"),
+    }
+}
+
+/// Where this run's log is, so Settings can show it and a person can find it.
+#[tauri::command]
+pub fn log_path() -> Option<String> {
+    crate::diag::log_path().map(|p| p.display().to_string())
+}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { api, errorText } from "../lib/api";
+import { diag } from "../lib/diag";
 import type { NetworkStatus } from "../lib/types";
 import { Glider } from "../components/Glider";
 
@@ -22,23 +23,42 @@ export function Boot({ onReady }: { onReady: () => void }) {
   useEffect(() => {
     let cancelled = false;
     const started = Date.now();
+    // Each outcome is logged once: the first answer, the first refusal, and
+    // giving up. Every 700ms tick after that would only bury them.
+    let loggedAnswer = false;
+    let loggedFailure = false;
+    let loggedGiveUp = false;
 
     const tick = async () => {
       try {
         const s = await api.networkStatus();
         if (cancelled) return;
         setStatus(s);
+        if (!loggedAnswer) {
+          loggedAnswer = true;
+          diag("info", `first network status: online=${s.online} searching=${String(s.searching)}`);
+        }
 
         if (s.online > 0) {
           setStage("found");
+          diag("info", `found ${s.online} provider(s); leaving the boot screen`);
           // Let the tick land visibly rather than flashing past it.
           setTimeout(() => !cancelled && onReady(), 650);
           return;
         }
 
-        setStage(Date.now() - started > GIVE_UP_AFTER ? "empty" : "searching");
-      } catch {
+        const gaveUp = Date.now() - started > GIVE_UP_AFTER;
+        if (gaveUp && !loggedGiveUp) {
+          loggedGiveUp = true;
+          diag("warn", `no providers after ${GIVE_UP_AFTER}ms; offering to continue anyway`);
+        }
+        setStage(gaveUp ? "empty" : "searching");
+      } catch (e) {
         // The backend is still starting; the next tick will do.
+        if (!loggedFailure) {
+          loggedFailure = true;
+          diag("warn", `network status failed: ${errorText(e)}`);
+        }
       }
       if (!cancelled) setTimeout(tick, 700);
     };

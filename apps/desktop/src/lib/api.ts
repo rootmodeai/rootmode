@@ -136,6 +136,8 @@ export const api = {
     invoke<SpendEntry[]>("spend_history", { limit: limit ?? null }),
   syncSettlements: () => invoke<number>("sync_settlements"),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
+  /// Where this run is writing its log, for Settings to point at.
+  logPath: () => invoke<string | null>("log_path"),
   skipUpdate: (version: string) => invoke<void>("skip_update", { version }),
   openUpdate: (url?: string) => invoke<void>("open_update", { url: url ?? null }),
 };

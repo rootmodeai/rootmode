@@ -36,6 +36,8 @@ k256 = { version = "0.13", features = ["ecdsa"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 base64 = "0.22"
 chrono = "0.4"
+# Where the app data lives, known before Tauri is, so the log can open first.
+dirs = "6"
 url = "2"
 png = "0.17"
 log = "0.4"

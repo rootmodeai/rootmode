@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { api, errorText, events } from "./api";
+import { diag } from "./diag";
 import { useEvent } from "./useEvent";
 import type {
   JobDelta,
@@ -90,8 +91,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setPeers(p);
         setJobs(j);
         setSettings(s);
+        diag(
+          "info",
+          `first backend answers: peer ${id.peer_id.slice(0, 12)}…, ${p.length} peer(s), ${j.length} job(s), theme ${s.theme ?? "default"}`,
+        );
       } catch (e) {
-        if (!cancelled) setBootError(errorText(e));
+        if (!cancelled) {
+          setBootError(errorText(e));
+          diag("error", `first backend calls failed: ${errorText(e)}`);
+        }
       } finally {
         if (!cancelled) setReady(true);
       }

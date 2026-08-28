@@ -3,6 +3,7 @@
 pub mod attach;
 pub mod commands;
 pub mod connected_tools;
+pub mod diag;
 pub mod erase;
 pub mod error;
 pub mod eth_tx;
@@ -34,29 +35,75 @@ async fn sweep(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Off unless asked for, so a normal run is quiet:
-    //   RUST_LOG=rootmode_desktop_lib=debug,rootmode_p2p=debug npm run app
-    // The `log` macros used elsewhere in this crate are captured too.
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rootmode_desktop_lib=info,rootmode_p2p=info,warn".into()),
-        )
-        .with_target(false)
-        .try_init();
+    // Stderr and a file in the app data directory, from the first line. The
+    // file is what to ask for when the window shows nothing:
+    //   macOS   ~/Library/Application Support/ai.rootmode.desktop/rootmode.log
+    //   Linux   ~/.local/share/ai.rootmode.desktop/rootmode.log
+    //   Windows %APPDATA%\ai.rootmode.desktop\rootmode.log
+    // RUST_LOG still overrides the filter; the `log` macros used elsewhere
+    // in this crate are captured too.
+    diag::init();
 
-    tauri::Builder::default()
+    let stamp = |what: &str| log::info!("[+{}ms] {what}", diag::uptime_ms());
+
+    stamp("building the app");
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        // The window's own life, as the OS reports it. A window that was
+        // never focused, or never resized past zero, is a different problem
+        // from one whose page never loaded.
+        .on_window_event(|window, event| {
+            use tauri::WindowEvent;
+            let label = window.label();
+            match event {
+                WindowEvent::Focused(f) => log::debug!("window {label}: focused={f}"),
+                WindowEvent::Resized(s) => log::debug!("window {label}: resized to {}x{}", s.width, s.height),
+                WindowEvent::Moved(p) => log::trace!("window {label}: moved to {},{}", p.x, p.y),
+                WindowEvent::ScaleFactorChanged { scale_factor, new_inner_size, .. } => log::info!(
+                    "window {label}: scale factor {scale_factor}, inner size {}x{}",
+                    new_inner_size.width,
+                    new_inner_size.height
+                ),
+                WindowEvent::ThemeChanged(t) => log::info!("window {label}: theme {t:?}"),
+                WindowEvent::CloseRequested { .. } => log::info!("window {label}: close requested"),
+                WindowEvent::Destroyed => log::info!("window {label}: destroyed"),
+                _ => {}
+            }
+        })
+        // The page's life, as the webview reports it. "started" with no
+        // "finished" means the engine gave up on our own HTML.
+        .on_page_load(|webview, payload| {
+            use tauri::webview::PageLoadEvent;
+            match payload.event() {
+                PageLoadEvent::Started => log::info!(
+                    "[+{}ms] webview {}: page load started: {}",
+                    diag::uptime_ms(),
+                    webview.label(),
+                    payload.url()
+                ),
+                PageLoadEvent::Finished => log::info!(
+                    "[+{}ms] webview {}: page load finished: {}",
+                    diag::uptime_ms(),
+                    webview.label(),
+                    payload.url()
+                ),
+            }
+        })
+        .setup(move |app| {
+            stamp("setup: started");
             let app_data = app.path().app_data_dir()?;
             let downloads = app
                 .path()
                 .download_dir()
                 .unwrap_or_else(|_| app_data.clone())
                 .join("rootmode");
+            log::info!("setup: app data {}", app_data.display());
+            log::info!("setup: downloads {}", downloads.display());
 
             let state = Arc::new(AppState::new(app_data, downloads)?);
+            stamp("setup: database open, identity loaded");
             crate::pot::boot(state.app_data.clone());
+            stamp("setup: wallet ledger restored");
 
             // Jobs cannot outlive the connection that owned them.
             match state.db.fail_orphaned_jobs() {
@@ -75,6 +122,16 @@ pub fn run() {
                 let window = app
                     .get_webview_window("main")
                     .ok_or("the main window is missing")?;
+                match (window.inner_size(), window.scale_factor(), window.is_visible()) {
+                    (Ok(size), Ok(scale), Ok(visible)) => log::info!(
+                        "setup: main window exists, {}x{} at scale {scale}, visible={visible}",
+                        size.width,
+                        size.height
+                    ),
+                    (size, scale, visible) => log::warn!(
+                        "setup: main window exists but will not describe itself: size={size:?} scale={scale:?} visible={visible:?}"
+                    ),
+                }
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop {
                         paths, ..
@@ -140,6 +197,7 @@ pub fn run() {
             // this network announce themselves and we react to that, rather
             // than polling and making the user wait for the next tick.
             let handle = app.handle().clone();
+            stamp("setup: background tasks started");
             tauri::async_runtime::spawn(async move {
                 loop {
                     if !state.discovery_enabled() {
@@ -189,6 +247,7 @@ pub fn run() {
                 }
             });
 
+            stamp("setup: complete, handing over to the event loop");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -241,7 +300,29 @@ pub fn run() {
             commands::check_update,
             commands::skip_update,
             commands::open_update,
+            commands::client_log,
+            commands::log_path,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running rootmode");
+        .build(tauri::generate_context!());
+
+    let app = match app {
+        Ok(app) => app,
+        Err(e) => {
+            log::error!("could not build the app: {e}");
+            panic!("error while building rootmode: {e}");
+        }
+    };
+
+    stamp("entering the event loop");
+    app.run(move |_app, event| {
+        use tauri::RunEvent;
+        match event {
+            // The moment the OS has finished launching us. If the log stops
+            // before this line, the window layer never came up at all.
+            RunEvent::Ready => stamp("event loop ready: the window is the OS's now"),
+            RunEvent::ExitRequested { code, .. } => log::info!("exit requested, code {code:?}"),
+            RunEvent::Exit => stamp("exiting"),
+            _ => {}
+        }
+    });
 }
