@@ -768,6 +768,9 @@ details.advanced .body { padding-top: 10px; }
   left: 0;
   right: 0;
   bottom: 0;
+  /* The plain gradient first: an engine without color-mix() (Safari
+     before 16.2) drops the declaration below and keeps this one. */
+  background: linear-gradient(to top, var(--accent) 0%, transparent 100%);
   background: linear-gradient(
     to top,
     var(--accent) 0%,

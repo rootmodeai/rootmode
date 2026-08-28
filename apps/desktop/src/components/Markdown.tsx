@@ -1,6 +1,6 @@
 import type { Components } from "react-markdown";
 import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import remarkGfmLite from "../lib/gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 function open(href: string) {
@@ -36,7 +36,7 @@ const components: Components = {
 export function MarkdownBody({ text }: { text: string }) {
   return (
     <div className="bubble md">
-      <Markdown remarkPlugins={[remarkGfm]} components={components}>
+      <Markdown remarkPlugins={[remarkGfmLite]} components={components}>
         {text}
       </Markdown>
     </div>

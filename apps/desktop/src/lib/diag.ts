@@ -57,12 +57,20 @@ export function showFatal(title: string, detail: string): void {
   root.replaceChildren(pre);
 }
 
+declare global {
+  interface Window {
+    /** Set once the bundle's own reporting is up, so public/early.js stands down. */
+    __rootmodeDiagnostics?: true;
+  }
+}
+
 let installed = false;
 
 /** Hook the window's error channels and say hello. Call before rendering. */
 export function installDiagnostics(): void {
   if (installed) return;
   installed = true;
+  window.__rootmodeDiagnostics = true;
 
   window.addEventListener("error", (event) => {
     const where = event.filename ? ` at ${event.filename}:${event.lineno}:${event.colno}` : "";
