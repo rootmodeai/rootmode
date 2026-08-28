@@ -106,6 +106,7 @@ async fn llm_job_reaches_done_with_a_verified_hash() {
         tools: Vec::new(),
         max_tokens: 128,
         temperature: 0.2,
+        reasoning_effort: None,
     });
 
     let job_id = run(&state, payload).await;
@@ -232,6 +233,7 @@ async fn a_reply_is_filed_even_when_nothing_is_watching() {
         tools: Vec::new(),
         max_tokens: 64,
         temperature: 0.0,
+        reasoning_effort: None,
     });
 
     let job_id = insert_job_in(&state, &payload, Some(chat.id.clone()));
@@ -282,6 +284,7 @@ async fn a_job_with_no_conversation_files_nothing() {
         tools: Vec::new(),
         max_tokens: 64,
         temperature: 0.0,
+        reasoning_effort: None,
     });
     let job_id = insert_job_in(&state, &payload, None);
 
@@ -322,6 +325,7 @@ fn every_caller_gets_a_ceiling_a_reasoning_model_can_work_under() {
             tools: Vec::new(),
             max_tokens: n,
             temperature: 0.0,
+            reasoning_effort: None,
         })) else {
             unreachable!("an llm payload stays an llm payload")
         };

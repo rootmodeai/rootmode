@@ -470,6 +470,29 @@ impl Price {
         (TOKEN_CHUNK as f64 * self.max_rate()).round().max(1.0) as u64
     }
 
+    /// How many tokens in total — prompt included — a bond of `micros`
+    /// covers for a job whose prompt is `prompt` tokens long.
+    ///
+    /// The prompt is billed at the input rate and only what is left buys
+    /// completion tokens at the output rate. Pricing the prompt at the
+    /// output rate instead (as [`Self::tokens_for_micros`] does, being
+    /// rate-agnostic) undercounts the budget by the ratio of the two rates:
+    /// on a model five times dearer to write than to read, a long prompt
+    /// exhausts such a budget before the first token is written, and a
+    /// bond that in fact covers the whole answer is treated as spent.
+    ///
+    /// A bond that does not even cover the prompt covers no completion.
+    pub fn authorized_tokens(&self, micros: u64, prompt: u64) -> u64 {
+        let (_, output, _, _) = self.llm_rates();
+        if output <= 0.0 {
+            return u64::MAX;
+        }
+        let prompt_cost = self.charge_llm_micros(prompt, 0, 0);
+        let left = micros.saturating_sub(prompt_cost);
+        let completion = (left as f64 / output).floor() as u64;
+        prompt.saturating_add(completion)
+    }
+
     /// How many tokens `micros` buys at [`Self::max_rate`].
     pub fn tokens_for_micros(&self, micros: u64) -> u64 {
         let rate = self.max_rate();
@@ -627,6 +650,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 32,
             temperature: 0.0,
+            reasoning_effort: None,
         })
     }
 
@@ -670,6 +694,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 16384,
             temperature: 0.7,
+            reasoning_effort: None,
         });
         let submit = JobSubmit::new(Uuid::new_v4(), "placeholder", payload)
             .signed_by(&id)
@@ -798,6 +823,32 @@ mod tests {
         assert_eq!(price.charge_llm_micros(500, 500, 0), 20_000);
         assert_eq!(price.chunk_micros(), 20_000_000, "1M tokens at $20/M is $20");
         assert_eq!(price.tokens_for_micros(500_000), 25_000); // $0.50 at $20/M
+    }
+
+    #[test]
+    fn a_bond_covers_the_prompt_at_the_input_rate_and_the_rest_at_output() {
+        // Reads at $2/M, writes at $10/M — the shape of a reasoning model.
+        let price = Price {
+            input: Some(2.0),
+            output: Some(10.0),
+            ..Price::new(10.0)
+        };
+        // 40k prompt tokens and room for exactly 1,000 completion tokens.
+        let bond = price.charge_llm_micros(40_000, 1_000, 0);
+        assert_eq!(bond, 80_000 + 10_000);
+        assert_eq!(price.authorized_tokens(bond, 40_000), 41_000);
+        // Priced at the dearest rate throughout, the same bond looks like
+        // 9,000 tokens — fewer than the prompt alone. That is the bug this
+        // replaces: a 40k-token prompt would be "over budget" before the
+        // first token was written.
+        assert_eq!(price.tokens_for_micros(bond), 9_000);
+        // A bond short of the prompt buys nothing beyond it.
+        assert_eq!(price.authorized_tokens(1, 40_000), 40_000);
+        // A flat rate reduces to the old arithmetic.
+        let flat = Price::new(20.0);
+        assert_eq!(flat.authorized_tokens(500_000, 5_000), flat.tokens_for_micros(500_000));
+        // A free model has no budget to run out of.
+        assert_eq!(Price::new(0.0).authorized_tokens(0, 40_000), u64::MAX);
     }
 
     #[test]

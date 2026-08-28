@@ -147,7 +147,17 @@ pub struct LlmParams {
     pub max_tokens: u32,
     #[serde(default = "default_temperature")]
     pub temperature: f32,
+    /// How hard a reasoning model should think before it answers — one of
+    /// [`REASONING_EFFORTS`]. Absent means the provider's default, which is
+    /// what every job asked for before this field existed; an older worker
+    /// ignores it and does exactly that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
+
+/// The efforts a client may ask for, lowest first. The names are the ones
+/// OpenAI-shaped APIs use, so a coding tool's setting passes through unchanged.
+pub const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh"];
 
 fn default_max_tokens() -> u32 {
     512
@@ -295,6 +305,14 @@ impl JobPayload {
                         "temperature out of range (0.0..=2.0)".into(),
                     ));
                 }
+                if let Some(effort) = &p.reasoning_effort {
+                    if !REASONING_EFFORTS.contains(&effort.as_str()) {
+                        return Err(CoreError::Invalid(format!(
+                            "reasoning_effort must be one of {}",
+                            REASONING_EFFORTS.join(", ")
+                        )));
+                    }
+                }
             }
             JobPayload::Image(p) => {
                 if p.prompt.trim().is_empty() {
@@ -412,6 +430,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 64,
             temperature: 0.7,
+            reasoning_effort: None,
         })
     }
 

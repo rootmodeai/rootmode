@@ -448,6 +448,7 @@ mod tests {
                 tools: Vec::new(),
                 max_tokens: 16,
                 temperature: 0.1,
+                reasoning_effort: None,
             },
         );
         assert_eq!(r.sha256, sha256_hex(r.text.as_ref().unwrap().as_bytes()));

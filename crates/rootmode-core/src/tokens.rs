@@ -209,6 +209,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 16,
             temperature: 0.0,
+            reasoning_effort: None,
         }
     }
 

@@ -108,6 +108,7 @@ fn llm_payload(model: Option<&str>) -> JobPayload {
         tools: Vec::new(),
         max_tokens: 64,
         temperature: 0.0,
+        reasoning_effort: None,
     })
 }
 

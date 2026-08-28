@@ -186,6 +186,7 @@ impl AnthropicRequest {
                 tools: self.tools.iter().filter_map(anthropic_tool).collect(),
                 max_tokens: self.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
                 temperature: self.temperature.unwrap_or(0.0),
+                reasoning_effort: None, // Anthropic clients send a thinking budget, not an effort
             },
             stream: self.stream,
         })
@@ -584,6 +585,9 @@ pub struct OpenAiRequest {
     pub stream: bool,
     #[serde(default)]
     pub temperature: Option<f32>,
+    /// OpenAI's chat-completions spelling: a bare `"low"` / `"high"`.
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -651,10 +655,21 @@ impl OpenAiRequest {
                     .or(self.max_completion_tokens)
                     .unwrap_or(DEFAULT_MAX_TOKENS),
                 temperature: self.temperature.unwrap_or(0.0),
+                reasoning_effort: reasoning_effort(self.reasoning_effort.as_deref()),
             },
             stream: self.stream,
         })
     }
+}
+
+/// A client's reasoning effort, if it named one we know. Anything else is
+/// dropped rather than refused: the request still runs, at the provider's
+/// default, which is what it did before efforts travelled at all.
+fn reasoning_effort(raw: Option<&str>) -> Option<String> {
+    let e = raw?.trim().to_ascii_lowercase();
+    rootmode_core::job::REASONING_EFFORTS
+        .contains(&e.as_str())
+        .then_some(e)
 }
 
 fn openai_tool(t: &Value) -> Option<ToolDef> {
@@ -812,6 +827,9 @@ pub struct ResponsesRequest {
     pub stream: bool,
     #[serde(default)]
     pub temperature: Option<f32>,
+    /// `{ "effort": "low", "summary": ... }` — Codex and friends.
+    #[serde(default)]
+    pub reasoning: Option<Value>,
 }
 
 /// Responses API content blocks use `input_text` / `output_text` where chat
@@ -906,6 +924,9 @@ impl ResponsesRequest {
                 tools: self.tools.iter().filter_map(responses_tool).collect(),
                 max_tokens: self.max_output_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
                 temperature: self.temperature.unwrap_or(0.0),
+                reasoning_effort: reasoning_effort(
+                    self.reasoning.as_ref().and_then(|r| r.get("effort")).and_then(Value::as_str),
+                ),
             },
             stream: self.stream,
         })
@@ -1516,6 +1537,7 @@ impl Usage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rootmode_core::JobPayload;
 
     fn anthropic(body: Value) -> ChatRequest {
         serde_json::from_value::<AnthropicRequest>(body)
@@ -1999,6 +2021,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 16,
             temperature: 0.0,
+            reasoning_effort: None,
         };
         let low = serde_json::json!({ "prompt_tokens": 1, "completion_tokens": 1 });
         let billed = Usage::billed(&params, "hello world", None, &[], &low);
@@ -2101,6 +2124,13 @@ mod tests {
             .unwrap()
     }
 
+    fn openai(body: Value) -> ChatRequest {
+        serde_json::from_value::<OpenAiRequest>(body)
+            .unwrap()
+            .into_chat()
+            .unwrap()
+    }
+
     #[test]
     fn a_plain_string_input_becomes_a_user_turn() {
         let req = responses(serde_json::json!({
@@ -2163,6 +2193,38 @@ mod tests {
         assert_eq!(m[2].role, "tool");
         assert_eq!(m[2].tool_call_id.as_deref(), Some("c1"));
         assert_eq!(m[2].content, "18C");
+    }
+
+    #[test]
+    fn a_reasoning_effort_travels_from_either_openai_shape() {
+        // Responses: Codex's `reasoning: { effort }` object.
+        let req = responses(serde_json::json!({
+            "model": "m",
+            "input": "hi",
+            "reasoning": { "effort": "low", "summary": "auto" },
+        }));
+        assert_eq!(req.params.reasoning_effort.as_deref(), Some("low"));
+        // Chat completions: the bare string, any case.
+        let req = openai(serde_json::json!({
+            "model": "m",
+            "messages": [{ "role": "user", "content": "hi" }],
+            "reasoning_effort": "HIGH",
+        }));
+        assert_eq!(req.params.reasoning_effort.as_deref(), Some("high"));
+        // Unknown names are dropped, not refused; absent stays absent.
+        let req = openai(serde_json::json!({
+            "model": "m",
+            "messages": [{ "role": "user", "content": "hi" }],
+            "reasoning_effort": "turbo",
+        }));
+        assert_eq!(req.params.reasoning_effort, None);
+        let req = responses(serde_json::json!({ "model": "m", "input": "hi" }));
+        assert_eq!(req.params.reasoning_effort, None);
+        // And the job itself refuses anything outside the list, so a peer
+        // cannot be handed a value the provider would choke on.
+        let mut bad = req.params.clone();
+        bad.reasoning_effort = Some("turbo".into());
+        assert!(JobPayload::Llm(bad).validate().is_err());
     }
 
     #[test]

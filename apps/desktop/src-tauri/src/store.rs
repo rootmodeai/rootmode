@@ -1334,6 +1334,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 32,
             temperature: 0.0,
+            reasoning_effort: None,
         })
     }
 

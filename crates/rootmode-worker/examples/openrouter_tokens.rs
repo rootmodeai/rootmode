@@ -46,6 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tools: Vec::new(),
         max_tokens: 64,
         temperature: 0.0,
+        reasoning_effort: None,
     };
 
     println!("model    {model}");

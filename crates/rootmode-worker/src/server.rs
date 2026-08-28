@@ -1068,19 +1068,25 @@ impl Worker {
         let (delta_tx, mut delta_rx) = mpsc::unbounded_channel::<TokenDelta>();
         let (need_tx, mut need_rx) = mpsc::unbounded_channel::<tokio::sync::oneshot::Sender<u64>>();
         let price = self.advertised_price(&submit.payload);
+        let prompt_used = match &submit.payload {
+            JobPayload::Llm(p) => TokenUsage::measure(p, None, None, &[]).prompt,
+            _ => 0,
+        };
+        // The bond pays for the prompt at the input rate and for the answer
+        // at the output rate, and the budget it buys has to be counted the
+        // same way. Counted at the dearest rate throughout, a long prompt on
+        // a model that writes dearer than it reads was "over budget" before
+        // the first token — a top-up the client could not grant, five
+        // seconds of silence, and an answer delivered unstreamed.
         let start_authorized = if holdback {
             self.pending_bonds
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .get(&job_id)
-                .map(|b| price.tokens_for_micros(b.delta))
+                .map(|b| price.authorized_tokens(b.delta, prompt_used))
                 .unwrap_or(0)
         } else {
             u64::MAX
-        };
-        let prompt_used = match &submit.payload {
-            JobPayload::Llm(p) => TokenUsage::measure(p, None, None, &[]).prompt,
-            _ => 0,
         };
         let forwarder = {
             let tx = tx.clone();
@@ -1149,7 +1155,7 @@ impl Worker {
                                         .lock()
                                         .unwrap_or_else(|e| e.into_inner())
                                         .get(&job_id)
-                                        .map(|b| price.tokens_for_micros(b.delta))
+                                        .map(|b| price.authorized_tokens(b.delta, prompt_used))
                                         .unwrap_or(0);
                                     let _ = reply.send(next);
                                 }
@@ -1645,6 +1651,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 100_000,
             temperature: 0.0,
+            reasoning_effort: None,
         });
         let JobPayload::Llm(clamped) = worker.clamp_to_chunk(payload, 500_000).unwrap() else {
             panic!("llm payload")
@@ -1703,6 +1710,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 16,
             temperature: 0.0,
+            reasoning_effort: None,
         })
     }
 
@@ -1958,6 +1966,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 16384,
             temperature: 0.7,
+            reasoning_effort: None,
         });
         let submit = JobSubmit::new(Uuid::new_v4(), "x", payload)
             .signed_by(&client)
@@ -2036,6 +2045,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 16,
             temperature: 0.0,
+            reasoning_effort: None,
         });
         let (status, error) =
             statuses(&collect(&worker, JobSubmit::new(Uuid::new_v4(), "x", bad)).await)[0].clone();
@@ -2199,6 +2209,92 @@ mod tests {
         );
         running.await.unwrap();
         assert_eq!(worker.channels.owed(), inv.amount, "actual, not the whole chunk");
+    }
+
+    /// A 40k-token prompt on a model that writes five times dearer than it
+    /// reads, bonded for exactly prompt + answer. Counted at the dearest
+    /// rate throughout, that bond looked like fewer tokens than the prompt
+    /// alone: the worker asked for a top-up before the first delta, the
+    /// client could not grant one, and every long-prompt job — an editor's
+    /// whole context — stalled for five seconds and arrived unstreamed.
+    #[tokio::test]
+    async fn a_long_prompt_on_a_split_rate_is_not_over_budget_before_it_starts() {
+        let worker = Worker::new(
+            priced_config(),
+            Identity::generate(),
+            crate::backends::testing::registry_priced_split(JobKind::Llm, 2.0, 10.0),
+        );
+        worker.set_test_channel(u64::MAX, &test_payer());
+        let worker = Arc::new(worker);
+
+        let prompt = "word ".repeat(40_000);
+        let params = LlmParams {
+            model_hash: None,
+            model_id: None,
+            messages: vec![ChatMessage::new("user", &prompt)],
+            tools: Vec::new(),
+            max_tokens: 16,
+            temperature: 0.0,
+            reasoning_effort: None,
+        };
+        let price = rootmode_core::Price {
+            input: Some(2.0),
+            output: Some(10.0),
+            ..rootmode_core::Price::new(10.0)
+        };
+        let prompt_tokens = TokenUsage::measure(&params, None, None, &[]).prompt;
+        assert!(prompt_tokens > 30_000, "the prompt is meant to be long: {prompt_tokens}");
+        // Exactly what the desktop bonds: the prompt at the input rate and
+        // the whole answer allowance at the output rate.
+        let bond = price.charge_llm_micros(prompt_tokens, 16, 0);
+        assert!(
+            price.tokens_for_micros(bond) < prompt_tokens,
+            "at the dearest rate the bond does not even cover the prompt — the old arithmetic"
+        );
+
+        let job_id = Uuid::new_v4();
+        let mut submit = JobSubmit::new(job_id, "client", JobPayload::Llm(params));
+        submit.payer = Some(test_payer());
+        submit.bond = Some(sign_pay(job_id, bond, "0x00000000000000000000000000000000000000b0"));
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let stop = Arc::new(tokio::sync::Notify::new());
+        let w = worker.clone();
+        let running = tokio::spawn(async move {
+            w.handle_submit_cancellable(submit, tx, stop, None).await;
+        });
+
+        let started = std::time::Instant::now();
+        let mut got_delta = false;
+        let mut top_ups = 0;
+        let mut bill = None;
+        while let Some(msg) = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+            .await
+            .expect("job stalled — a top-up nobody answers waits five seconds")
+        {
+            match &msg {
+                WorkerMessage::JobDelta(_) => got_delta = true,
+                WorkerMessage::JobInvoice(i) if i.top_up => top_ups += 1,
+                WorkerMessage::JobInvoice(i) => {
+                    bill = Some(i.clone());
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(top_ups, 0, "the bond covers the whole job; nothing to top up");
+        assert!(got_delta, "the answer streamed");
+        assert!(started.elapsed() < Duration::from_secs(2), "and did not wait on anyone");
+        let bill = bill.expect("the actual bill");
+        assert!(bill.amount <= bond, "billed within the bond: {} <= {bond}", bill.amount);
+
+        let pay = sign_pay(job_id, bill.amount, "0x00000000000000000000000000000000000000b0");
+        let (dummy, _rx) = mpsc::unbounded_channel();
+        worker.on_line(
+            &serde_json::to_string(&ClientMessage::JobPay(pay)).unwrap(),
+            &dummy,
+        );
+        running.await.unwrap();
     }
 
     #[tokio::test]

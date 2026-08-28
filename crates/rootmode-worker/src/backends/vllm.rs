@@ -303,6 +303,20 @@ impl Backend for VllmBackend {
             // OpenRouter: billed dollars and cache/reasoning details.
             body["usage"] = serde_json::json!({ "include": true });
         }
+        // The client's reasoning effort, in the spelling each server reads.
+        // OpenRouter takes the OpenAI `reasoning` object; a vLLM server
+        // takes it as a chat-template argument, which a template without
+        // the knob ignores. Only OpenRouter gets the top-level object — a
+        // local server that rejects unknown keys would refuse the job.
+        if let Some(effort) = &params.reasoning_effort {
+            if self.include_cost {
+                body["reasoning"] = serde_json::json!({ "effort": effort });
+            }
+            body["chat_template_kwargs"] = serde_json::json!({
+                "thinking": effort != "none",
+                "reasoning_effort": effort,
+            });
+        }
         if let Some(model) = &model {
             body["model"] = serde_json::Value::String(model.clone());
         }
@@ -330,10 +344,12 @@ impl Backend for VllmBackend {
             // emitting the answer delimiter — an empty completion. Cap the
             // effort per-request so a tool-using client gets a tool call, not
             // a monologue. Servers that do not know this option ignore it.
-            body["chat_template_kwargs"] = serde_json::json!({
-                "thinking": true,
-                "reasoning_effort": "low",
-            });
+            if params.reasoning_effort.is_none() {
+                body["chat_template_kwargs"] = serde_json::json!({
+                    "thinking": true,
+                    "reasoning_effort": "low",
+                });
+            }
         }
 
         let resp = self
@@ -1103,6 +1119,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 8,
             temperature: 0.0,
+            reasoning_effort: None,
         }
     }
 
@@ -1284,6 +1301,46 @@ mod tests {
             completion.contains("llama-3.1-8b"),
             "and the server was told so too"
         );
+    }
+
+    /// The client's effort reaches the server in the spelling it reads:
+    /// a chat-template argument for vLLM, and for OpenRouter also the
+    /// OpenAI `reasoning` object. A server that is not OpenRouter never
+    /// sees the top-level object — one that rejects unknown keys would
+    /// refuse the whole job over it.
+    #[tokio::test]
+    async fn a_reasoning_effort_is_sent_in_each_servers_spelling() {
+        let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n";
+        let mut with_effort = params();
+        with_effort.reasoning_effort = Some("low".into());
+
+        let stub = StubHttp::start(vec![StubHttp::sse(sse)]).await;
+        backend(stub.base_url())
+            .run(Uuid::nil(), &JobPayload::Llm(with_effort.clone()), &Progress::none())
+            .await
+            .unwrap();
+        let sent = stub.requests().into_iter().last().unwrap();
+        assert!(sent.contains("\"chat_template_kwargs\""), "{sent}");
+        assert!(sent.contains("\"reasoning_effort\":\"low\""), "{sent}");
+        assert!(!sent.contains("\"reasoning\":{"), "a plain server gets no OpenAI object: {sent}");
+
+        let stub = StubHttp::start(vec![StubHttp::sse(sse)]).await;
+        backend(stub.base_url())
+            .reporting_cost()
+            .run(Uuid::nil(), &JobPayload::Llm(with_effort), &Progress::none())
+            .await
+            .unwrap();
+        let sent = stub.requests().into_iter().last().unwrap();
+        assert!(sent.contains("\"reasoning\":{\"effort\":\"low\"}"), "OpenRouter gets the object: {sent}");
+
+        // No effort named: the request is what it always was.
+        let stub = StubHttp::start(vec![StubHttp::sse(sse)]).await;
+        backend(stub.base_url())
+            .run(Uuid::nil(), &JobPayload::Llm(params()), &Progress::none())
+            .await
+            .unwrap();
+        let sent = stub.requests().into_iter().last().unwrap();
+        assert!(!sent.contains("reasoning_effort"), "{sent}");
     }
 
     #[tokio::test]

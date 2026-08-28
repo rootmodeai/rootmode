@@ -82,6 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tools: Vec::new(),
             max_tokens: 64,
             temperature: 0.0,
+            reasoning_effort: None,
         });
         let mut submit = JobSubmit::new(job_id, identity.peer_id(), payload);
         submit.payer = Some(chain.client.clone());

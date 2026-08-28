@@ -222,6 +222,7 @@ async fn run_job(
             tools: Vec::new(),
             max_tokens: 2048,
             temperature: 0.7,
+            reasoning_effort: None,
         }),
     )
     .signed_by(identity)?;

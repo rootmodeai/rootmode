@@ -99,6 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tools: Vec::new(),
             max_tokens: 8192,
             temperature: 0.7,
+            reasoning_effort: None,
         })
     };
 

@@ -418,6 +418,27 @@ pub mod testing {
         )])
     }
 
+    /// A stub priced like a reasoning model: cheap to read, dear to write.
+    pub fn registry_priced_split(kind: JobKind, input: f64, output: f64) -> Registry {
+        use rootmode_core::Price;
+        Registry::from_backends(vec![(
+            Arc::new(StubBackend {
+                kind,
+                reply: "ok".into(),
+            }) as Arc<dyn Backend>,
+            vec![ModelDescriptor {
+                id: "stub".into(),
+                sha256: None,
+                kind,
+                price: Some(Price {
+                    input: Some(input),
+                    output: Some(output),
+                    ..Price::new(input.max(output))
+                }),
+            }],
+        )])
+    }
+
     /// A stub that advertises a price, so holdback tests have something to bill.
     pub fn registry_priced(kind: JobKind, amount: f64) -> Registry {
         use rootmode_core::Price;
@@ -450,6 +471,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 16,
             temperature: 0.0,
+            reasoning_effort: None,
         })
     }
 
