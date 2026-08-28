@@ -895,12 +895,27 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
     if invoice.top_up {
         let room = pending.job_cap.saturating_sub(pending.ceiling);
         if room == 0 || invoice.amount > room {
-            return Err(AppError::Invalid(
+            // The job was bonded at min(its own worst-case estimate, the
+            // account's cap). Which of the two it hit is the whole message:
+            // one is a limit the person can raise, the other is the
+            // worker's accounting running ahead of the prompt it was sent.
+            let st = status(state).await?;
+            let cap = if st.max_per_job_micros == 0 {
+                DEFAULT_MAX_JOB
+            } else {
+                st.max_per_job_micros
+            };
+            let job_cap = pending.job_cap as f64 / 1_000_000.0;
+            return Err(AppError::Invalid(if pending.job_cap >= cap {
+                format!("this reply reached your ${job_cap:.2} limit for a single job; raise it in your wallet")
+            } else {
                 format!(
-                    "this reply reached your ${:.2} limit for a single job",
-                    pending.job_cap as f64 / 1_000_000.0
-                ),
-            ));
+                    "the worker asked for more than the ${job_cap:.2} this reply was prepaid for \
+                     (its estimated worst case, under your ${:.2} limit); its token accounting \
+                     disagrees with ours and the request is refused",
+                    cap as f64 / 1_000_000.0
+                )
+            }));
         }
         if invoice.amount > chunk {
             return Err(AppError::Invalid(
