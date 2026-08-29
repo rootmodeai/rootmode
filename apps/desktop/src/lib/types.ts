@@ -265,10 +265,22 @@ export interface Attachment {
   kind: string;
 }
 
+/** A picture that was dropped in and kept; `id` is its content hash. */
+export interface Picture {
+  id: string;
+  name: string;
+  mime: string;
+  bytes: number;
+}
+
 export interface DropOutcome {
   attached: Attachment[];
+  /** Pictures kept for a flow to point at. */
+  pictures: Picture[];
   /** One line per file that could not be read, already phrased for a person. */
   rejected: string[];
+  /** Where on the page the files landed, in CSS pixels. */
+  at?: { x: number; y: number } | null;
 }
 
 /** A CLI tool or editor that can be config-patched to use the local endpoint. */

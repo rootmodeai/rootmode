@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, errorText } from "../lib/api";
+import { api, errorText, events } from "../lib/api";
+import { useEvent } from "../lib/useEvent";
 import {
   estimate,
   KIND_OF,
@@ -58,7 +59,7 @@ interface Temp {
 }
 
 const KINDS: JobKind[] = ["llm", "image", "video"];
-const TITLE: Record<NodeType, string> = { input: "Input", output: "Output", text: "Text", picture: "Picture", clip: "Video" };
+const TITLE: Record<NodeType, string> = { input: "Input", image: "Image", output: "Output", text: "Text", picture: "Picture", clip: "Video" };
 
 export function Flows() {
   const [flow, setFlowState] = useState<Flow>(() => loadFlow() ?? { nodes: [], edges: [] });
@@ -315,6 +316,35 @@ export function Flows() {
     setFlow((f) => ({ ...f, nodes: f.nodes.map((n) => (n.id === id ? { ...n, text } : n)) }));
   }
 
+  // Pictures dropped on the window land on the canvas as Image nodes, under
+  // the cursor. The OS hands the files to the backend, which keeps them and
+  // tells us where the drop was; documents are the chat's business.
+  useEvent(events.onFilesDropped, (outcome) => {
+    if (outcome.pictures.length > 0) {
+      const cv = canvasRef.current;
+      const r = cv?.getBoundingClientRect();
+      const v = viewRef.current;
+      const inside =
+        outcome.at && r && outcome.at.x >= r.left && outcome.at.x <= r.right && outcome.at.y >= r.top && outcome.at.y <= r.bottom;
+      const base = inside
+        ? toWorld({ clientX: outcome.at!.x, clientY: outcome.at!.y })
+        : { x: ((r?.width ?? 800) / 2 - v.x) / v.k, y: ((r?.height ?? 500) / 2 - v.y) / v.k };
+      const added = outcome.pictures.map((p, i) => ({
+        id: `n${seq.current++}`,
+        type: "image" as const,
+        x: Math.round((base.x - 90 + i * 24) / 10) * 10,
+        y: Math.round((base.y - 20 + i * 24) / 10) * 10,
+        picture: { id: p.id, name: p.name, mime: p.mime },
+      }));
+      setFlow((f) => ({ ...f, nodes: [...f.nodes, ...added] }));
+      setSel(added[added.length - 1].id);
+      setStatus(added.length === 1 ? `Added ${added[0].picture.name}` : `Added ${added.length} pictures`);
+    }
+    const notes = [...outcome.rejected];
+    if (outcome.attached.length > 0) notes.push("Documents go to a chat; drop them on the Text screen.");
+    if (notes.length > 0) setStatus(notes.join(" · "));
+  });
+
   // ----- run
   async function run() {
     if (running) return;
@@ -415,6 +445,9 @@ export function Flows() {
             <span>Output</span>
             <span className="s">any</span>
           </button>
+          <div className="flows-pal-hint">
+            <b>Image</b> — drop a picture anywhere on the canvas to start a model from it.
+          </div>
         </div>
         <div className="flows-side-foot">
           <span><i style={{ background: "var(--t-text)" }} />text</span>
@@ -595,9 +628,11 @@ function Node({
   const P = PORTS[n.type];
   const rows = Math.max(P.ins.length, P.outs.length);
   const state = rt?.state ?? "idle";
-  const color = n.type === "input" ? "var(--t-text)" : n.type === "output" ? "var(--text-3)" : `var(--t-${n.type})`;
-  const offer = n.model && n.type !== "input" && n.type !== "output" ? offerFor(offers, KIND_OF[n.type], n.model) : undefined;
-  const title = n.model ? describe(n.model).name : TITLE[n.type];
+  const color =
+    n.type === "input" ? "var(--t-text)" : n.type === "output" ? "var(--text-3)" : n.type === "image" ? "var(--t-picture)" : `var(--t-${n.type})`;
+  const offer =
+    n.model && n.type !== "input" && n.type !== "image" && n.type !== "output" ? offerFor(offers, KIND_OF[n.type], n.model) : undefined;
+  const title = n.model ? describe(n.model).name : n.type === "image" ? n.picture?.name ?? "Image" : TITLE[n.type];
   const isModel = n.type === "text" || n.type === "picture" || n.type === "clip";
 
   return (
@@ -650,6 +685,7 @@ function Node({
         {n.type === "input" && (
           <textarea value={n.text ?? ""} placeholder="Say what you want…" onChange={(e) => onText(e.target.value)} disabled={running} />
         )}
+        {n.type === "image" && (n.picture ? <Media pictureId={n.picture.id} /> : <div className="bad">no picture</div>)}
         {isModel && (
           <>
             <div className="line">
@@ -684,6 +720,8 @@ function Node({
                   <div className="res text" key={i.port}>{i.from.text}</div>
                 ) : i.from?.jobId && i.port !== "text" ? (
                   <Media key={i.port} jobId={i.from.jobId} />
+                ) : i.from?.pictureId && i.port === "picture" ? (
+                  <Media key={i.port} pictureId={i.from.pictureId} />
                 ) : null,
               )
             )}
@@ -700,29 +738,31 @@ function Node({
   );
 }
 
-/** A picture or clip a node made, straight off disk. */
-function Media({ jobId }: { jobId: string }) {
+/** A picture or clip a node made, straight off disk — or one that was brought. */
+function Media({ jobId, pictureId }: { jobId?: string; pictureId?: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [gone, setGone] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    api
-      .readResultImage(jobId)
-      .then((s) => !cancelled && setSrc(s))
-      .catch(() => !cancelled && setGone(true));
+    setSrc(null);
+    setGone(false);
+    const load = jobId ? api.readResultImage(jobId) : pictureId ? api.readPicture(pictureId) : Promise.reject(new Error("nothing"));
+    load.then((s) => !cancelled && setSrc(s)).catch(() => !cancelled && setGone(true));
     return () => {
       cancelled = true;
     };
-  }, [jobId]);
+  }, [jobId, pictureId]);
   if (gone) return <div className="res empty">This file is no longer on disk.</div>;
   if (!src) return <div className="res empty">Loading…</div>;
   const video = src.startsWith("data:video/");
   return (
     <div className="res media">
       {video ? <video src={src} controls loop muted playsInline /> : <img src={src} alt="" />}
-      <button className="btn sm ghost" onClick={() => void api.revealResult(jobId).catch(() => undefined)}>
-        Show in Finder
-      </button>
+      {jobId && (
+        <button className="btn sm ghost" onClick={() => void api.revealResult(jobId).catch(() => undefined)}>
+          Show in Finder
+        </button>
+      )}
     </div>
   );
 }

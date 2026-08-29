@@ -15,7 +15,9 @@ import type { JobKind, JobPayload, ProviderOption } from "./types";
 
 /** What flows along a wire. */
 export type PortType = "text" | "picture" | "clip";
-export type NodeType = "input" | "text" | "picture" | "clip" | "output";
+/** `image` is a picture you brought — dropped onto the canvas — as opposed
+ * to `picture`, a model that makes one. */
+export type NodeType = "input" | "image" | "text" | "picture" | "clip" | "output";
 
 export interface FlowNode {
   id: string;
@@ -27,6 +29,8 @@ export interface FlowNode {
   /** Input nodes: the text. Model nodes: an optional instruction put in
    * front of whatever arrives on the prompt port. */
   text?: string;
+  /** Image nodes: the kept picture. */
+  picture?: { id: string; name: string; mime: string };
 }
 
 export interface FlowEdge {
@@ -100,6 +104,7 @@ export function due(s: Schedule | undefined, now = Date.now()): boolean {
 /** Port names and what they carry, per node type. */
 export const PORTS: Record<NodeType, { ins: [string, PortType][]; outs: [string, PortType][] }> = {
   input: { ins: [], outs: [["text", "text"]] },
+  image: { ins: [], outs: [["picture", "picture"]] },
   text: { ins: [["prompt", "text"]], outs: [["text", "text"]] },
   picture: { ins: [["prompt", "text"], ["start from", "picture"]], outs: [["picture", "picture"]] },
   clip: { ins: [["prompt", "text"], ["first frame", "picture"]], outs: [["clip", "clip"]] },
@@ -114,6 +119,8 @@ export interface NodeOutput {
   text?: string;
   /** Picture and clip results stay on disk; the job id is how to fetch them. */
   jobId?: string;
+  /** A picture that was brought, not made: its kept id. */
+  pictureId?: string;
 }
 
 export type NodeState = "idle" | "running" | "done" | "failed";
@@ -138,7 +145,7 @@ export function estimate(flow: Flow, offers: Offers): { usd: number; models: num
   let models = 0;
   const missing: string[] = [];
   for (const n of flow.nodes) {
-    if (n.type === "input" || n.type === "output" || !n.model) continue;
+    if (n.type === "input" || n.type === "image" || n.type === "output" || !n.model) continue;
     models += 1;
     const o = offerFor(offers, KIND_OF[n.type], n.model);
     if (!o) {
@@ -178,7 +185,8 @@ export async function runFlow(flow: Flow, offers: Offers, hooks: RunHooks, handl
   const failed = new Set<string>();
   const running = new Set<string>();
   const incoming = (id: string) => flow.edges.filter((e) => e.to === id);
-  const name = (n: FlowNode) => n.model ?? (n.type === "input" ? "Input" : "Output");
+  const name = (n: FlowNode) =>
+    n.model ?? (n.type === "input" ? "Input" : n.type === "image" ? n.picture?.name ?? "Image" : "Output");
 
   for (const n of flow.nodes) hooks.onNode(n.id, { state: "idle", progress: 0, error: undefined, output: undefined });
 
@@ -233,6 +241,10 @@ async function runNode(
     return e ? done.get(e.from) : undefined;
   };
   if (n.type === "input") return { text: (n.text ?? "").trim() };
+  if (n.type === "image") {
+    if (!n.picture) throw new Error("no picture on this node");
+    return { pictureId: n.picture.id };
+  }
   if (n.type === "output") return {};
 
   const kind = KIND_OF[n.type];
@@ -260,8 +272,14 @@ async function runNode(
     };
   } else {
     const fromPort = n.type === "picture" ? "start from" : "first frame";
-    const from = feed(fromPort)?.jobId;
-    const bytes = from ? await api.readResultBytes(from).catch(() => undefined) : undefined;
+    const from = feed(fromPort);
+    // A picture a model made may have been cleaned off disk since; one you
+    // brought is expected to be there, and its absence is the node's error.
+    const bytes = from?.jobId
+      ? await api.readResultBytes(from.jobId).catch(() => undefined)
+      : from?.pictureId
+        ? await api.readPictureBytes(from.pictureId)
+        : undefined;
     payload =
       n.type === "picture"
         ? { kind: "image", checkpoint_id: n.model, prompt, ...(bytes ? { from_image: bytes } : {}) }

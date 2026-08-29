@@ -243,7 +243,9 @@ export function Chat() {
         return [...prev, ...outcome.attached.filter((a) => !names.has(a.name))];
       });
     }
-    setError(outcome.rejected.length > 0 ? outcome.rejected.join(" · ") : null);
+    const notes = [...outcome.rejected];
+    if (outcome.pictures.length > 0) notes.push("Pictures go on the Flows canvas — drop them there to start a model from one.");
+    setError(notes.length > 0 ? notes.join(" · ") : null);
   });
 
   // The reply is written by the job pipeline, so it lands whether or not this

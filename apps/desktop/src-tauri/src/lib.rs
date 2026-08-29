@@ -134,13 +134,28 @@ pub fn run() {
                 }
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop {
-                        paths, ..
+                        paths,
+                        position,
                     }) = event
                     {
                         let handle = handle.clone();
                         let paths = paths.clone();
+                        // Where it landed, in the page's coordinates, so a
+                        // canvas can put the thing under the cursor.
+                        let scale = handle
+                            .get_webview_window("main")
+                            .and_then(|w| w.scale_factor().ok())
+                            .unwrap_or(1.0);
+                        let at = crate::attach::DropPoint {
+                            x: position.x / scale,
+                            y: position.y / scale,
+                        };
                         tauri::async_runtime::spawn_blocking(move || {
-                            let outcome = crate::attach::read_all(&paths);
+                            let pictures = handle
+                                .try_state::<Arc<AppState>>()
+                                .map(|s| s.app_data.join(crate::attach::PICTURES_DIR));
+                            let outcome =
+                                crate::attach::read_all(&paths, pictures.as_deref(), Some(at));
                             let _ = handle.emit(commands::EVENT_FILES_DROPPED, outcome);
                         });
                     }
@@ -302,6 +317,8 @@ pub fn run() {
             commands::open_update,
             commands::client_log,
             commands::log_path,
+            commands::read_picture,
+            commands::read_picture_bytes,
         ])
         .build(tauri::generate_context!());
 

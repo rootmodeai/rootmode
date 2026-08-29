@@ -14,6 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, Result};
 
@@ -124,28 +125,146 @@ fn extract_pdf(path: &Path, name: &str) -> Result<String> {
         .map_err(|e| AppError::Invalid(format!("cannot read {name}: {e}")))
 }
 
+// ------------------------------------------------------------------ pictures
+
+/// A picture is kept, not read: copied into the app's data under its own
+/// hash, so a flow can point at it by id for as long as it likes and the
+/// frontend still never names a path.
+pub const PICTURES_DIR: &str = "pictures";
+
+/// A photo, not a print run. Well above anything a picture model takes.
+pub const MAX_PICTURE_BYTES: u64 = 25 * 1024 * 1024;
+
+const PICTURE_TYPES: &[(&str, &str)] = &[
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("webp", "image/webp"),
+    ("gif", "image/gif"),
+];
+
+/// A dropped picture, kept under [`PICTURES_DIR`].
+#[derive(Debug, Clone, Serialize)]
+pub struct Picture {
+    /// SHA-256 of the bytes, hex. The only handle the frontend gets.
+    pub id: String,
+    pub name: String,
+    pub mime: String,
+    pub bytes: u64,
+}
+
+fn picture_mime(path: &Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_string_lossy().to_lowercase();
+    PICTURE_TYPES.iter().find(|(e, _)| *e == ext).map(|(_, m)| *m)
+}
+
+fn is_picture(path: &Path) -> bool {
+    picture_mime(path).is_some()
+}
+
+/// Copy a dropped picture into `dir` under its hash and describe it.
+pub fn stash_picture(path: &Path, dir: &Path) -> Result<Picture> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "picture".to_string());
+    let mime = picture_mime(path)
+        .ok_or_else(|| AppError::Invalid(format!("{name} is not a picture format this app knows")))?;
+    let meta = std::fs::metadata(path)
+        .map_err(|e| AppError::Invalid(format!("cannot open {name}: {e}")))?;
+    if meta.len() > MAX_PICTURE_BYTES {
+        return Err(AppError::Invalid(format!(
+            "{name} is {} MB, too big for a picture",
+            meta.len() / (1024 * 1024)
+        )));
+    }
+    let bytes =
+        std::fs::read(path).map_err(|e| AppError::Invalid(format!("cannot read {name}: {e}")))?;
+    if bytes.is_empty() {
+        return Err(AppError::Invalid(format!("{name} is empty")));
+    }
+    let id = hex::encode(Sha256::digest(&bytes));
+    std::fs::create_dir_all(dir)?;
+    let ext = PICTURE_TYPES.iter().find(|(_, m)| *m == mime).map(|(e, _)| *e).unwrap_or("png");
+    let kept = dir.join(format!("{id}.{ext}"));
+    if !kept.exists() {
+        std::fs::write(&kept, &bytes)?;
+    }
+    Ok(Picture {
+        id,
+        name,
+        mime: mime.to_string(),
+        bytes: bytes.len() as u64,
+    })
+}
+
+/// Where a kept picture lives, by id. The id is checked to be a hash so
+/// nothing but a file this app wrote can be named.
+fn picture_path(dir: &Path, id: &str) -> Result<(PathBuf, &'static str)> {
+    if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(AppError::Invalid("not a picture id".into()));
+    }
+    for (ext, mime) in PICTURE_TYPES {
+        let p = dir.join(format!("{id}.{ext}"));
+        if p.exists() {
+            return Ok((p, mime));
+        }
+    }
+    Err(AppError::NotFound(format!("picture {id}")))
+}
+
+/// The bytes of a kept picture and their type.
+pub fn read_picture(dir: &Path, id: &str) -> Result<(Vec<u8>, &'static str)> {
+    let (path, mime) = picture_path(dir, id)?;
+    let bytes = std::fs::read(&path)
+        .map_err(|e| AppError::Invalid(format!("cannot read {}: {e}", path.display())))?;
+    Ok((bytes, mime))
+}
+
+/// Where on the window the files landed, in the page's own coordinates.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct DropPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
 /// Everything the frontend needs to know about a drop.
 #[derive(Debug, Clone, Serialize)]
 pub struct DropOutcome {
     pub attached: Vec<Attachment>,
+    /// Pictures, kept under [`PICTURES_DIR`] for a flow to point at.
+    pub pictures: Vec<Picture>,
     /// One line per file that could not be read, already phrased for a person.
     pub rejected: Vec<String>,
+    pub at: Option<DropPoint>,
 }
 
 /// Read every dropped path, keeping what worked and explaining what did not.
 ///
 /// A failure on one file never discards the others: dropping five documents
 /// and getting nothing because the third was a photo would be maddening.
-pub fn read_all(paths: &[PathBuf]) -> DropOutcome {
+/// Pictures are kept rather than read, in `pictures_dir` when there is one.
+pub fn read_all(paths: &[PathBuf], pictures_dir: Option<&Path>, at: Option<DropPoint>) -> DropOutcome {
     let mut attached = Vec::new();
+    let mut pictures = Vec::new();
     let mut rejected = Vec::new();
     for path in paths {
+        if is_picture(path) {
+            match pictures_dir {
+                Some(dir) => match stash_picture(path, dir) {
+                    Ok(p) => pictures.push(p),
+                    Err(e) => rejected.push(e.to_string()),
+                },
+                None => rejected.push("pictures cannot be kept before the app has started".into()),
+            }
+            continue;
+        }
         match read(path) {
             Ok(a) => attached.push(a),
             Err(e) => rejected.push(e.to_string()),
         }
     }
-    DropOutcome { attached, rejected }
+    DropOutcome { attached, pictures, rejected, at }
 }
 
 #[cfg(test)]
@@ -182,6 +301,49 @@ mod tests {
     }
 
     #[test]
+    fn a_dropped_picture_is_kept_under_its_hash_and_read_back_by_id() {
+        let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3];
+        let path = temp("cat.PNG", &png);
+        let dir = path.parent().unwrap().join("pictures");
+        let outcome = read_all(&[path.clone()], Some(&dir), Some(DropPoint { x: 10.0, y: 20.0 }));
+        assert!(outcome.rejected.is_empty(), "{:?}", outcome.rejected);
+        assert!(outcome.attached.is_empty(), "a picture is not a document");
+        let p = &outcome.pictures[0];
+        assert_eq!(p.name, "cat.PNG");
+        assert_eq!(p.mime, "image/png");
+        assert_eq!(p.bytes, png.len() as u64);
+        assert_eq!(p.id.len(), 64);
+        assert_eq!(outcome.at.unwrap().x, 10.0);
+
+        let (bytes, mime) = read_picture(&dir, &p.id).unwrap();
+        assert_eq!(bytes, png);
+        assert_eq!(mime, "image/png");
+        // Dropping it again keeps one copy.
+        let again = read_all(&[path], Some(&dir), None);
+        assert_eq!(again.pictures[0].id, p.id);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_picture_id_is_a_hash_and_nothing_else() {
+        let dir = std::env::temp_dir().join(format!("rootmode-pictures-{}", uuid::Uuid::new_v4()));
+        for bad in ["../identity.key", "abc", &"z".repeat(64), "/etc/passwd"] {
+            let err = read_picture(&dir, bad).unwrap_err().to_string();
+            assert!(err.contains("not a picture id"), "{bad}: {err}");
+        }
+        let missing = "0".repeat(64);
+        assert!(read_picture(&dir, &missing).unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn a_document_dropped_with_no_pictures_dir_still_reads() {
+        let path = temp("notes.txt", b"hello");
+        let outcome = read_all(&[path], None, None);
+        assert_eq!(outcome.attached[0].text, "hello");
+        assert!(outcome.pictures.is_empty());
+    }
+
+    #[test]
     fn an_empty_document_says_so_rather_than_attaching_nothing() {
         let path = temp("blank.txt", b"   \n\t  ");
         assert!(read(&path).unwrap_err().to_string().contains("no text"));
@@ -210,7 +372,7 @@ mod tests {
     fn one_bad_file_does_not_lose_the_good_ones() {
         let good = temp("good.txt", b"keep me");
         let bad = temp("bad.bin", &[0xff, 0xfe, 0x00]);
-        let outcome = read_all(&[good, bad]);
+        let outcome = read_all(&[good, bad], None, None);
 
         assert_eq!(outcome.attached.len(), 1);
         assert_eq!(outcome.attached[0].text, "keep me");

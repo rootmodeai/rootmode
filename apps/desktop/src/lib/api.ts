@@ -67,6 +67,10 @@ export const api = {
   readResultImage: (jobId: string) => invoke<string>("read_result_image", { jobId }),
   /// The raw base64 of a result, for sending back as a starting point.
   readResultBytes: (jobId: string) => invoke<string>("read_result_bytes", { jobId }),
+  /// A dropped-in picture as a data URL, by its id.
+  readPicture: (id: string) => invoke<string>("read_picture", { id }),
+  /// A dropped-in picture's raw base64, for a job's starting point.
+  readPictureBytes: (id: string) => invoke<string>("read_picture_bytes", { id }),
   revealResult: (jobId: string) => invoke<void>("reveal_result", { jobId }),
   /// Erase a result: the bytes on disk first, then the rows.
   deleteResult: (jobId: string) => invoke<void>("delete_result", { jobId }),

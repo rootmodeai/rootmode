@@ -1101,6 +1101,9 @@ button.wipe-all:disabled {
   border-radius: 10px; box-shadow: var(--shadow); cursor: default;
 }
 .fl-node.input { width: 280px; }
+.fl-node.image { width: 200px; }
+.fl-node.image .fl-body .res.media img { max-height: 160px; object-fit: contain; }
+.flows-pal-hint { font-size: 11.5px; color: var(--text-3); padding: 6px 10px 4px; line-height: 1.45; }
 .fl-node.output { width: 260px; }
 .fl-node.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow); }
 .fl-node.running { border-color: var(--accent); }

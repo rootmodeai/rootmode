@@ -799,3 +799,24 @@ pub fn client_log(level: String, message: String) {
 pub fn log_path() -> Option<String> {
     crate::diag::log_path().map(|p| p.display().to_string())
 }
+
+// ---------------------------------------------------------------- pictures
+
+/// A kept picture as a data URL, for showing on a canvas.
+#[tauri::command]
+pub fn read_picture(state: St<'_>, id: String) -> Result<String> {
+    let dir = state.app_data.join(crate::attach::PICTURES_DIR);
+    let (bytes, mime) = crate::attach::read_picture(&dir, &id)?;
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+/// A kept picture's raw base64, for sending as a job's starting point.
+#[tauri::command]
+pub fn read_picture_bytes(state: St<'_>, id: String) -> Result<String> {
+    let dir = state.app_data.join(crate::attach::PICTURES_DIR);
+    let (bytes, _) = crate::attach::read_picture(&dir, &id)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
