@@ -313,11 +313,12 @@ async fn attempt(
             WorkerMessage::JobStatus(s)
                 if s.job_id == job_id && matches!(s.status, JobStatus::Failed) && !spoke =>
             {
-                nothing = Some(
-                    s.error
-                        .clone()
-                        .unwrap_or_else(|| "the provider failed without saying why".into()),
-                );
+                let why = s
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "the provider failed without saying why".into());
+                crate::pot::adopt_authorised(state, job_id, &why).await;
+                nothing = Some(why);
                 break;
             }
             // An empty answer is not an answer either.

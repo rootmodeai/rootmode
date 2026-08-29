@@ -696,12 +696,13 @@ async fn submit(
 
                 let (worker_tx, mut worker_rx) = mpsc::unbounded_channel::<WorkerMessage>();
                 let (pay_tx, pay_rx) = mpsc::unbounded_channel::<ClientMessage>();
-                // An HTTP client has no way to press Stop, so nothing here
-                // ever notifies this — it exists only because `run_job`
-                // takes one.
+                // An HTTP client has no Stop button, but it can hang up — and
+                // when it does, this is pressed for it (below), so the worker
+                // stops spending on an answer nobody will read.
                 let stop = std::sync::Arc::new(tokio::sync::Notify::new());
                 let drive = {
                     let transport = transport.clone();
+                    let stop = stop.clone();
                     tauri::async_runtime::spawn(async move {
                         transport.run_job(submit, worker_tx, stop, pay_rx).await
                     })
@@ -712,6 +713,13 @@ async fn submit(
                 // held back, and the next provider gets the request.
                 let mut spoke = false;
                 let mut withheld: Option<(String, WorkerMessage)> = None;
+                // Once the client has hung up, nothing more is forwarded —
+                // but the job is stopped and its invoice is still paid. Leaving
+                // the loop instead left the worker to finish an answer nobody
+                // read and bank the whole bond when no payment came, and that
+                // banked bond sat above our ledger, refusing every ticket we
+                // sent that node afterwards.
+                let mut gone = false;
                 while let Some(msg) = worker_rx.recv().await {
                     if let WorkerMessage::JobInvoice(inv) = &msg {
                         match crate::pot::pay_invoice(&state, job_id, inv).await {
@@ -720,6 +728,16 @@ async fn submit(
                             }
                             Err(e) => log::warn!("gateway pay: {e}"),
                         }
+                    }
+                    if let WorkerMessage::JobStatus(s) = &msg {
+                        if matches!(s.status, rootmode_core::JobStatus::Failed) {
+                            if let Some(why) = &s.error {
+                                crate::pot::adopt_authorised(&state, job_id, why).await;
+                            }
+                        }
+                    }
+                    if gone {
+                        continue;
                     }
                     match &msg {
                         WorkerMessage::JobDelta(d) if !d.is_empty() => spoke = true,
@@ -744,7 +762,9 @@ async fn submit(
                         _ => {}
                     }
                     if client_tx.send(msg).is_err() {
-                        break;
+                        gone = true;
+                        log::info!("gateway: the client of job {job_id} hung up; stopping it and paying for what was done");
+                        stop.notify_one();
                     }
                 }
                 let out = if withheld.is_some() {

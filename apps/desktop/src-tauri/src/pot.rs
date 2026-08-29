@@ -865,6 +865,71 @@ pub fn abandon_job(state: &AppState, job_id: Uuid) {
     }
 }
 
+/// The total a worker says it has already authorised, when a refusal
+/// names one — "already authorised 8064009".
+pub fn authorised_in(message: &str) -> Option<u64> {
+    let rest = message.split("already authorised ").nth(1)?;
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok().filter(|n| *n > 0)
+}
+
+/// A node refused a ticket because its ledger is ahead of ours. Every node
+/// on a payout shares one monotonic cumulative on-chain, so a node that has
+/// banked more than we remember — a bond it kept when a job's client went
+/// quiet, or a capture we never recorded — is a number our next ticket must
+/// clear, whichever node it goes to. Adopting it is paying what that node
+/// will settle anyway; refusing to would mean never being served there
+/// again until captures elsewhere happened to carry us past it.
+pub async fn adopt_authorised(state: &AppState, job_id: Uuid, message: &str) {
+    let Some(theirs) = authorised_in(message) else {
+        return;
+    };
+    let payout = jobs()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&job_id)
+        .map(|p| p.payout.clone());
+    let Some(payout) = payout else {
+        return;
+    };
+    let Some(cfg) = load_chain_config(state) else {
+        return;
+    };
+    let ours = cached_cumulative(&cfg, &payout);
+    if theirs <= ours {
+        return;
+    }
+    let Ok(st) = status(state).await else {
+        return;
+    };
+    let Some(client) = st.client.clone() else {
+        return;
+    };
+    let _gate = gate().lock().await;
+    match sign_latest(&state.app_data, &cfg, &client, &payout, theirs) {
+        Ok((ticket, sig)) => {
+            let wk = worker_key(&payout);
+            let mut all = latest().lock().unwrap_or_else(|e| e.into_inner());
+            let on_chain_paid = all.get(&wk).map(|t| t.on_chain_paid).unwrap_or(0);
+            all.insert(
+                wk,
+                LatestTicket {
+                    ticket,
+                    sig,
+                    on_chain_paid,
+                    pot: cfg.pot.clone(),
+                },
+            );
+            drop(all);
+            persist(&state.app_data);
+            log::info!(
+                "job {job_id}: a node had {theirs} µUSDC authorised against our {ours}; adopted it — the next ticket starts there"
+            );
+        }
+        Err(e) => log::warn!("job {job_id}: could not adopt the node's authorised total: {e}"),
+    }
+}
+
 /// Sign a SpendTicket for this invoice. Refuses an amount above the
 /// advertised price × claimed tokens, the prepaid chunk, or the per-job cap.
 pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -> Result<JobPay> {
@@ -1976,6 +2041,20 @@ async fn rpc_once(url: &str, method: &str, params: serde_json::Value) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refusal_that_names_an_authorised_total_is_read() {
+        assert_eq!(
+            authorised_in("ticket cumulative 8063894 is less than 8062420 + 8944 (already authorised 8062420)"),
+            Some(8_062_420)
+        );
+        assert_eq!(
+            authorised_in("the prepaid ticket raises this channel by only $0.0003 (already authorised 8064009), and the prompt alone is 35756 tokens"),
+            Some(8_064_009)
+        );
+        assert_eq!(authorised_in("this reply reached your $12.00 limit for a single job"), None);
+        assert_eq!(authorised_in("already authorised 0"), None);
+    }
 
     #[test]
     fn a_text_job_bonds_what_its_answer_can_cost_not_a_million_token_slice() {

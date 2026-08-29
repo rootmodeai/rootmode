@@ -213,8 +213,11 @@ impl Channels {
         }
         let already = existing.map(|c| c.authorised).unwrap_or(0);
         if ticket.cumulative < already.saturating_add(expected_delta) {
+            // The client's ledger is behind this node's — usually a job whose
+            // bond this node banked after its client went quiet. Naming the
+            // number lets the client adopt it and carry on.
             return Err(format!(
-                "ticket cumulative {} is less than {} + {expected_delta}",
+                "ticket cumulative {} is less than {} + {expected_delta} (already authorised {already})",
                 ticket.cumulative, already
             ));
         }

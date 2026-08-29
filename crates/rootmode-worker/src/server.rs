@@ -293,8 +293,9 @@ impl Worker {
         self.config.payments.domain().is_some() && !self.advertised_price(payload).is_free()
     }
 
-    /// Bank the prepaid chunk. Returns its delta in micros.
-    fn take_bond(&self, submit: &JobSubmit) -> std::result::Result<u64, WorkerError> {
+    /// Bank the prepaid chunk. Returns its delta in micros, and what this
+    /// node had already authorised for the channel before it.
+    fn take_bond(&self, submit: &JobSubmit) -> std::result::Result<(u64, u64), WorkerError> {
         let Some(bond) = submit.bond.clone() else {
             return Err(WorkerError::Rejected(
                 "priced jobs need a signed 1M-token chunk before work".into(),
@@ -342,12 +343,17 @@ impl Worker {
                     app_key: String::new(),
                 },
             );
-        Ok(delta)
+        Ok((delta, already))
     }
 
     /// Bound generation to what is already prepaid. Mid-stream top-ups raise
     /// the prepaid amount; this is only the starting ceiling.
-    fn clamp_to_chunk(&self, payload: JobPayload, bond_micros: u64) -> std::result::Result<JobPayload, WorkerError> {
+    fn clamp_to_chunk(
+        &self,
+        payload: JobPayload,
+        bond_micros: u64,
+        already: u64,
+    ) -> std::result::Result<JobPayload, WorkerError> {
         let price = self.advertised_price(&payload);
         let JobPayload::Llm(mut params) = payload else {
             return Ok(payload);
@@ -363,11 +369,16 @@ impl Worker {
         let fresh = input.max(cache_write);
         let prompt_micros = (prompt as f64 * fresh).ceil() as u64;
         if prompt_micros >= bond_micros {
+            // A ticket that raises this channel by less than the prompt costs
+            // is almost never a cap: it is the client's ledger sitting below
+            // this node's, so its "cumulative" lands barely above what was
+            // already authorised here. Say what that number is — the client
+            // adopts it and the next ticket clears.
             return Err(WorkerError::Rejected(format!(
-                "this prompt is {prompt} tokens (about ${:.2} at this model's input rate), more than \
-                 your ${:.2} limit for a single job",
-                prompt_micros as f64 / 1_000_000.0,
-                bond_micros as f64 / 1_000_000.0
+                "the prepaid ticket raises this channel by only ${:.4} (already authorised {already}), \
+                 and the prompt alone is {prompt} tokens (about ${:.4} at this model's input rate)",
+                bond_micros as f64 / 1_000_000.0,
+                prompt_micros as f64 / 1_000_000.0
             )));
         }
         let room = if output > 0.0 {
@@ -994,7 +1005,7 @@ impl Worker {
 
         if holdback {
             match self.take_bond(&submit) {
-                Ok(delta) => match self.clamp_to_chunk(submit.payload.clone(), delta) {
+                Ok((delta, already)) => match self.clamp_to_chunk(submit.payload.clone(), delta, already) {
                     Ok(payload) => submit.payload = payload,
                     Err(e) => {
                         self.pending_bonds
@@ -1668,7 +1679,7 @@ mod tests {
             temperature: 0.0,
             reasoning_effort: None,
         });
-        let JobPayload::Llm(clamped) = worker.clamp_to_chunk(payload, 500_000).unwrap() else {
+        let JobPayload::Llm(clamped) = worker.clamp_to_chunk(payload, 500_000, 0).unwrap() else {
             panic!("llm payload")
         };
         assert!(clamped.max_tokens > 15_000, "room left for the answer: {}", clamped.max_tokens);
@@ -2310,6 +2321,29 @@ mod tests {
             &dummy,
         );
         running.await.unwrap();
+    }
+
+    #[test]
+    fn a_ticket_that_barely_raises_the_channel_names_what_was_already_authorised() {
+        let worker = priced_worker();
+        let long = "word ".repeat(2_000);
+        let params = LlmParams {
+            model_hash: None,
+            model_id: None,
+            messages: vec![ChatMessage::new("user", &long)],
+            tools: Vec::new(),
+            max_tokens: 16,
+            temperature: 0.0,
+            reasoning_effort: None,
+        };
+        // 2,000 tokens at $20/M is $0.04; a ticket raising the channel by
+        // 300 µUSDC over 8,064,009 already authorised cannot cover it.
+        let err = worker
+            .clamp_to_chunk(JobPayload::Llm(params), 300, 8_064_009)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("already authorised 8064009"), "{err}");
+        assert!(!err.contains("your $"), "it is not the person's limit: {err}");
     }
 
     #[tokio::test]
