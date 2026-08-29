@@ -142,6 +142,8 @@ export const api = {
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
   /// Where this run is writing its log, for Settings to point at.
   logPath: () => invoke<string | null>("log_path"),
+  /// Where the intro film is installed, or null when it was not shipped.
+  introPath: () => invoke<string | null>("intro_path"),
   skipUpdate: (version: string) => invoke<void>("skip_update", { version }),
   openUpdate: (url?: string) => invoke<void>("open_update", { url: url ?? null }),
 };

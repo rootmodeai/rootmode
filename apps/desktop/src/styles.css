@@ -91,6 +91,11 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
 
 /* ------------------------------------------------------------------ boot */
 
+.intro { position: fixed; inset: 0; z-index: 50; background: #08090a; display: flex; align-items: center; justify-content: center; opacity: 1; transition: opacity 0.35s ease; }
+.intro.leaving { opacity: 0; pointer-events: none; }
+.intro video { width: 100%; height: 100%; object-fit: contain; background: #08090a; }
+.intro-skip { position: absolute; right: 22px; bottom: 20px; border: 1px solid rgba(255,255,255,0.28); background: rgba(0,0,0,0.35); color: #e6e6e6; font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 999px; cursor: pointer; opacity: 0.75; }
+.intro-skip:hover { opacity: 1; }
 .boot {
   height: 100%;
   display: grid;

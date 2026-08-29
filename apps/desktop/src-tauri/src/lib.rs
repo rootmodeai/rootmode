@@ -319,6 +319,7 @@ pub fn run() {
             commands::log_path,
             commands::read_picture,
             commands::read_picture_bytes,
+            commands::intro_path,
         ])
         .build(tauri::generate_context!());
 

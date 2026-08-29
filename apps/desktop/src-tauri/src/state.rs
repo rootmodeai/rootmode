@@ -28,6 +28,10 @@ pub const SETTING_MOCK_WORKER: &str = "mock_worker";
 pub const SETTING_HEARTBEAT: &str = "heartbeat";
 /// A random id this install made up for itself the first time it was asked.
 pub const SETTING_INSTALL_ID: &str = "install_id";
+/// Whether this install has watched the intro film. Kept here, with the
+/// install's own data, rather than in the webview's storage — which on
+/// macOS lives with the user, not the install.
+pub const SETTING_INTRO_SEEN: &str = "intro_seen";
 pub use crate::gateway::{
     SETTING_GATEWAY, SETTING_GATEWAY_MODEL, SETTING_GATEWAY_PORT, SETTING_GATEWAY_SUBSTITUTE,
 };
@@ -246,6 +250,10 @@ impl AppState {
                 .and_then(|s| s.trim().parse().ok())
                 .unwrap_or(crate::gateway::DEFAULT_PORT),
             heartbeat: self.heartbeat_enabled(),
+            intro_seen: matches!(
+                self.db.get_setting(SETTING_INTRO_SEEN).ok().flatten().as_deref(),
+                Some("true")
+            ),
             app_data_dir: self.app_data.to_string_lossy().into_owned(),
             db_path: self.db.path().to_string_lossy().into_owned(),
             key_path: identity_store::key_path(&self.app_data)
@@ -255,8 +263,9 @@ impl AppState {
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
-        const ALLOWED: [&str; 14] = [
+        const ALLOWED: [&str; 15] = [
             SETTING_HEARTBEAT,
+            SETTING_INTRO_SEEN,
             SETTING_DOWNLOAD_DIR,
             SETTING_DEFAULT_PEER,
             SETTING_DEFAULT_LLM,
@@ -343,6 +352,8 @@ pub struct Settings {
     pub gateway_port: u16,
     /// Whether the update check identifies this install so it can be counted.
     pub heartbeat: bool,
+    /// Whether the intro film has played on this install.
+    pub intro_seen: bool,
     pub app_data_dir: String,
     pub db_path: String,
     pub key_path: String,

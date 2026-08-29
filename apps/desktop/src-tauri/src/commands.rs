@@ -820,3 +820,15 @@ pub fn read_picture_bytes(state: St<'_>, id: String) -> Result<String> {
     let (bytes, _) = crate::attach::read_picture(&dir, &id)?;
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
+
+/// Where the intro film was installed, for the webview to play through the
+/// asset protocol — the embedded-asset scheme cannot serve media, since
+/// WebKit's media loader needs byte ranges and it answers whole files.
+#[tauri::command]
+pub fn intro_path(app: AppHandle) -> Option<String> {
+    let path = app
+        .path()
+        .resolve("resources/intro.mp4", tauri::path::BaseDirectory::Resource)
+        .ok()?;
+    path.exists().then(|| path.display().to_string())
+}

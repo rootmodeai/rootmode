@@ -285,6 +285,19 @@ export function Settings() {
       </div>
 
       <div className="card">
+        <h2>Intro</h2>
+        <p style={{ color: "var(--text-2)", fontSize: 13.5, margin: "0 0 10px" }}>
+          The film a new install opens with. It plays once; this brings it back on the next start.
+        </p>
+        <button
+          className="btn"
+          onClick={() => void save("intro_seen", "false", "The intro will play the next time rootmode starts.")}
+        >
+          Play the intro again
+        </button>
+      </div>
+
+      <div className="card">
         <details className="advanced">
           <summary>Where things are kept</summary>
           <div className="body mono" style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.9 }}>

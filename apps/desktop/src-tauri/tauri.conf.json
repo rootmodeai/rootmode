@@ -22,7 +22,13 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; media-src 'self' asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$RESOURCE/**"
+        ]
+      }
     }
   },
   "bundle": {
@@ -36,6 +42,9 @@
     ],
     "copyright": "rootmode",
     "shortDescription": "your keys, your peers",
-    "longDescription": "rootmode is a local-first desktop client for discovering peers and submitting LLM inference and image generation jobs to them."
+    "longDescription": "rootmode is a local-first desktop client for discovering peers and submitting LLM inference and image generation jobs to them.",
+    "resources": [
+      "resources/intro.mp4"
+    ]
   }
 }

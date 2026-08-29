@@ -3,6 +3,7 @@ import { StoreProvider, useStore } from "./lib/store";
 import { api } from "./lib/api";
 import { diag } from "./lib/diag";
 import { Boot } from "./screens/Boot";
+import { Intro, markIntroSeen } from "./components/Intro";
 import { Chat } from "./screens/Chat";
 import { Create } from "./screens/Create";
 import { Flows } from "./screens/Flows";
@@ -42,8 +43,14 @@ export default function App() {
 
 /** Nothing is shown until the app knows whether it can do anything. */
 function Gate() {
-  const { ready, bootError } = useStore();
+  const { ready, bootError, settings } = useStore();
   const [entered, setEntered] = useState(false);
+  // The intro plays over the boot screen the first time this install
+  // starts, and never again unless asked for in Settings. Until the
+  // settings have been read nothing is decided, so it neither flashes for
+  // an old install nor is missed by a new one.
+  const [dismissed, setDismissed] = useState(false);
+  const intro = settings !== null && !settings.intro_seen && !dismissed;
   // Stable on purpose: Boot restarts its search — and its give-up timer —
   // whenever this changes, and the store re-renders Gate every ten seconds
   // as the peer list is re-read. A fresh closure each time meant the
@@ -62,10 +69,28 @@ function Gate() {
     if (entered) diag("info", "entered the main shell");
   }, [entered]);
 
+  const film = intro ? (
+    <Intro
+      onDone={() => {
+        void markIntroSeen().catch(() => undefined);
+        setDismissed(true);
+      }}
+    />
+  ) : null;
   if (!ready || !entered) {
-    return <Boot onReady={enter} />;
+    return (
+      <>
+        <Boot onReady={enter} />
+        {film}
+      </>
+    );
   }
-  return <Shell />;
+  return (
+    <>
+      <Shell />
+      {film}
+    </>
+  );
 }
 
 function Shell() {
