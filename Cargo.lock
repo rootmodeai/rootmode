@@ -4952,7 +4952,7 @@ dependencies = [
 
 [[package]]
 name = "rootmode-core"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -4969,7 +4969,7 @@ dependencies = [
 
 [[package]]
 name = "rootmode-desktop"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "async-trait",
  "axum",
@@ -5005,7 +5005,7 @@ dependencies = [
 
 [[package]]
 name = "rootmode-p2p"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "clap",
  "futures",
@@ -5023,7 +5023,7 @@ dependencies = [
 
 [[package]]
 name = "rootmode-worker"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
