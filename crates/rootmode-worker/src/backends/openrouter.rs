@@ -157,6 +157,19 @@ struct ListedVideo {
     /// Whether the model can put sound on a clip at all.
     #[serde(default)]
     generate_audio: Option<bool>,
+    /// Which frames may be supplied: "first_frame", "last_frame". The
+    /// catalogue writes an explicit `null` for a model that takes none
+    /// (Sora), which is a different thing from not saying: kept as raw
+    /// JSON so the two can be told apart.
+    #[serde(default, deserialize_with = "present")]
+    supported_frame_images: Option<serde_json::Value>,
+}
+
+/// `Some` for any value that was on the wire, `null` included — serde's own
+/// `Option` reads a `null` as absent, which is exactly the distinction the
+/// catalogue's frame list needs kept.
+fn present<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Option<serde_json::Value>, D::Error> {
+    <serde_json::Value as serde::Deserialize>::deserialize(d).map(Some)
 }
 
 #[derive(Deserialize)]
@@ -174,6 +187,14 @@ const VIDEO_ASPECT: &str = "16:9";
 
 /// Resolution names as they appear inside SKU keys.
 const RESOLUTION_TAGS: &[&str] = &["480p", "720p", "1024p", "1080p", "2k", "4k"];
+
+/// Token-metered providers count a few more tokens than width × height ×
+/// 24 / 1024 says — a 15 s Seedance clip came to 324,900 against 324,000
+/// computed, and the quote cleared the bill by 733 µUSDC only because a
+/// quote rounds up to the cent. A bill above the bond is refused by the
+/// client and the node eats the clip, so the quote carries this much room.
+/// The bill itself is still cost plus margin; only the lock is higher.
+const VIDEO_TOKEN_HEADROOM: f64 = 1.04;
 
 /// Pixels per frame at a resolution, 16:9 — the widest frame at that
 /// height, so a token count from it never comes in under a narrower one.
@@ -251,7 +272,7 @@ fn shape_rate_usd(
         return Some((cents_per_s / 100.0, floor / 100.0));
     }
     if let Some(usd_per_token) = pick(&|k| k.starts_with("video_tokens")) {
-        return Some((usd_per_token * pixels(&res) * 24.0 / 1024.0, 0.0));
+        return Some((usd_per_token * pixels(&res) * 24.0 / 1024.0 * VIDEO_TOKEN_HEADROOM, 0.0));
     }
     None
 }
@@ -315,6 +336,20 @@ impl ListedVideo {
         self.audio_offer() == AudioOffer::Optional
     }
 
+    /// Whether a first frame may be supplied. The catalogue lists the
+    /// frames a model takes; Sora lists `null` and refuses one with a 400.
+    /// An entry that does not mention frames at all is assumed to take
+    /// one — that is what every clip was priced as before, and the safe
+    /// side for a lock is the dearer one.
+    fn takes_first_frame(&self) -> bool {
+        match &self.supported_frame_images {
+            None => true,
+            Some(serde_json::Value::Array(frames)) => frames.iter().any(|f| f.as_str() == Some("first_frame")),
+            Some(serde_json::Value::Null) => false,
+            Some(_) => true,
+        }
+    }
+
     /// The menu: every shape this model makes and what each costs per
     /// second after markup. `None` when the catalogue names no clip rate.
     fn offer(&self, markup: f64) -> Option<VideoOffer> {
@@ -332,10 +367,12 @@ impl ListedVideo {
         } else {
             resolutions.iter().cloned().map(Some).collect()
         };
+        let first_frame = self.takes_first_frame();
+        let froms: &[bool] = if first_frame { &[false, true] } else { &[false] };
         let mut rates = Vec::new();
         for res in &res_choices {
             for &sound in sounds {
-                for from_image in [false, true] {
+                for &from_image in froms {
                     if let Some((per_second, minimum)) = shape_rate_usd(&skus, res.as_deref(), sound, from_image) {
                         rates.push(VideoRate {
                             resolution: res.clone(),
@@ -362,6 +399,7 @@ impl ListedVideo {
             aspect_ratios: self.supported_aspect_ratios.clone().unwrap_or_default(),
             default_aspect: self.aspect(),
             audio,
+            first_frame,
             rates,
         })
     }
@@ -992,9 +1030,10 @@ mod tests {
         // cents per output second by resolution (grok): the 720p one, not the input-image fee
         assert_eq!(clip(r#"{"id":"x-ai/grok-imagine-video","pricing_skus":{"cents_per_image_input":"0.2",
             "cents_per_video_output_second_480p":"5","cents_per_video_output_second_720p":"7"}}"#), 0.41); // 35¢ ×1.15
-        // per video token: 1280×720×24/1024 = 21,600 tokens/s × 5s × 0.0000042 = $0.4536
+        // per video token: 1280×720×24/1024 = 21,600 tokens/s × 5s × 0.0000042 = $0.4536,
+        // plus the 4% the meter tends to run over, then markup: 0.5425 → 0.55
         assert_eq!(clip(r#"{"id":"bytedance/seedance-2.0-fast","pricing_skus":{"video_tokens":"0.0000042",
-            "video_tokens_without_audio":"0.0000042","video_tokens_with_video_input":"0.000002475"}}"#), 0.53);
+            "video_tokens_without_audio":"0.0000042","video_tokens_with_video_input":"0.000002475"}}"#), 0.55);
         // an upscaler priced per megapixel is not a clip: not advertised
         let up: super::ListedVideo = serde_json::from_str(r#"{"id":"black-forest-labs/flux-video-upscale",
             "pricing_skus":{"cents_per_megapixel_second_precise":"7.5"}}"#).unwrap();
@@ -1077,14 +1116,30 @@ mod tests {
             "pricing_skus":{"video_tokens":"0.000007","video_tokens_4k":"0.000004","video_tokens_1080p":"0.0000077"}}"#).unwrap();
         let s = seedance.offer(1.0).unwrap();
         let per = |res: &str| s.rates.iter().find(|r| r.resolution.as_deref() == Some(res) && !r.from_image).unwrap().usd_per_second;
-        assert!((per("720p") - 0.000007 * 1280.0 * 720.0 * 24.0 / 1024.0).abs() < 1e-9);
+        assert!((per("720p") - 0.000007 * 1280.0 * 720.0 * 24.0 / 1024.0 * super::VIDEO_TOKEN_HEADROOM).abs() < 1e-9);
         assert!(per("4K") > per("720p") * 3.0, "4K costs several times 720p per second");
         // Sora: one rate, sound built in, no switch.
         let sora: super::ListedVideo = serde_json::from_str(r#"{"id":"openai/sora-2-pro",
             "supported_durations":[4,8,12,16,20],"generate_audio":true,"supported_resolutions":["720p","1080p"],
+            "supported_frame_images":null,
             "pricing_skus":{"duration_seconds_720p":"0.30","duration_seconds_1024p":"0.50","duration_seconds_1080p":"0.50"}}"#).unwrap();
         let so = sora.offer(1.15).unwrap();
         assert_eq!(so.audio, rootmode_core::AudioOffer::Always);
+        // Sora lists no frames it takes: no image-to-video rate, and a
+        // request carrying a first frame is refused before anything is
+        // locked or sent — the alternative was a 400 after a $6.90 bond.
+        assert!(!so.first_frame);
+        assert!(so.rates.iter().all(|r| !r.from_image));
+        let framed = rootmode_core::VideoParams {
+            model_hash: None, checkpoint_id: None, prompt: "x".into(), from_image: Some("abc".into()),
+            seconds: Some(8), resolution: None, aspect_ratio: None, audio: None,
+        };
+        assert!(so.shape_for(&framed).unwrap_err().contains("cannot start from a picture"));
+        // Kling lists first_frame: it takes one, and prices it.
+        let kling_frames: super::ListedVideo = serde_json::from_str(r#"{"id":"kwaivgi/kling-v3.0-std",
+            "supported_frame_images":["first_frame","last_frame"],"generate_audio":true,
+            "pricing_skus":{"duration_seconds":"0.084"}}"#).unwrap();
+        assert!(kling_frames.offer(1.0).unwrap().first_frame);
         let twenty = rootmode_core::VideoParams {
             model_hash: None, checkpoint_id: None, prompt: "x".into(), from_image: None,
             seconds: Some(20), resolution: Some("1080p".into()), aspect_ratio: None, audio: None,

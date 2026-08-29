@@ -257,7 +257,12 @@ async function runNode(
   if (!cheapest) throw new Error(`nobody is serving ${n.model} right now`);
   const target = targetFor(cheapest, rows);
 
-  // A clip is checked and locked at the quote for its chosen shape.
+  // A clip is checked and locked at the quote for its chosen shape — and a
+  // model that takes no first frame is told so here, before any lock,
+  // rather than by the provider after one.
+  if (n.type === "clip" && feed("first frame") && cheapest.video && !cheapest.video.first_frame) {
+    throw new Error(`${n.model} cannot start from a picture — disconnect its "first frame" wire`);
+  }
   const stepPrice = n.type === "clip" ? (quote(cheapest.video, n.video ?? {}, !!feed("first frame")) ?? cheapest.price) : cheapest.price;
   const check = await api.potCheck(stepPrice, cheapest.unpriced, kind);
   if (!check.ready) throw new Error(check.reason || "your wallet cannot cover this step");

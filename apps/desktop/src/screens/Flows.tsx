@@ -706,6 +706,9 @@ function Node({
                 <span className="bad">nobody serves this right now</span>
               )}
             </div>
+            {n.type === "clip" && offer?.video && !offer.video.first_frame && incoming.some((i) => i.port === "first frame") && (
+              <div className="bad">This model cannot start from a picture — disconnect the first-frame wire.</div>
+            )}
             {n.type === "clip" &&
               (offer?.video ? (
                 <ClipOptions compact offer={offer.video} choice={n.video ?? {}} onChange={onVideo} currency={offer.currency} disabled={running} />

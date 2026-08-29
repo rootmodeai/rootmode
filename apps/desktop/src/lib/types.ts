@@ -79,6 +79,8 @@ export interface VideoOffer {
   aspect_ratios: string[];
   default_aspect?: string | null;
   audio: AudioOffer;
+  /** Whether a first frame is taken at all. */
+  first_frame: boolean;
   rates: VideoRate[];
 }
 

@@ -565,7 +565,15 @@ pub struct VideoOffer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_aspect: Option<String>,
     pub audio: AudioOffer,
+    /// Whether a first frame (image-to-video) is taken at all. Absent on
+    /// the wire means an older provider that did not say: assumed yes.
+    #[serde(default = "yes")]
+    pub first_frame: bool,
     pub rates: Vec<VideoRate>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// One clip, fully decided: what will be asked of the provider and priced.
@@ -642,6 +650,9 @@ impl VideoOffer {
             AudioOffer::Optional => p.audio.unwrap_or(false),
         };
         let from_image = p.from_image.as_deref().is_some_and(|s| !s.trim().is_empty());
+        if from_image && !self.first_frame {
+            return Err("this model cannot start from a picture".into());
+        }
         Ok(VideoShape {
             seconds,
             resolution,
@@ -1044,6 +1055,7 @@ mod tests {
             aspect_ratios: vec!["16:9".into(), "9:16".into()],
             default_aspect: Some("16:9".into()),
             audio: AudioOffer::Optional,
+            first_frame: true,
             rates: vec![
                 VideoRate { resolution: Some("720p".into()), audio: false, from_image: false, usd_per_second: 0.05, minimum_usd: 0.0 },
                 VideoRate { resolution: Some("720p".into()), audio: false, from_image: true, usd_per_second: 0.07, minimum_usd: 0.0 },
@@ -1126,6 +1138,19 @@ mod tests {
         on.audio = Some(true);
         assert!(o.shape_for(&on).unwrap_err().contains("silent"));
         assert!(!o.shape_for(&clip()).unwrap().audio);
+    }
+
+    #[test]
+    fn a_model_that_takes_no_first_frame_refuses_one_before_anything_is_locked() {
+        let mut o = offer();
+        o.first_frame = false;
+        let mut from = clip();
+        from.from_image = Some("abc".into());
+        assert!(o.shape_for(&from).unwrap_err().contains("cannot start from a picture"));
+        assert!(o.shape_for(&clip()).is_ok(), "without one it is an ordinary clip");
+        // An offer from a provider that predates the flag is read as taking one.
+        let old: VideoOffer = serde_json::from_str(r#"{"durations":[5],"default_seconds":5,"audio":"never","rates":[]}"#).unwrap();
+        assert!(old.first_frame);
     }
 
     #[test]
