@@ -413,6 +413,7 @@ pub mod testing {
                     sha256: None,
                     kind,
                     price: Some(Price::new(*amount)),
+                    video: None,
                 })
                 .collect(),
         )])
@@ -435,6 +436,7 @@ pub mod testing {
                     output: Some(output),
                     ..Price::new(input.max(output))
                 }),
+                video: None,
             }],
         )])
     }
@@ -452,6 +454,7 @@ pub mod testing {
                 sha256: None,
                 kind,
                 price: Some(Price::new(amount)),
+                video: None,
             }],
         )])
     }
@@ -492,6 +495,7 @@ mod tests {
             sha256: None,
             kind: JobKind::Llm,
             price: None,
+            video: None,
         }
     }
 
@@ -539,6 +543,7 @@ mod tests {
                 sha256: None,
                 kind: JobKind::Video,
                 price: None,
+                video: None,
             }],
             JobKind::Image,
         );
@@ -548,6 +553,10 @@ mod tests {
             checkpoint_id: Some("minimax-h3".into()),
             prompt: "a clip".into(),
             from_image: None,
+            seconds: None,
+            resolution: None,
+            aspect_ratio: None,
+            audio: None,
         });
         assert!(registry.route(&payload).is_ok());
     }

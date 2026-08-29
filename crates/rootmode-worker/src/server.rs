@@ -398,6 +398,15 @@ impl Worker {
                 .iter()
                 .find(|m| m.id == model || model.starts_with(&m.id) || m.id.starts_with(model))
             {
+                // A clip of a chosen shape is priced by that shape's rate on
+                // the model's offer, which is what the client quoted and
+                // locked. A request off the menu keeps the listed price
+                // here and is refused where it runs.
+                if let (JobPayload::Video(p), Some(offer)) = (payload, &found.video) {
+                    if let Some(quote) = offer.shape_for(p).ok().and_then(|s| offer.quote_usd(&s)) {
+                        return Some(Price::new(quote));
+                    }
+                }
                 return Some(found.price.clone().unwrap_or_default().round_protocol());
             }
         }
@@ -408,7 +417,12 @@ impl Worker {
     }
 
     fn bill_micros(&self, payload: &JobPayload, result: &JobResult) -> u64 {
-        let price = self.price_of(result);
+        // A clip is billed at the quote for its shape, not the model's
+        // default-shape price — the two differ as soon as a client chooses.
+        let price = match result.kind {
+            rootmode_core::JobKind::Video => self.advertised_price(payload),
+            _ => self.price_of(result),
+        };
         if price.is_free() {
             return 0;
         }
@@ -1640,6 +1654,7 @@ mod tests {
                     sha256: None,
                     kind: rootmode_core::JobKind::Llm,
                     price: Some(price),
+                    video: None,
                 }],
                 rootmode_core::JobKind::Llm,
             ),

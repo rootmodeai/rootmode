@@ -24,6 +24,8 @@ import {
   type PortType,
 } from "../lib/flows";
 import { describe, priceLabel } from "../lib/models";
+import { ClipOptions } from "../components/ClipOptions";
+import { clipLabel, type ClipChoice } from "../lib/video";
 import type { JobKind } from "../lib/types";
 
 /**
@@ -218,7 +220,7 @@ export function Flows() {
     const port = target.closest<HTMLElement>(".fl-port");
     const head = target.closest<HTMLElement>(".fl-head");
     const node = target.closest<HTMLElement>(".fl-node");
-    if (target.closest("textarea, button, input")) return;
+    if (target.closest("textarea, button, input, select, label")) return;
     const pt = toWorld(e);
     if (port && !running) {
       const t = port.dataset.t as PortType;
@@ -314,6 +316,9 @@ export function Flows() {
   }
   function setText(id: string, text: string) {
     setFlow((f) => ({ ...f, nodes: f.nodes.map((n) => (n.id === id ? { ...n, text } : n)) }));
+  }
+  function setVideo(id: string, video: ClipChoice) {
+    setFlow((f) => ({ ...f, nodes: f.nodes.map((n) => (n.id === id ? { ...n, video } : n)) }));
   }
 
   // Pictures dropped on the window land on the canvas as Image nodes, under
@@ -577,6 +582,7 @@ export function Flows() {
                   glow={temp ? { t: temp.t, dir: temp.dir === "out" ? "in" : "out", not: temp.node } : null}
                   onRemove={() => removeNode(n.id)}
                   onText={(t) => setText(n.id, t)}
+                  onVideo={(v) => setVideo(n.id, v)}
                   incoming={flow.edges.filter((e) => e.to === n.id).map((e) => ({ port: e.ip, from: rt[e.from]?.output }))}
                 />
               ))}
@@ -613,6 +619,7 @@ function Node({
   glow,
   onRemove,
   onText,
+  onVideo,
   incoming,
 }: {
   n: FlowNode;
@@ -623,6 +630,7 @@ function Node({
   glow: { t: PortType; dir: "in" | "out"; not: string } | null;
   onRemove: () => void;
   onText: (t: string) => void;
+  onVideo: (v: ClipChoice) => void;
   incoming: { port: string; from?: NodeOutput }[];
 }) {
   const P = PORTS[n.type];
@@ -698,7 +706,12 @@ function Node({
                 <span className="bad">nobody serves this right now</span>
               )}
             </div>
-            {n.type === "clip" && <div className="line m">5 s · 720p · 16:9</div>}
+            {n.type === "clip" &&
+              (offer?.video ? (
+                <ClipOptions compact offer={offer.video} choice={n.video ?? {}} onChange={onVideo} currency={offer.currency} disabled={running} />
+              ) : (
+                <div className="line m">{clipLabel(offer?.video, n.video ?? {})}</div>
+              ))}
             {n.type === "text" && (
               <textarea
                 className="instr"

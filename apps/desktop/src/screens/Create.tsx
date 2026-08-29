@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { ClipOptions } from "../components/ClipOptions";
+import { clipParams, quote, tidy, type ClipChoice } from "../lib/video";
 import { api, errorText, events } from "../lib/api";
 import { useStore } from "../lib/store";
 import { useEvent } from "../lib/useEvent";
@@ -77,6 +79,13 @@ export function Create({ kind }: { kind: "image" | "video" }) {
   const option = chosen ?? offers[0];
   const provider = option;
   const checkpoint = option?.model;
+  // The clip's shape, for video: whatever this model offers and the user
+  // picked. Choices that are not on a newly chosen model's menu fall away.
+  const [clip, setClip] = useState<ClipChoice>({});
+  useEffect(() => {
+    setClip((c) => tidy(provider?.video, c));
+  }, [provider?.model, provider?.video]);
+  const clipPrice = kind === "video" && provider ? (quote(provider.video, clip) ?? provider.price) : provider?.price ?? 0;
 
   const loadChats = useCallback(async () => {
     const rows = await api.listConversations(kind);
@@ -210,7 +219,7 @@ export function Create({ kind }: { kind: "image" | "video" }) {
       return;
     }
     try {
-      const check = await api.potCheck(provider.price, provider.unpriced, kind);
+      const check = await api.potCheck(clipPrice, provider.unpriced, kind);
       const blocked = noticeFromCheck(check);
       if (blocked) {
         setFunding(blocked);
@@ -248,6 +257,7 @@ export function Create({ kind }: { kind: "image" | "video" }) {
               kind: "video",
               checkpoint_id: checkpoint,
               prompt: text,
+              ...clipParams(clip),
             }
           : await (async (): Promise<ImageParams> => {
               const image: ImageParams = {
@@ -480,6 +490,9 @@ export function Create({ kind }: { kind: "image" | "video" }) {
                 </button>
               )}
             </div>
+            {kind === "video" && provider?.video && (
+              <ClipOptions offer={provider.video} choice={clip} onChange={setClip} currency={provider.currency} disabled={waiting} />
+            )}
             <div className="composer-hint">
               {provider && !provider.unpriced && provider.price > 0 && pot?.client && (
                 <FundingHint

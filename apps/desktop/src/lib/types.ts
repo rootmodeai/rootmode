@@ -47,9 +47,40 @@ export interface VideoParams {
   prompt: string;
   /** First frame, base64, for image-to-video. Absent is text-to-video. */
   from_image?: string;
+  /** How long, in seconds. Absent: the provider's default clip. */
+  seconds?: number;
+  /** "720p", "1080p", "4K" — from the provider's menu. */
+  resolution?: string;
+  /** "16:9", "9:16" — from the provider's menu. */
+  aspect_ratio?: string;
+  /** Sound, on providers that sell it apart. */
+  audio?: boolean;
 }
 
 export type JobPayload = LlmParams | ImageParams | VideoParams;
+
+export type AudioOffer = "never" | "always" | "optional";
+
+/** USD per second, after markup, for one shape of clip. */
+export interface VideoRate {
+  resolution?: string | null;
+  audio: boolean;
+  from_image: boolean;
+  usd_per_second: number;
+  minimum_usd: number;
+}
+
+/** A video model's menu: what may be chosen, the defaults, and the rates. */
+export interface VideoOffer {
+  durations: number[];
+  default_seconds: number;
+  resolutions: string[];
+  default_resolution?: string | null;
+  aspect_ratios: string[];
+  default_aspect?: string | null;
+  audio: AudioOffer;
+  rates: VideoRate[];
+}
 
 export interface Price {
   amount: number;
@@ -185,6 +216,8 @@ export interface ProviderOption {
   currency: string;
   unpriced: boolean;
   latency_ms: number | null;
+  /** Video models: the shapes on offer and their rates. */
+  video?: VideoOffer | null;
   /**
    * Set by the picker: true when the user chose this exact provider, false
    * (or absent) when they chose the model and any provider at its best

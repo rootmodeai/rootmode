@@ -241,7 +241,16 @@ async fn attempt(
         .models
         .iter()
         .find(|m| m.id == model || model.starts_with(&m.id))
-        .and_then(|m| m.price.as_ref())
+        .and_then(|m| {
+            // A clip of a chosen shape locks that shape's quote — the same
+            // arithmetic the worker bills by — not the default clip's price.
+            if let (JobPayload::Video(p), Some(offer)) = (payload, &m.video) {
+                if let Some(q) = offer.shape_for(p).ok().and_then(|s| offer.quote_usd(&s)) {
+                    return Some(rootmode_core::Price::new(q));
+                }
+            }
+            m.price.clone()
+        })
         .filter(|p| p.amount > 0.0)
     {
         if let Ok(st) = crate::pot::status(state).await {

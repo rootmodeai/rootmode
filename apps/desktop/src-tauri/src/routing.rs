@@ -123,6 +123,10 @@ pub struct ProviderOption {
     pub currency: String,
     pub unpriced: bool,
     pub latency_ms: Option<u32>,
+    /// Video models: the shapes on offer and their rates. `price` is the
+    /// default shape's; a chosen shape is quoted from this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video: Option<rootmode_core::VideoOffer>,
 }
 
 /// Everyone serving anything of this kind, cheapest first.
@@ -152,6 +156,7 @@ pub fn provider_options(peers: &[Peer], kind: JobKind) -> Vec<ProviderOption> {
                         .unwrap_or_else(|| "USD".to_string()),
                     unpriced: model.price.as_ref().map_or(true, |p| p.is_free()),
                     latency_ms: peer.latency_ms,
+                    video: model.video.clone(),
                 })
         })
         .collect();
@@ -271,6 +276,7 @@ mod tests {
             sha256: None,
             kind: JobKind::Llm,
             price: price.map(Price::new),
+            video: None,
         }
     }
 
@@ -353,6 +359,7 @@ mod tests {
             sha256: None,
             kind: JobKind::Image,
             price: Some(Price::new(0.02)),
+            video: None,
         };
         let peers = vec![peer(
             "mixed",

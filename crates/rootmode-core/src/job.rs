@@ -233,6 +233,28 @@ pub struct VideoParams {
     /// First frame, base64, for image-to-video. Absent is text-to-video.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_image: Option<String>,
+    /// How long, in seconds. Absent means the provider's default shape —
+    /// what every clip was before a client could ask, so an older worker
+    /// that ignores these fields makes exactly the clip it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<u32>,
+    /// "480p", "720p", "1080p", "4K" — whatever the provider lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<String>,
+    /// "16:9", "9:16", "1:1" — whatever the provider lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aspect_ratio: Option<String>,
+    /// Whether the clip should have sound, on providers that sell both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<bool>,
+}
+
+impl VideoParams {
+    /// Whether the client asked for any particular shape. A request with
+    /// none is the provider's default clip at the price it advertised.
+    pub fn is_shaped(&self) -> bool {
+        self.seconds.is_some() || self.resolution.is_some() || self.aspect_ratio.is_some() || self.audio.is_some()
+    }
 }
 
 /// The `payload` of a `job.submit`, discriminated by `kind`.
@@ -339,6 +361,24 @@ impl JobPayload {
                 }
                 if p.from_image.as_ref().is_some_and(|i| i.trim().is_empty()) {
                     return Err(CoreError::Invalid("from_image is present but empty".into()));
+                }
+                if let Some(s) = p.seconds {
+                    if !(1..=60).contains(&s) {
+                        return Err(CoreError::Invalid("seconds out of range (1..=60)".into()));
+                    }
+                }
+                if let Some(r) = &p.resolution {
+                    if r.trim().is_empty() || r.len() > 8 {
+                        return Err(CoreError::Invalid("resolution is not a name like 720p".into()));
+                    }
+                }
+                if let Some(a) = &p.aspect_ratio {
+                    let ok = a.split_once(':').is_some_and(|(w, h)| {
+                        w.parse::<u8>().is_ok_and(|w| w > 0) && h.parse::<u8>().is_ok_and(|h| h > 0)
+                    });
+                    if !ok {
+                        return Err(CoreError::Invalid("aspect_ratio is not a ratio like 16:9".into()));
+                    }
                 }
             }
         }
@@ -497,6 +537,10 @@ mod tests {
             checkpoint_id: Some("minimax-h3".into()),
             prompt: "a glider over a datacentre".into(),
             from_image: None,
+            seconds: None,
+            resolution: None,
+            aspect_ratio: None,
+            audio: None,
         });
         let json = serde_json::to_string(&p).unwrap();
         assert!(json.contains("\"kind\":\"video\""));
@@ -508,6 +552,10 @@ mod tests {
             checkpoint_id: None,
             prompt: "  ".into(),
             from_image: None,
+            seconds: None,
+            resolution: None,
+            aspect_ratio: None,
+            audio: None,
         });
         assert!(empty.validate().is_err());
     }

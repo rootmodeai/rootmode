@@ -513,6 +513,190 @@ pub struct ModelDescriptor {
     /// nothing is being charged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price: Option<Price>,
+    /// Video models: the shapes a clip may take and what each costs. `price`
+    /// stays the default shape's price, so a client that never looks here
+    /// locks and pays exactly what it did before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video: Option<VideoOffer>,
+}
+
+/// Whether a provider's clips have sound, and whether that is up to the client.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioOffer {
+    /// Silent, always.
+    Never,
+    /// Sound built in; it cannot be switched off.
+    Always,
+    /// Either, priced apart. The default is silent, the cheaper.
+    Optional,
+}
+
+/// USD per second, after markup, for one shape of clip. A rate with no
+/// resolution applies to a provider that offers no choice of one.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VideoRate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<String>,
+    pub audio: bool,
+    pub from_image: bool,
+    pub usd_per_second: f64,
+    /// The least a generation costs, however short.
+    #[serde(default)]
+    pub minimum_usd: f64,
+}
+
+/// The menu for a video model: what may be chosen, what is chosen when
+/// nothing is, and the rate for every combination. The client quotes a
+/// shape from this before it locks; the provider bills the same quote.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VideoOffer {
+    /// Lengths on offer, seconds. Empty: only `default_seconds`.
+    #[serde(default)]
+    pub durations: Vec<u32>,
+    pub default_seconds: u32,
+    /// Empty: the provider offers no choice.
+    #[serde(default)]
+    pub resolutions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_resolution: Option<String>,
+    #[serde(default)]
+    pub aspect_ratios: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_aspect: Option<String>,
+    pub audio: AudioOffer,
+    pub rates: Vec<VideoRate>,
+}
+
+/// One clip, fully decided: what will be asked of the provider and priced.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VideoShape {
+    pub seconds: u32,
+    pub resolution: Option<String>,
+    pub aspect_ratio: Option<String>,
+    pub audio: bool,
+    pub from_image: bool,
+}
+
+impl VideoOffer {
+    /// The shape a request resolves to: the client's choices where it made
+    /// them, this offer's defaults where it did not, and an error naming
+    /// the menu when a choice is not on it.
+    pub fn shape_for(&self, p: &crate::job::VideoParams) -> std::result::Result<VideoShape, String> {
+        let seconds = p.seconds.unwrap_or(self.default_seconds);
+        if !self.durations.is_empty() {
+            if !self.durations.contains(&seconds) {
+                return Err(format!(
+                    "{seconds} s is not offered; this model makes {} s clips",
+                    list_of(&self.durations.iter().map(u32::to_string).collect::<Vec<_>>())
+                ));
+            }
+        } else if seconds != self.default_seconds {
+            return Err(format!("this model only makes {} s clips", self.default_seconds));
+        }
+        let resolution = match &p.resolution {
+            Some(want) => Some(
+                self.resolutions
+                    .iter()
+                    .find(|r| r.eq_ignore_ascii_case(want))
+                    .cloned()
+                    .ok_or_else(|| {
+                        if self.resolutions.is_empty() {
+                            "this model offers no choice of resolution".to_string()
+                        } else {
+                            format!("{want} is not offered; this model makes {}", list_of(&self.resolutions))
+                        }
+                    })?,
+            ),
+            None => self.default_resolution.clone(),
+        };
+        let aspect_ratio = match &p.aspect_ratio {
+            Some(want) => Some(
+                self.aspect_ratios
+                    .iter()
+                    .find(|a| a.as_str() == want)
+                    .cloned()
+                    .ok_or_else(|| {
+                        if self.aspect_ratios.is_empty() {
+                            "this model offers no choice of aspect ratio".to_string()
+                        } else {
+                            format!("{want} is not offered; this model makes {}", list_of(&self.aspect_ratios))
+                        }
+                    })?,
+            ),
+            None => self.default_aspect.clone(),
+        };
+        let audio = match self.audio {
+            AudioOffer::Never => {
+                if p.audio == Some(true) {
+                    return Err("this model makes silent clips".into());
+                }
+                false
+            }
+            AudioOffer::Always => {
+                if p.audio == Some(false) {
+                    return Err("sound cannot be switched off on this model".into());
+                }
+                true
+            }
+            AudioOffer::Optional => p.audio.unwrap_or(false),
+        };
+        let from_image = p.from_image.as_deref().is_some_and(|s| !s.trim().is_empty());
+        Ok(VideoShape {
+            seconds,
+            resolution,
+            aspect_ratio,
+            audio,
+            from_image,
+        })
+    }
+
+    /// The rate for a shape: the entry matching its resolution and sound,
+    /// preferring the one that also matches whether a first frame is sent,
+    /// and among several the dearest, so a quote never undercuts the bill.
+    pub fn rate_for(&self, shape: &VideoShape) -> Option<&VideoRate> {
+        let fits = |r: &&VideoRate| {
+            r.audio == shape.audio
+                && match (&r.resolution, &shape.resolution) {
+                    (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                    (None, _) => true,
+                    (Some(_), None) => false,
+                }
+        };
+        fn dearest<'a>(rs: impl Iterator<Item = &'a VideoRate>) -> Option<&'a VideoRate> {
+            rs.fold(None, |m: Option<&'a VideoRate>, r| match m {
+                Some(m) if m.usd_per_second >= r.usd_per_second => Some(m),
+                _ => Some(r),
+            })
+        }
+        let exact = dearest(self.rates.iter().filter(fits).filter(|r| r.from_image == shape.from_image));
+        if exact.is_some() {
+            return exact;
+        }
+        dearest(self.rates.iter().filter(fits))
+    }
+
+    /// What a shape costs, in USD, rounded up to the cent.
+    pub fn quote_usd(&self, shape: &VideoShape) -> Option<f64> {
+        let rate = self.rate_for(shape)?;
+        let cost = (rate.usd_per_second * shape.seconds as f64).max(rate.minimum_usd);
+        Some(ceil_cents(cost))
+    }
+
+    /// The default shape's price — what `ModelDescriptor::price` carries.
+    pub fn default_shape(&self) -> VideoShape {
+        VideoShape {
+            seconds: self.default_seconds,
+            resolution: self.default_resolution.clone(),
+            aspect_ratio: self.default_aspect.clone(),
+            audio: self.audio == AudioOffer::Always,
+            from_image: false,
+        }
+    }
+}
+
+fn list_of(items: &[String]) -> String {
+    items.join(", ")
 }
 
 impl ModelDescriptor {
@@ -851,6 +1035,107 @@ mod tests {
         assert_eq!(Price::new(0.0).authorized_tokens(0, 40_000), u64::MAX);
     }
 
+    fn offer() -> VideoOffer {
+        VideoOffer {
+            durations: vec![4, 6, 8],
+            default_seconds: 6,
+            resolutions: vec!["720p".into(), "1080p".into()],
+            default_resolution: Some("720p".into()),
+            aspect_ratios: vec!["16:9".into(), "9:16".into()],
+            default_aspect: Some("16:9".into()),
+            audio: AudioOffer::Optional,
+            rates: vec![
+                VideoRate { resolution: Some("720p".into()), audio: false, from_image: false, usd_per_second: 0.05, minimum_usd: 0.0 },
+                VideoRate { resolution: Some("720p".into()), audio: false, from_image: true, usd_per_second: 0.07, minimum_usd: 0.0 },
+                VideoRate { resolution: Some("720p".into()), audio: true, from_image: false, usd_per_second: 0.10, minimum_usd: 0.0 },
+                VideoRate { resolution: Some("1080p".into()), audio: false, from_image: false, usd_per_second: 0.20, minimum_usd: 0.5 },
+            ],
+        }
+    }
+
+    fn clip() -> crate::job::VideoParams {
+        crate::job::VideoParams {
+            model_hash: None,
+            checkpoint_id: Some("m".into()),
+            prompt: "a cat".into(),
+            from_image: None,
+            seconds: None,
+            resolution: None,
+            aspect_ratio: None,
+            audio: None,
+        }
+    }
+
+    #[test]
+    fn a_request_with_no_choices_is_the_default_shape_at_the_advertised_price() {
+        let o = offer();
+        let shape = o.shape_for(&clip()).unwrap();
+        assert_eq!(shape, o.default_shape());
+        assert_eq!(shape.seconds, 6);
+        assert_eq!(shape.resolution.as_deref(), Some("720p"));
+        assert!(!shape.audio);
+        assert_eq!(o.quote_usd(&shape), Some(0.30)); // 0.05 × 6
+    }
+
+    #[test]
+    fn choices_are_priced_by_their_own_rate_and_checked_against_the_menu() {
+        let o = offer();
+        let mut p = clip();
+        p.seconds = Some(8);
+        p.resolution = Some("1080P".into());
+        p.aspect_ratio = Some("9:16".into());
+        let shape = o.shape_for(&p).unwrap();
+        assert_eq!(shape.resolution.as_deref(), Some("1080p"), "matched case-insensitively, stored as offered");
+        assert_eq!(o.quote_usd(&shape), Some(1.60)); // 0.20 × 8, above the 0.50 minimum
+        // A short clip is charged the minimum.
+        p.seconds = Some(4);
+        assert_eq!(o.quote_usd(&o.shape_for(&p).unwrap()), Some(0.80)); // 0.20 × 4 = 0.80 > 0.5
+        // Sound, where it is optional, is its own rate.
+        let mut loud = clip();
+        loud.audio = Some(true);
+        assert_eq!(o.quote_usd(&o.shape_for(&loud).unwrap()), Some(0.60)); // 0.10 × 6
+        // A first frame picks the image-to-video rate when there is one.
+        let mut from = clip();
+        from.from_image = Some("abc".into());
+        assert_eq!(o.quote_usd(&o.shape_for(&from).unwrap()), Some(0.42)); // 0.07 × 6
+        // ...and falls back to the text rate where there is not.
+        from.audio = Some(true);
+        assert_eq!(o.quote_usd(&o.shape_for(&from).unwrap()), Some(0.60));
+        // Off the menu is refused in words that name the menu.
+        let mut bad = clip();
+        bad.seconds = Some(5);
+        assert!(o.shape_for(&bad).unwrap_err().contains("4, 6, 8"));
+        let mut bad = clip();
+        bad.resolution = Some("4K".into());
+        assert!(o.shape_for(&bad).unwrap_err().contains("720p, 1080p"));
+        let mut bad = clip();
+        bad.aspect_ratio = Some("1:1".into());
+        assert!(o.shape_for(&bad).unwrap_err().contains("16:9"));
+    }
+
+    #[test]
+    fn sound_follows_what_the_provider_sells() {
+        let mut o = offer();
+        o.audio = AudioOffer::Always;
+        assert!(o.shape_for(&clip()).unwrap().audio, "built in: on by default");
+        let mut off = clip();
+        off.audio = Some(false);
+        assert!(o.shape_for(&off).unwrap_err().contains("switched off"));
+        o.audio = AudioOffer::Never;
+        let mut on = clip();
+        on.audio = Some(true);
+        assert!(o.shape_for(&on).unwrap_err().contains("silent"));
+        assert!(!o.shape_for(&clip()).unwrap().audio);
+    }
+
+    #[test]
+    fn a_descriptor_without_an_offer_still_reads() {
+        let d: ModelDescriptor = serde_json::from_str(r#"{"id":"x","kind":"video","price":{"amount":0.5}}"#).unwrap();
+        assert!(d.video.is_none());
+        let s = serde_json::to_string(&d).unwrap();
+        assert!(!s.contains("video\":"), "absent stays absent on the wire: {s}");
+    }
+
     #[test]
     fn advertised_rates_round_up_to_cents() {
         assert_eq!(ceil_cents(0.141), 0.15);
@@ -869,6 +1154,7 @@ mod tests {
                 output: Some(0.139),
                 ..Price::default()
             }),
+            video: None,
         };
         assert_eq!(listed.amount(), 0.15);
     }

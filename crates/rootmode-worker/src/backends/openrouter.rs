@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 use std::sync::RwLock;
 
 use async_trait::async_trait;
-use rootmode_core::{JobKind, JobPayload, JobResult, ModelDescriptor, Price};
+use rootmode_core::{JobKind, JobPayload, JobResult, ModelDescriptor, Price, AudioOffer, VideoOffer, VideoRate};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -154,6 +154,9 @@ struct ListedVideo {
     supported_aspect_ratios: Option<Vec<String>>,
     #[serde(default)]
     pricing_skus: Option<BTreeMap<String, String>>,
+    /// Whether the model can put sound on a clip at all.
+    #[serde(default)]
+    generate_audio: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -161,58 +164,94 @@ struct VideoCatalogue {
     data: Vec<ListedVideo>,
 }
 
-/// Every clip the seed makes has one shape: this long, this size, silent.
-/// The client's request carries a prompt and an optional first frame and
-/// nothing else, so the shape is the node's to choose — and one shape is
-/// one price, which is what the client locks before the work starts.
+/// The clip a client gets when it asks for nothing in particular: this
+/// long, this size, silent. It is also the shape whose price is the
+/// model's advertised `price`, which is what a client that never looks at
+/// the offer locks before the work starts.
 pub const VIDEO_SECONDS: u32 = 5;
 const VIDEO_RESOLUTION: &str = "720p";
 const VIDEO_ASPECT: &str = "16:9";
 
-/// Video tokens per second of 720p footage, the way ByteDance meters it:
-/// width × height × 24 frames / 1024. The lock is computed for the 720p
-/// clip this node asks for.
-const VIDEO_TOKENS_PER_SECOND_720P: f64 = 1280.0 * 720.0 * 24.0 / 1024.0;
+/// Resolution names as they appear inside SKU keys.
+const RESOLUTION_TAGS: &[&str] = &["480p", "720p", "1024p", "1080p", "2k", "4k"];
 
-/// What one clip of this node's shape costs upstream, in USD, from a
-/// model's `pricing_skus` — OpenRouter's video catalogue speaks several
-/// dialects, and a lock computed from the wrong one is either a refused
-/// job or a loss:
+/// Pixels per frame at a resolution, 16:9 — the widest frame at that
+/// height, so a token count from it never comes in under a narrower one.
+fn pixels(resolution: &str) -> f64 {
+    match resolution.to_ascii_lowercase().as_str() {
+        "480p" => 854.0 * 480.0,
+        "1024p" | "1080p" => 1920.0 * 1080.0,
+        "2k" => 2560.0 * 1440.0,
+        "4k" => 3840.0 * 2160.0,
+        _ => 1280.0 * 720.0,
+    }
+}
+
+/// What one second of a shape costs upstream, in USD, and the least a
+/// generation costs however short — from a model's `pricing_skus`.
+/// OpenRouter's video catalogue speaks several dialects, and a lock
+/// computed from the wrong one is either a refused job or a loss:
 ///
 /// - `duration_seconds…`: dollars per second;
 /// - `cents_per_second…` / `cents_per_video_output_second…`: cents per second;
 /// - `video_tokens…`: dollars per video token, tokens = w × h × 24 fps / 1024;
 /// - anything else (per megapixel, per image input): not a clip price.
 ///
-/// Within a dialect, SKUs for shapes dearer than ours (1080p, 4K, audio,
-/// continuation) are left out and the dearest of the rest is taken, so an
-/// image-to-video surcharge is covered. `None` means "do not advertise".
-fn clip_cost_usd(skus: &BTreeMap<String, String>, seconds: u32) -> Option<f64> {
-    let dearer = |k: &str| {
-        ["1080p", "1024p", "4k", "with_audio", "continuation", "megapixel", "2k"]
+/// A SKU that contradicts the shape — another resolution, sound where
+/// silence was asked, image-to-video for a text request — is left out;
+/// among the rest the dearest is taken, so a SKU the provider might bill
+/// the clip under is never under the quote. `None` means "do not advertise".
+fn shape_rate_usd(
+    skus: &BTreeMap<String, String>,
+    resolution: Option<&str>,
+    audio: bool,
+    from_image: bool,
+) -> Option<(f64, f64)> {
+    let res = resolution.unwrap_or(VIDEO_RESOLUTION).to_ascii_lowercase();
+    let contradicts = |key: &str| {
+        let k = key.to_ascii_lowercase();
+        if ["continuation", "megapixel", "with_video_input", "reference_images", "image_input", "cents_per_image"]
             .iter()
             .any(|x| k.contains(x))
+        {
+            return true;
+        }
+        if RESOLUTION_TAGS.iter().any(|t| k.contains(t) && *t != res && !(res == "1080p" && *t == "1024p")) {
+            return true;
+        }
+        if audio && k.contains("without_audio") {
+            return true;
+        }
+        if !audio && k.contains("with_audio") {
+            return true;
+        }
+        if from_image && k.contains("text_to_video") {
+            return true;
+        }
+        if !from_image && k.contains("image_to_video") {
+            return true;
+        }
+        false
     };
-    let pick = |prefix_ok: &dyn Fn(&str) -> bool| -> Option<f64> {
+    let pick = |dialect: &dyn Fn(&str) -> bool| -> Option<f64> {
         skus.iter()
-            .filter(|(k, _)| prefix_ok(k) && !dearer(k))
+            .filter(|(k, _)| dialect(k) && !contradicts(k))
             .filter_map(|(_, v)| v.trim().parse::<f64>().ok())
             .filter(|v| *v > 0.0)
             .fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))))
     };
-    let secs = seconds as f64;
     if let Some(usd_per_s) = pick(&|k| k.contains("duration_seconds")) {
-        return Some(usd_per_s * secs);
+        return Some((usd_per_s, 0.0));
     }
     if let Some(cents_per_s) = pick(&|k| k.contains("cents_per_second") || k.contains("cents_per_video_output_second")) {
         let floor = skus
             .get("minimum_cents_per_generation")
             .and_then(|v| v.trim().parse::<f64>().ok())
             .unwrap_or(0.0);
-        return Some((cents_per_s * secs).max(floor) / 100.0);
+        return Some((cents_per_s / 100.0, floor / 100.0));
     }
-    if let Some(usd_per_token) = pick(&|k| k.starts_with("video_tokens") && !k.contains("with_video_input")) {
-        return Some(usd_per_token * VIDEO_TOKENS_PER_SECOND_720P * secs);
+    if let Some(usd_per_token) = pick(&|k| k.starts_with("video_tokens")) {
+        return Some((usd_per_token * pixels(&res) * 24.0 / 1024.0, 0.0));
     }
     None
 }
@@ -256,20 +295,87 @@ impl ListedVideo {
         self.pricing_skus.clone().unwrap_or_default()
     }
 
-    /// Whether silence is something this model sells. The lock is computed
-    /// from the silent SKU where there is one, so that is the shape to ask
-    /// for — but a model with no such SKU (Sora: one rate, audio built in)
-    /// refuses the switch outright: "generate_audio cannot be set to false".
-    /// Asked for nothing, it makes its clip at the one price it has.
-    fn silent_is_priced(&self) -> bool {
-        self.skus().keys().any(|k| k.contains("without_audio"))
+    /// Whether sound is the client's to choose. A model that prices the
+    /// two apart takes the switch; one with a single rate and sound built
+    /// in (Sora) refuses it outright — "generate_audio cannot be set to
+    /// false" — and one that makes no sound has nothing to switch.
+    fn audio_offer(&self) -> AudioOffer {
+        if self.generate_audio != Some(true) {
+            return AudioOffer::Never;
+        }
+        if self.skus().keys().any(|k| k.contains("audio")) {
+            AudioOffer::Optional
+        } else {
+            AudioOffer::Always
+        }
     }
 
-    /// Flat price for one clip of this node's shape, after markup.
-    fn per_clip(&self, markup: f64) -> Option<Price> {
+    /// Whether silence is something this model sells.
+    fn silent_is_priced(&self) -> bool {
+        self.audio_offer() == AudioOffer::Optional
+    }
+
+    /// The menu: every shape this model makes and what each costs per
+    /// second after markup. `None` when the catalogue names no clip rate.
+    fn offer(&self, markup: f64) -> Option<VideoOffer> {
         let markup = if markup > 0.0 { markup } else { 1.0 };
-        let cost = clip_cost_usd(&self.skus(), self.duration())?;
-        Some(Price::new(cost * markup))
+        let skus = self.skus();
+        let resolutions: Vec<String> = self.supported_resolutions.clone().unwrap_or_default();
+        let audio = self.audio_offer();
+        let sounds: &[bool] = match audio {
+            AudioOffer::Never => &[false],
+            AudioOffer::Always => &[true],
+            AudioOffer::Optional => &[false, true],
+        };
+        let res_choices: Vec<Option<String>> = if resolutions.is_empty() {
+            vec![None]
+        } else {
+            resolutions.iter().cloned().map(Some).collect()
+        };
+        let mut rates = Vec::new();
+        for res in &res_choices {
+            for &sound in sounds {
+                for from_image in [false, true] {
+                    if let Some((per_second, minimum)) = shape_rate_usd(&skus, res.as_deref(), sound, from_image) {
+                        rates.push(VideoRate {
+                            resolution: res.clone(),
+                            audio: sound,
+                            from_image,
+                            usd_per_second: per_second * markup,
+                            minimum_usd: minimum * markup,
+                        });
+                    }
+                }
+            }
+        }
+        if rates.is_empty() {
+            return None;
+        }
+        let mut durations = self.supported_durations.clone().unwrap_or_default();
+        durations.sort_unstable();
+        durations.dedup();
+        Some(VideoOffer {
+            durations,
+            default_seconds: self.duration(),
+            resolutions,
+            default_resolution: self.resolution(),
+            aspect_ratios: self.supported_aspect_ratios.clone().unwrap_or_default(),
+            default_aspect: self.aspect(),
+            audio,
+            rates,
+        })
+    }
+
+    /// Flat price for one default-shape clip, after markup: the dearer of
+    /// text- and image-to-video, since a request that names no shape may
+    /// still carry a first frame.
+    fn per_clip(&self, markup: f64) -> Option<Price> {
+        let offer = self.offer(markup)?;
+        let mut shape = offer.default_shape();
+        let text = offer.quote_usd(&shape)?;
+        shape.from_image = true;
+        let image = offer.quote_usd(&shape).unwrap_or(text);
+        Some(Price::new(text.max(image)))
     }
 }
 
@@ -431,6 +537,7 @@ impl Backend for OpenRouterBackend {
                         let id = advertised_id(&video.id);
                         match video.per_clip(self.config.markup) {
                             Some(price) => {
+                                let offer = video.offer(self.config.markup);
                                 map.insert(id.clone(), video.id.clone());
                                 videos.insert(id.clone(), video);
                                 models.push(ModelDescriptor {
@@ -438,6 +545,7 @@ impl Backend for OpenRouterBackend {
                                     kind: JobKind::Video,
                                     sha256: None,
                                     price: Some(price),
+                                    video: offer,
                                 });
                             }
                             None => tracing::warn!("'{want}' makes video but lists no per-second rate — not advertising it"),
@@ -472,6 +580,7 @@ impl Backend for OpenRouterBackend {
                 kind,
                 sha256: None,
                 price,
+                video: None,
             });
         }
 
@@ -650,18 +759,26 @@ impl OpenRouterBackend {
             .cloned()
             .ok_or_else(|| WorkerError::Rejected(format!("'{advertised}' is not served here")))?;
 
+        // The client's choices, or this node's defaults where it made none,
+        // checked against the menu it was shown — a shape off the menu was
+        // never quoted, so it is refused rather than billed as something else.
+        let offer = listed
+            .offer(self.config.markup)
+            .ok_or_else(|| WorkerError::Rejected(format!("'{advertised}' lists no clip rate")))?;
+        let shape = offer.shape_for(params).map_err(WorkerError::Rejected)?;
+
         let mut body = serde_json::json!({
             "model": listed.id,
             "prompt": params.prompt,
-            "duration": listed.duration(),
+            "duration": shape.seconds,
         });
         if listed.silent_is_priced() {
-            body["generate_audio"] = serde_json::json!(false);
+            body["generate_audio"] = serde_json::json!(shape.audio);
         }
-        if let Some(r) = listed.resolution() {
+        if let Some(r) = &shape.resolution {
             body["resolution"] = serde_json::json!(r);
         }
-        if let Some(a) = listed.aspect() {
+        if let Some(a) = &shape.aspect_ratio {
             body["aspect_ratio"] = serde_json::json!(a);
         }
         if let Some(from) = params.from_image.as_deref().filter(|s| !s.trim().is_empty()) {
@@ -731,7 +848,10 @@ impl OpenRouterBackend {
         let mut meta = serde_json::json!({
             "model": advertised,
             "backend": "openrouter",
-            "seconds": listed.duration(),
+            "seconds": shape.seconds,
+            "resolution": shape.resolution,
+            "aspect_ratio": shape.aspect_ratio,
+            "audio": shape.audio,
             "prompt_tokens": 0,
             "completion_tokens": 0,
         });
@@ -890,10 +1010,93 @@ mod tests {
     }
 
     #[test]
+    fn every_shape_on_the_menu_has_its_own_rate() {
+        // Veo, the way the catalogue really lists it: sound priced apart,
+        // 720p cheaper than the bare (1080p) rate, three lengths.
+        let veo: super::ListedVideo = serde_json::from_str(r#"{"id":"google/veo-3.1-lite",
+            "supported_durations":[8,4,6],"supported_resolutions":["720p","1080p"],
+            "supported_aspect_ratios":["16:9","9:16"],"generate_audio":true,
+            "pricing_skus":{"duration_seconds_with_audio":"0.08","duration_seconds_without_audio":"0.05",
+                            "duration_seconds_with_audio_720p":"0.05","duration_seconds_without_audio_720p":"0.03"}}"#).unwrap();
+        let offer = veo.offer(1.0).unwrap();
+        assert_eq!(offer.durations, vec![4, 6, 8]);
+        assert_eq!(offer.default_seconds, 6);
+        assert_eq!(offer.audio, rootmode_core::AudioOffer::Optional);
+        let rate = |res: &str, audio: bool| {
+            offer
+                .rates
+                .iter()
+                .find(|r| r.resolution.as_deref() == Some(res) && r.audio == audio && !r.from_image)
+                .unwrap()
+                .usd_per_second
+        };
+        // 720p silent: the bare silent rate (0.05) is not contradicted by
+        // 720p, so the quote takes it over the cheaper 720p-only SKU — a
+        // quote that never comes in under what the provider might bill.
+        assert_eq!(rate("720p", false), 0.05);
+        assert_eq!(rate("720p", true), 0.08);
+        assert_eq!(rate("1080p", false), 0.05);
+        assert_eq!(rate("1080p", true), 0.08);
+        // A chosen shape is quoted from its rate: 8 s, 1080p, with sound.
+        let mut want = rootmode_core::VideoParams {
+            model_hash: None,
+            checkpoint_id: Some("veo-3.1-lite".into()),
+            prompt: "x".into(),
+            from_image: None,
+            seconds: Some(8),
+            resolution: Some("1080p".into()),
+            aspect_ratio: Some("9:16".into()),
+            audio: Some(true),
+        };
+        let shape = offer.shape_for(&want).unwrap();
+        assert_eq!(offer.quote_usd(&shape), Some(0.64)); // 0.08 × 8
+        // Off the menu: refused with the menu in the message.
+        want.seconds = Some(5);
+        assert!(offer.shape_for(&want).unwrap_err().contains("4, 6, 8"));
+
+        // Kling prices sound as a surcharge over a plain rate: optional.
+        let kling: super::ListedVideo = serde_json::from_str(r#"{"id":"kwaivgi/kling-v3.0-std",
+            "supported_durations":[3,4,5,6,7,8,9,10,11,12,13,14,15],"supported_resolutions":["720p"],
+            "supported_aspect_ratios":["16:9","9:16","1:1"],"generate_audio":true,
+            "pricing_skus":{"duration_seconds":"0.084","duration_seconds_with_audio":"0.126",
+                            "text_to_video_duration_seconds_480p":"0.084"}}"#).unwrap();
+        let k = kling.offer(1.0).unwrap();
+        assert_eq!(k.audio, rootmode_core::AudioOffer::Optional);
+        let mut fifteen = rootmode_core::VideoParams {
+            model_hash: None, checkpoint_id: None, prompt: "x".into(), from_image: None,
+            seconds: Some(15), resolution: None, aspect_ratio: Some("9:16".into()), audio: None,
+        };
+        assert_eq!(k.quote_usd(&k.shape_for(&fifteen).unwrap()), Some(1.26)); // 0.084 × 15
+        fifteen.audio = Some(true);
+        assert_eq!(k.quote_usd(&k.shape_for(&fifteen).unwrap()), Some(1.89)); // 0.126 × 15
+
+        // Seedance meters video tokens: 4K frames are many more of them.
+        let seedance: super::ListedVideo = serde_json::from_str(r#"{"id":"bytedance/seedance-2.0",
+            "supported_durations":[4,5,6,7,8,9,10],"supported_resolutions":["480p","720p","1080p","4K"],
+            "generate_audio":true,
+            "pricing_skus":{"video_tokens":"0.000007","video_tokens_4k":"0.000004","video_tokens_1080p":"0.0000077"}}"#).unwrap();
+        let s = seedance.offer(1.0).unwrap();
+        let per = |res: &str| s.rates.iter().find(|r| r.resolution.as_deref() == Some(res) && !r.from_image).unwrap().usd_per_second;
+        assert!((per("720p") - 0.000007 * 1280.0 * 720.0 * 24.0 / 1024.0).abs() < 1e-9);
+        assert!(per("4K") > per("720p") * 3.0, "4K costs several times 720p per second");
+        // Sora: one rate, sound built in, no switch.
+        let sora: super::ListedVideo = serde_json::from_str(r#"{"id":"openai/sora-2-pro",
+            "supported_durations":[4,8,12,16,20],"generate_audio":true,"supported_resolutions":["720p","1080p"],
+            "pricing_skus":{"duration_seconds_720p":"0.30","duration_seconds_1024p":"0.50","duration_seconds_1080p":"0.50"}}"#).unwrap();
+        let so = sora.offer(1.15).unwrap();
+        assert_eq!(so.audio, rootmode_core::AudioOffer::Always);
+        let twenty = rootmode_core::VideoParams {
+            model_hash: None, checkpoint_id: None, prompt: "x".into(), from_image: None,
+            seconds: Some(20), resolution: Some("1080p".into()), aspect_ratio: None, audio: None,
+        };
+        assert_eq!(so.quote_usd(&so.shape_for(&twenty).unwrap()), Some(11.50)); // 0.50 × 20 × 1.15
+    }
+
+    #[test]
     fn silence_is_asked_for_only_where_it_is_sold() {
         // Veo prices audio and silence apart: the lock is the silent rate,
         // so the request says so.
-        let veo: super::ListedVideo = serde_json::from_str(r#"{"id":"google/veo-3.1-lite",
+        let veo: super::ListedVideo = serde_json::from_str(r#"{"id":"google/veo-3.1-lite","generate_audio":true,
             "pricing_skus":{"duration_seconds_with_audio":"0.08","duration_seconds_without_audio":"0.05"}}"#).unwrap();
         assert!(veo.silent_is_priced());
         // Sora has one rate with audio built in and rejects the switch:

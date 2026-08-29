@@ -1,6 +1,7 @@
 import { api } from "./api";
 import { targetFor } from "./models";
 import type { JobKind, JobPayload, ProviderOption } from "./types";
+import { clipParams, quote, type ClipChoice } from "./video";
 
 /**
  * Flows: models wired together on a canvas, run as a chain of ordinary jobs.
@@ -31,6 +32,8 @@ export interface FlowNode {
   text?: string;
   /** Image nodes: the kept picture. */
   picture?: { id: string; name: string; mime: string };
+  /** Clip nodes: the shape chosen from the model's menu. */
+  video?: ClipChoice;
 }
 
 export interface FlowEdge {
@@ -153,7 +156,7 @@ export function estimate(flow: Flow, offers: Offers): { usd: number; models: num
       continue;
     }
     if (o.unpriced || o.price <= 0) continue;
-    usd += n.type === "text" ? (o.price * 4000) / 1_000_000 : o.price;
+    usd += n.type === "text" ? (o.price * 4000) / 1_000_000 : n.type === "clip" ? (quote(o.video, n.video ?? {}) ?? o.price) : o.price;
   }
   return { usd, models, missing };
 }
@@ -254,7 +257,9 @@ async function runNode(
   if (!cheapest) throw new Error(`nobody is serving ${n.model} right now`);
   const target = targetFor(cheapest, rows);
 
-  const check = await api.potCheck(cheapest.price, cheapest.unpriced, kind);
+  // A clip is checked and locked at the quote for its chosen shape.
+  const stepPrice = n.type === "clip" ? (quote(cheapest.video, n.video ?? {}, !!feed("first frame")) ?? cheapest.price) : cheapest.price;
+  const check = await api.potCheck(stepPrice, cheapest.unpriced, kind);
   if (!check.ready) throw new Error(check.reason || "your wallet cannot cover this step");
 
   const promptIn = feed("prompt")?.text ?? "";
@@ -283,7 +288,7 @@ async function runNode(
     payload =
       n.type === "picture"
         ? { kind: "image", checkpoint_id: n.model, prompt, ...(bytes ? { from_image: bytes } : {}) }
-        : { kind: "video", checkpoint_id: n.model, prompt, ...(bytes ? { from_image: bytes } : {}) };
+        : { kind: "video", checkpoint_id: n.model, prompt, ...(bytes ? { from_image: bytes } : {}), ...clipParams(n.video ?? {}) };
   }
 
   const record = await api.submitJob(target.peer_id, payload);

@@ -135,6 +135,7 @@ async fn app_at(worker_endpoint: String) -> (Arc<AppState>, Arc<Gateway>, gatewa
                 sha256: None,
                 kind: JobKind::Llm,
                 price: None,
+                video: None,
             }]),
             Some(2),
             // No country announced by this stub worker.

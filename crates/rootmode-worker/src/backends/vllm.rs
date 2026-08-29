@@ -258,6 +258,7 @@ impl Backend for VllmBackend {
                     }),
                 id,
                 kind: JobKind::Llm,
+                video: None,
             })
             .collect())
     }

@@ -51,18 +51,21 @@ impl MockTransport {
                     // $20 / million tokens so a 1,000-token mock reply is $0.02
                     // and a 16k ceiling still fits the $0.50 default cap.
                     price: Some(Price::new(20.0)),
+                    video: None,
                 },
                 ModelDescriptor {
                     id: "mock-diffusion-v0".into(),
                     sha256: Some(sha256_hex(b"mock-diffusion-v0")),
                     kind: JobKind::Image,
                     price: Some(Price::new(0.02)),
+                    video: None,
                 },
                 ModelDescriptor {
                     id: "mock-video-v0".into(),
                     sha256: Some(sha256_hex(b"mock-video-v0")),
                     kind: JobKind::Video,
                     price: None,
+                    video: None,
                 },
             ],
             max_concurrent: 2,

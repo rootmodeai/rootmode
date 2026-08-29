@@ -1387,6 +1387,7 @@ impl Backend for ComfyBackend {
                 sha256: None,
                 kind: JobKind::Image,
                 price: self.advertised_price(&w.model),
+                video: None,
             })
             .collect();
 
@@ -1399,6 +1400,7 @@ impl Backend for ComfyBackend {
                 sha256: self.config.model_hash.clone(),
                 kind: JobKind::Image,
                 price: self.advertised_price(&self.model_id),
+                video: None,
             });
             return Ok(out);
         }
@@ -1423,6 +1425,7 @@ impl Backend for ComfyBackend {
                 sha256: None,
                 kind: JobKind::Image,
                 price: self.advertised_price(&w.model),
+                video: None,
             });
         }
         *self.saved.write().unwrap_or_else(|e| e.into_inner()) = saved;
@@ -1446,6 +1449,7 @@ impl Backend for ComfyBackend {
                 sha256: None,
                 kind: JobKind::Video,
                 price,
+                video: None,
             });
         }
 
@@ -1478,6 +1482,7 @@ impl Backend for ComfyBackend {
                 id,
                 kind: JobKind::Image,
                 price,
+                video: None,
             });
         }
         Ok(out)
