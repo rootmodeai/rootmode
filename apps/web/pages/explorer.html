@@ -387,32 +387,6 @@
 
       <div class="panel">
         <div class="panel-head">
-          <h2>Tokens per day</h2>
-          <div class="ranges" role="group" aria-label="Time range for tokens">
-            <button type="button" data-range="7"  aria-pressed="false">7D</button>
-            <button type="button" data-range="30" aria-pressed="true">30D</button>
-            <button type="button" data-range="90" aria-pressed="false">90D</button>
-            <button type="button" data-range="0"  aria-pressed="false">ALL</button>
-          </div>
-          <p class="why">Words in and words out, as counted by the workers that answered.</p>
-        </div>
-        <div class="legend">
-          <span><i style="background:var(--s-in)"></i> In</span>
-          <span><i style="background:var(--s-out)"></i> Out</span>
-        </div>
-        <figure>
-          <svg class="chart" id="tokens-chart" viewBox="0 0 720 260" role="img"
-               aria-labelledby="tokens-title"><title id="tokens-title">Tokens per day, split into input and output</title></svg>
-          <div class="tip" id="tokens-tip" role="status"></div>
-        </figure>
-        <details class="data">
-          <summary>Show the numbers</summary>
-          <div class="tablewrap"><table id="tokens-table"></table></div>
-        </details>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
           <h2>Tokens, cumulative</h2>
           <div class="ranges" role="group" aria-label="Time range for cumulative tokens">
             <button type="button" data-range="7"  aria-pressed="false">7D</button>
@@ -420,7 +394,7 @@
             <button type="button" data-range="90" aria-pressed="false">90D</button>
             <button type="button" data-range="0"  aria-pressed="true">ALL</button>
           </div>
-          <p class="why">Every token the network has answered, running total. Its own panel rather than a second axis on the chart beside it — two scales on one plot is the easiest way to misread a chart.</p>
+          <p class="why">Every token the network has answered, running total — in and out together, as counted by the workers that answered. Each day's own figure is under the marker, and in the table.</p>
         </div>
         <figure>
           <svg class="chart" id="cum-chart" viewBox="0 0 720 260" role="img"
@@ -461,18 +435,18 @@
 
       <div class="panel">
         <div class="panel-head">
-          <h2>What workers earned, per day</h2>
+          <h2>What workers have earned</h2>
           <div class="ranges" role="group" aria-label="Time range for revenue">
             <button type="button" data-range="7"  aria-pressed="false">7D</button>
-            <button type="button" data-range="30" aria-pressed="true">30D</button>
+            <button type="button" data-range="30" aria-pressed="false">30D</button>
             <button type="button" data-range="90" aria-pressed="false">90D</button>
-            <button type="button" data-range="0"  aria-pressed="false">ALL</button>
+            <button type="button" data-range="0"  aria-pressed="true">ALL</button>
           </div>
-          <p class="why">At the prices each worker set. Operators keep 90%; 10% goes to the network vault.</p>
+          <p class="why">Running total, at the prices each worker set. Operators keep 90%; 10% goes to the network vault.</p>
         </div>
         <figure>
           <svg class="chart" id="rev-chart" viewBox="0 0 720 260" role="img"
-               aria-labelledby="rev-title"><title id="rev-title">Worker earnings per day</title></svg>
+               aria-labelledby="rev-title"><title id="rev-title">Worker earnings, cumulative</title></svg>
           <div class="tip" id="rev-tip" role="status"></div>
         </figure>
         <details class="data">
@@ -483,18 +457,18 @@
 
       <div class="panel">
         <div class="panel-head">
-          <h2>Requests per day</h2>
+          <h2>Requests, cumulative</h2>
           <div class="ranges" role="group" aria-label="Time range for requests">
             <button type="button" data-range="7"  aria-pressed="false">7D</button>
-            <button type="button" data-range="30" aria-pressed="true">30D</button>
+            <button type="button" data-range="30" aria-pressed="false">30D</button>
             <button type="button" data-range="90" aria-pressed="false">90D</button>
-            <button type="button" data-range="0"  aria-pressed="false">ALL</button>
+            <button type="button" data-range="0"  aria-pressed="true">ALL</button>
           </div>
-          <p class="why">One job submitted and answered is one request, text or picture.</p>
+          <p class="why">One job submitted and answered is one request, text or picture. Running total; each day's own count is under the marker, and in the table.</p>
         </div>
         <figure>
           <svg class="chart" id="reqs-chart" viewBox="0 0 720 260" role="img"
-               aria-labelledby="reqs-title"><title id="reqs-title">Requests answered per day</title></svg>
+               aria-labelledby="reqs-title"><title id="reqs-title">Requests answered, cumulative</title></svg>
           <div class="tip" id="reqs-tip" role="status"></div>
         </figure>
         <details class="data">
@@ -531,18 +505,18 @@
 
       <div class="panel">
         <div class="panel-head">
-          <h2>Downloads per day</h2>
+          <h2>Downloads, cumulative</h2>
           <div class="ranges" role="group" aria-label="Time range for downloads">
             <button type="button" data-range="7"  aria-pressed="false">7D</button>
-            <button type="button" data-range="30" aria-pressed="true">30D</button>
+            <button type="button" data-range="30" aria-pressed="false">30D</button>
             <button type="button" data-range="90" aria-pressed="false">90D</button>
-            <button type="button" data-range="0"  aria-pressed="false">ALL</button>
+            <button type="button" data-range="0"  aria-pressed="true">ALL</button>
           </div>
-          <p class="why">Visitors the Download button sent to an installer. GitHub counts every installer actually fetched, from here or anywhere else — the tile above shows that as real downloads.</p>
+          <p class="why">Visitors the Download button sent to an installer, running total. GitHub counts every installer actually fetched — from here, from the releases page, and by the release pipeline itself — so the tile above always reads higher.</p>
         </div>
         <figure>
           <svg class="chart" id="dl-chart" viewBox="0 0 720 260" role="img"
-               aria-labelledby="dl-title"><title id="dl-title">Installer downloads per day</title></svg>
+               aria-labelledby="dl-title"><title id="dl-title">Installer downloads, cumulative</title></svg>
           <div class="tip" id="dl-tip" role="status"></div>
         </figure>
         <details class="data">
@@ -751,8 +725,8 @@
 
   var DATA = sample();
   // One per range group, in the order the panels appear.
-  var KEYS = ["tokens", "cum", "peers", "rev", "reqs", "users", "dl"];
-  var RANGE = { tokens: 30, cum: 0, peers: 30, rev: 30, reqs: 30, users: 30, dl: 30 };
+  var KEYS = ["cum", "peers", "rev", "reqs", "users", "dl"];
+  var RANGE = { cum: 0, peers: 30, rev: 0, reqs: 0, users: 30, dl: 0 };
 
   // ---------------------------------------------------------------- charts
   function slice(n) { return n > 0 ? DATA.days.slice(-n) : DATA.days; }
@@ -860,7 +834,16 @@
 
   /// A running total is a line, not a stack of bars: the shape people read is
   /// the slope, and bars of a monotonic series hide it behind their own height.
-  function drawArea(svgId, tipId, range) {
+  /// `opts.value(d)` is one day's figure; the line is its running sum.
+  function drawArea(svgId, tipId, range, opts) {
+    opts = opts || {};
+    var value = opts.value || function (d) { return d.tokens_in + d.tokens_out; };
+    var money = !!opts.money;
+    var fmtAxis = money ? function (v) { return "$" + compact(v); } : compact;
+    var fmtFull = money
+      ? function (v) { return "$" + v.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+      : full;
+    var unit = opts.unit || "";
     var svg = document.getElementById(svgId);
     var tip = document.getElementById(tipId);
     while (svg.childNodes.length > 1) svg.removeChild(svg.lastChild);
@@ -869,8 +852,8 @@
     // never restarts the count — a running total that resets is a lie.
     var all = DATA.days, running = 0;
     var points = all.map(function (d) {
-      running += d.tokens_in + d.tokens_out;
-      return { date: d.date, value: running, day: d.tokens_in + d.tokens_out };
+      running += value(d);
+      return { date: d.date, value: running, day: value(d) };
     });
     var days = range > 0 ? points.slice(-range) : points;
 
@@ -887,7 +870,7 @@
       var y = padT + plotH - ((v - bottom) / (top - bottom)) * plotH;
       el("line", { x1: padL, x2: W - padR, y1: y, y2: y }, grid);
       var lab = el("text", { class: "axis", x: padL - 8, y: y + 3.5, "text-anchor": "end" }, svg);
-      lab.textContent = compact(v);
+      lab.textContent = fmtAxis(v);
     }
 
     var x = function (i) { return padL + (days.length === 1 ? plotW / 2 : (i / (days.length - 1)) * plotW); };
@@ -905,7 +888,7 @@
     el("circle", { cx: lastX, cy: lastY, r: 5, fill: "var(--accent)", stroke: "var(--paper-3)", "stroke-width": 2 }, svg);
     var end = el("text", { class: "axis", x: lastX - 6, y: lastY - 12, "text-anchor": "end",
                            "font-weight": "700", fill: "var(--accent)" }, svg);
-    end.textContent = compact(hi);
+    end.textContent = fmtAxis(hi);
 
     var marker = el("circle", { cx: 0, cy: 0, r: 5, fill: "var(--accent)", stroke: "var(--paper-3)",
                                 "stroke-width": 2, opacity: 0, "pointer-events": "none" }, svg);
@@ -913,7 +896,7 @@
     days.forEach(function (p, i) {
       var hit = el("rect", {
         x: padL + i * band - band / 2, y: padT, width: band, height: plotH, class: "hit", tabindex: "0",
-        role: "img", "aria-label": dayLabel(p.date) + ": " + full(p.value) + " tokens in total",
+        role: "img", "aria-label": dayLabel(p.date) + ": " + fmtFull(p.value) + unit + " in total",
       }, svg);
       function show() {
         var rect = svg.getBoundingClientRect(), scale = rect.width / W;
@@ -924,9 +907,9 @@
         tip.style.opacity = 1;
         tip.innerHTML = "<b>" + dayLabel(p.date) + "</b>" +
           '<div class="row"><i style="background:' + ink("--accent") + '"></i><span>Total</span><span>' +
-          full(p.value) + "</span></div>" +
+          fmtFull(p.value) + "</span></div>" +
           '<div class="row"><i style="background:transparent"></i><span>That day</span><span>' +
-          full(p.day) + "</span></div>";
+          fmtFull(p.day) + "</span></div>";
       }
       function hide() { tip.style.opacity = 0; marker.setAttribute("opacity", 0); }
       hit.addEventListener("mouseenter", show);
@@ -1036,39 +1019,43 @@
     }).join("");
   }
 
+  /// A cumulative table: the day's own figure beside the running total.
+  function fillCumTable(id, range, value, labels, money) {
+    var running = 0;
+    var rows = DATA.days.map(function (d) {
+      running += value(d);
+      var r = { date: d.date }; r.day = value(d); r.total = running;
+      return r;
+    });
+    fillTable(id, range > 0 ? rows.slice(-range) : rows,
+      [{ key: "day", label: labels[0], money: money }, { key: "total", label: labels[1], money: money }]);
+  }
+
   function draw() {
-    drawBars("tokens-chart", "tokens-tip", ["tokens_in", "tokens_out"], RANGE.tokens,
-      { labels: { tokens_in: "In", tokens_out: "Out" } });
     drawArea("cum-chart", "cum-tip", RANGE.cum);
     drawBars("peers-chart", "peers-tip", ["peers_returning", "peers_new"], RANGE.peers,
       { labels: { peers_returning: "Returning", peers_new: "First seen" } });
-    drawBars("rev-chart", "rev-tip", ["revenue"], RANGE.rev,
-      { labels: { revenue: "Earned" }, money: true, solo: true });
-    drawBars("reqs-chart", "reqs-tip", ["requests"], RANGE.reqs,
-      { labels: { requests: "Requests" }, solo: true });
+    drawArea("rev-chart", "rev-tip", RANGE.rev,
+      { value: function (d) { return d.revenue || 0; }, money: true });
+    drawArea("reqs-chart", "reqs-tip", RANGE.reqs,
+      { value: function (d) { return d.requests || 0; }, unit: " requests" });
     drawBars("users-chart", "users-tip", ["installs_returning", "installs_new"], RANGE.users,
       { labels: { installs_returning: "Returning", installs_new: "New install" } });
-    drawBars("dl-chart", "dl-tip", ["downloads"], RANGE.dl,
-      { labels: { downloads: "Downloads" }, solo: true });
+    drawArea("dl-chart", "dl-tip", RANGE.dl,
+      { value: function (d) { return d.downloads || 0; }, unit: " downloads" });
 
-    fillTable("tokens-table", slice(RANGE.tokens),
-      [{ key: "tokens_in", label: "In" }, { key: "tokens_out", label: "Out" }]);
     fillTable("peers-table", slice(RANGE.peers),
       [{ key: "peers_returning", label: "Returning" }, { key: "peers_new", label: "New" }]);
-    fillTable("rev-table", slice(RANGE.rev), [{ key: "revenue", label: "Earned (USD)", money: true }]);
-    fillTable("reqs-table", slice(RANGE.reqs), [{ key: "requests", label: "Requests" }]);
     fillTable("users-table", slice(RANGE.users),
       [{ key: "installs_returning", label: "Returning" }, { key: "installs_new", label: "New" }]);
-    fillTable("dl-table", slice(RANGE.dl), [{ key: "downloads", label: "Downloads" }]);
-
-    // The cumulative table is derived, so it is built rather than sliced.
-    var running = 0;
-    var cum = DATA.days.map(function (d) {
-      running += d.tokens_in + d.tokens_out;
-      return { date: d.date, total: running };
-    });
-    fillTable("cum-table", RANGE.cum > 0 ? cum.slice(-RANGE.cum) : cum,
-      [{ key: "total", label: "Total tokens" }]);
+    fillCumTable("cum-table", RANGE.cum,
+      function (d) { return d.tokens_in + d.tokens_out; }, ["That day", "Total tokens"]);
+    fillCumTable("rev-table", RANGE.rev,
+      function (d) { return d.revenue || 0; }, ["That day (USD)", "Total (USD)"], true);
+    fillCumTable("reqs-table", RANGE.reqs,
+      function (d) { return d.requests || 0; }, ["That day", "Total requests"]);
+    fillCumTable("dl-table", RANGE.dl,
+      function (d) { return d.downloads || 0; }, ["That day", "Total downloads"]);
   }
 
   function render() {
