@@ -269,11 +269,7 @@ class Store:
                 "by_platform_30d": [{"platform": p, "count": n} for p, n in dl_platform],
                 "by_country_30d": [{"country": c, "count": n} for c, n in dl_country],
             },
-            "github": {
-                "snapshot_day": latest_day,
-                "total": sum(c for _, _, c in gh_assets),
-                "assets": [{"tag": t, "asset": a, "count": c} for t, a, c in gh_assets],
-            },
+            "github": _github_block(latest_day, gh_assets),
             "installs": {
                 "total": installs_total,
                 "new_7d": sum(new_day.get((first + timedelta(days=i)).isoformat(), 0)
@@ -287,7 +283,7 @@ class Store:
             },
         }
 
-    def reports_since(self, peer_id: str, since: int) -> int:
+    def reports_since(self, peer_id: str, since: int) -> int:  # noqa: E301 — see _github_block below
         """How many reports this node has filed lately, for rate limiting."""
         with self.connect() as conn:
             row = conn.execute(
@@ -403,3 +399,41 @@ class Store:
                 for w in worker_rows
             ],
         }
+
+
+# Up to and including this tag, the release pipeline's own "stable filename"
+# step fetched assets back off the release to re-upload them — two dmg-glob
+# downloads on each of two macOS jobs, one AppImage, one msi: six fetches a
+# release that GitHub counted like anyone else's. v0.1.22 onwards uploads
+# from the runner's own build, so the counter is clean from there.
+_LAST_INFLATED = (0, 1, 21)
+_CI_FETCHES_PER_RELEASE = 6
+
+
+def _release_ci_fetches(tag: str) -> int:
+    """What the pipeline itself contributed to this release's count."""
+    if not tag.startswith("v"):
+        return 0
+    try:
+        parts = tuple(int(x) for x in tag[1:].split("."))
+    except ValueError:
+        return 0
+    return _CI_FETCHES_PER_RELEASE if parts <= _LAST_INFLATED else 0
+
+
+def _github_block(latest_day, gh_assets):
+    """GitHub's counter, and the same number with the pipeline's own fetches
+    taken back out. The raw figure stays published — it is what GitHub shows
+    anyone who looks — but the headline is the one that means people."""
+    raw = sum(c for _, _, c in gh_assets)
+    by_tag: dict[str, int] = {}
+    for t, _, c in gh_assets:
+        by_tag[t] = by_tag.get(t, 0) + c
+    ci = sum(min(by_tag[t], _release_ci_fetches(t)) for t in by_tag)
+    return {
+        "snapshot_day": latest_day,
+        "total": raw - ci,
+        "raw_total": raw,
+        "ci_estimate": ci,
+        "assets": [{"tag": t, "asset": a, "count": c} for t, a, c in gh_assets],
+    }

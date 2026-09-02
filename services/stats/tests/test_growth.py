@@ -84,4 +84,26 @@ def test_githubs_own_counts_are_snapshotted(monkeypatch):
     g = growth()
     counts = {a["asset"]: a["count"] for a in g["github"]["assets"] if a["tag"] == "v0.1.11"}
     assert counts["rootmode-macos-arm64.dmg"] == 40 and counts["rootmode-windows-x64.msi"] == 2
-    assert g["github"]["total"] >= 42
+    # v0.1.11 predates the pipeline fix, so six of its fetches were the
+    # pipeline's own; the headline subtracts them, the raw figure keeps them.
+    assert g["github"]["raw_total"] >= 42
+    assert g["github"]["total"] == g["github"]["raw_total"] - 6
+
+
+def test_a_release_after_the_pipeline_fix_is_not_discounted(monkeypatch):
+    # The same day's snapshot may already hold rows from the test above, so
+    # every expectation is computed from what actually comes back.
+    monkeypatch.setattr("app.main.release_counts",
+                        lambda repo=None: [("v0.1.22", "rootmode-macos-arm64.dmg", 10),
+                                           ("v0.1.2", "rootmode-linux-x86_64.AppImage", 3)])
+    g = growth()["github"]
+    by_tag = {}
+    for a in g["assets"]:
+        by_tag[a["tag"]] = by_tag.get(a["tag"], 0) + a["count"]
+    assert by_tag["v0.1.22"] == 10 and by_tag["v0.1.2"] == 3
+    # Only pre-fix tags are discounted, each by at most six and never below
+    # zero - so v0.1.2's three all come off, and v0.1.22's ten all stay.
+    expected_ci = sum(min(6, n) for t, n in by_tag.items() if t != "v0.1.22")
+    assert g["ci_estimate"] == expected_ci
+    assert g["total"] == g["raw_total"] - expected_ci
+    assert g["raw_total"] == sum(by_tag.values())

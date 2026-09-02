@@ -703,7 +703,7 @@
       growth: {
         installs: { total: installsAll, active_7d: Math.round(installsAll * 0.55), active_30d: Math.round(installsAll * 0.8) },
         downloads: { total: downloadsAll },
-        github: { total: Math.round(downloadsAll * 1.3) },
+        github: { total: Math.round(downloadsAll * 1.3), raw_total: Math.round(downloadsAll * 1.45), ci_estimate: Math.round(downloadsAll * 0.15) },
       },
       models: [
         { id: "glm-5.2", tokens: 1.42e9 },
@@ -980,9 +980,12 @@
       '<div class="tile"><p class="k">Workers seen</p><p class="v">' + DATA.workers.length +
         '</p><p class="n">' + online + " answering now</p></div>",
       '<div class="tile"><p class="k">App installs</p><p class="v">' + full(installs.total || 0) +
-        '</p><p class="n">' + full(usersToday) + " active today" + (usersPrev ? " · " + delta(usersToday, usersPrev) : "") + "</p></div>",
-      '<div class="tile"><p class="k">Downloads</p><p class="v">' + full(gh.total || dls.total || 0) +
-        '</p><p class="n">GitHub ' + full(gh.total || 0) + " / Site " + full(dls.total || 0) + "</p></div>",
+        '</p><p class="n">' + full(usersToday) + " active today" + (usersPrev ? " · " + delta(usersToday, usersPrev) : "") +
+        " · counted only when the app runs and opts in</p></div>",
+      '<div class="tile"><p class="k">Installer downloads</p><p class="v">' + full(gh.total || dls.total || 0) +
+        '</p><p class="n">' + full(dls.total || 0) + " via the site button" +
+        (gh.ci_estimate ? " · GitHub shows " + full(gh.raw_total || 0) + ", " + full(gh.ci_estimate) + " of those were the release pipeline's own" : "") +
+        "</p></div>",
     ].join("");
   }
 
