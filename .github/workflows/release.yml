@@ -3,6 +3,12 @@
 # points at the stable asset names uploaded here.
 #
 #   git tag v0.1.0 && git push origin v0.1.0
+#   gh release create v0.1.0 --title "rootmode v0.1.0" --notes "Installers for this tag." --verify-tag
+#
+# The release itself is created by whoever tags (an admin bypasses the
+# "release tags" ruleset); the workflow token cannot create one — tag
+# rulesets gate release creation and GitHub Actions is not a bypass
+# actor. The jobs here only upload assets into the existing release.
 #
 # Apple secrets (macOS jobs only; unsigned if missing):
 #   APPLE_CERTIFICATE            base64 of Developer ID Application .p12
