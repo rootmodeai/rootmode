@@ -479,22 +479,18 @@
 
       <div class="panel">
         <div class="panel-head">
-          <h2>People using the app, per day</h2>
+          <h2>People using the app, cumulative</h2>
           <div class="ranges" role="group" aria-label="Time range for app installs">
             <button type="button" data-range="7"  aria-pressed="false">7D</button>
-            <button type="button" data-range="30" aria-pressed="true">30D</button>
+            <button type="button" data-range="30" aria-pressed="false">30D</button>
             <button type="button" data-range="90" aria-pressed="false">90D</button>
-            <button type="button" data-range="0"  aria-pressed="false">ALL</button>
+            <button type="button" data-range="0"  aria-pressed="true">ALL</button>
           </div>
-          <p class="why">Copies of the desktop app that checked for an update that day, split by whether it was their first time. An install counts itself with a random id and its version — nothing about what it did — and can switch that off in Settings.</p>
-        </div>
-        <div class="legend">
-          <span><i style="background:var(--s-in)"></i> Returning</span>
-          <span><i style="background:var(--s-out)"></i> New install</span>
+          <p class="why">Every copy of the desktop app that has counted itself, running total. An install counts itself once, with a random id and its version — nothing about what it did — and can switch that off in Settings.</p>
         </div>
         <figure>
           <svg class="chart" id="users-chart" viewBox="0 0 720 260" role="img"
-               aria-labelledby="users-title"><title id="users-title">App installs active per day</title></svg>
+               aria-labelledby="users-title"><title id="users-title">App installs, cumulative</title></svg>
           <div class="tip" id="users-tip" role="status"></div>
         </figure>
         <details class="data">
@@ -726,7 +722,7 @@
   var DATA = sample();
   // One per range group, in the order the panels appear.
   var KEYS = ["cum", "peers", "rev", "reqs", "users", "dl"];
-  var RANGE = { cum: 0, peers: 30, rev: 0, reqs: 0, users: 30, dl: 0 };
+  var RANGE = { cum: 0, peers: 30, rev: 0, reqs: 0, users: 0, dl: 0 };
 
   // ---------------------------------------------------------------- charts
   function slice(n) { return n > 0 ? DATA.days.slice(-n) : DATA.days; }
@@ -979,13 +975,9 @@
         '</p><p class="n">' + delta(today.requests, prev.requests) + "</p></div>",
       '<div class="tile"><p class="k">Workers seen</p><p class="v">' + DATA.workers.length +
         '</p><p class="n">' + online + " answering now</p></div>",
-      '<div class="tile"><p class="k">App installs</p><p class="v">' + full(installs.total || 0) +
-        '</p><p class="n">' + full(usersToday) + " active today" + (usersPrev ? " · " + delta(usersToday, usersPrev) : "") +
-        " · counted only when the app runs and opts in</p></div>",
       '<div class="tile"><p class="k">Installer downloads</p><p class="v">' + full(gh.total || dls.total || 0) +
-        '</p><p class="n">' + full(dls.total || 0) + " via the site button" +
-        (gh.ci_estimate ? " · GitHub shows " + full(gh.raw_total || 0) + ", " + full(gh.ci_estimate) + " of those were the release pipeline's own" : "") +
-        "</p></div>",
+        '</p><p class="n">' + full(dls.total || 0) + " via the site button · " + full(installs.total || 0) +
+        " installs running and opted in</p></div>",
     ].join("");
   }
 
@@ -1042,15 +1034,15 @@
       { value: function (d) { return d.revenue || 0; }, money: true });
     drawArea("reqs-chart", "reqs-tip", RANGE.reqs,
       { value: function (d) { return d.requests || 0; }, unit: " requests" });
-    drawBars("users-chart", "users-tip", ["installs_returning", "installs_new"], RANGE.users,
-      { labels: { installs_returning: "Returning", installs_new: "New install" } });
+    drawArea("users-chart", "users-tip", RANGE.users,
+      { value: function (d) { return d.installs_new || 0; }, unit: " installs" });
     drawArea("dl-chart", "dl-tip", RANGE.dl,
       { value: function (d) { return d.downloads || 0; }, unit: " downloads" });
 
     fillTable("peers-table", slice(RANGE.peers),
       [{ key: "peers_returning", label: "Returning" }, { key: "peers_new", label: "New" }]);
-    fillTable("users-table", slice(RANGE.users),
-      [{ key: "installs_returning", label: "Returning" }, { key: "installs_new", label: "New" }]);
+    fillCumTable("users-table", RANGE.users,
+      function (d) { return d.installs_new || 0; }, ["New that day", "Total installs"]);
     fillCumTable("cum-table", RANGE.cum,
       function (d) { return d.tokens_in + d.tokens_out; }, ["That day", "Total tokens"]);
     fillCumTable("rev-table", RANGE.rev,
