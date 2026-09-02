@@ -105,14 +105,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # tauri-action already uploaded a versioned name. Pull that back and
-          # re-upload under the stable name the site Download button uses.
-          mkdir -p /tmp/rm-asset
-          gh release download "${{ github.ref_name }}" --dir /tmp/rm-asset --pattern '${{ matrix.glob }}'
-          src=$(find /tmp/rm-asset -type f -name '${{ matrix.glob }}' | head -1)
+          # tauri-action uploaded a versioned name; upload the same file we
+          # just built under the stable name the site Download button uses.
+          # From the local bundle, not downloaded back from the release: every
+          # download counts on GitHub's public counter, and this step alone
+          # was ~6 phantom "downloads" per release.
+          src=$(find target -type f -path '*/bundle/*' -name '${{ matrix.glob }}' | head -1)
           if [ -z "$src" ]; then
-            echo "no ${{ matrix.glob }} on the release"
-            ls -la /tmp/rm-asset
+            echo "no ${{ matrix.glob }} under target/"
+            find target -type d -name bundle
             exit 1
           fi
           cp "$src" "${{ matrix.stable }}"
