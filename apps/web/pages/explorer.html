@@ -975,9 +975,8 @@
         '</p><p class="n">' + delta(today.requests, prev.requests) + "</p></div>",
       '<div class="tile"><p class="k">Workers seen</p><p class="v">' + DATA.workers.length +
         '</p><p class="n">' + online + " answering now</p></div>",
-      '<div class="tile"><p class="k">Installer downloads</p><p class="v">' + full(gh.total || dls.total || 0) +
-        '</p><p class="n">' + full(dls.total || 0) + " of them via the site button · " + full(installs.total || 0) +
-        " of them now run as installs</p></div>",
+      '<div class="tile"><p class="k">Downloads</p><p class="v">' + full(gh.total || dls.total || 0) +
+        '</p><p class="n">&nbsp;</p></div>",
     ].join("");
   }
 
