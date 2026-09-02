@@ -720,7 +720,14 @@ async fn submit(
                 // banked bond sat above our ledger, refusing every ticket we
                 // sent that node afterwards.
                 let mut gone = false;
+                let mut finished = false;
                 while let Some(msg) = worker_rx.recv().await {
+                    match &msg {
+                        WorkerMessage::JobResult(_) => finished = true,
+                        WorkerMessage::JobInvoice(inv) if !inv.top_up => finished = true,
+                        WorkerMessage::JobStatus(s) if s.status.is_terminal() => finished = true,
+                        _ => {}
+                    }
                     if let WorkerMessage::JobInvoice(inv) = &msg {
                         match crate::pot::pay_invoice(&state, job_id, inv).await {
                             Ok(pay) => {
@@ -763,8 +770,16 @@ async fn submit(
                     }
                     if client_tx.send(msg).is_err() {
                         gone = true;
-                        log::info!("gateway: the client of job {job_id} hung up; stopping it and paying for what was done");
-                        stop.notify_one();
+                        if finished {
+                            // The answer exists and the bill is in flight;
+                            // there is nothing left to stop, and a stop here
+                            // once raced the payment into forfeiting the
+                            // whole bond on the worker.
+                            log::info!("gateway: the client of job {job_id} hung up after the answer; paying its bill");
+                        } else {
+                            log::info!("gateway: the client of job {job_id} hung up; stopping it and paying for what was done");
+                            stop.notify_one();
+                        }
                     }
                 }
                 let out = if withheld.is_some() {

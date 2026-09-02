@@ -1371,15 +1371,14 @@ impl Worker {
         } else {
             Duration::from_secs(30)
         };
+        // A stop that lands here changes nothing: generation is over, the
+        // bill is out, and the client may be signing it this instant. When
+        // this wait raced a client's hang-up — whose gateway stops the job
+        // and *then* pays — the stop used to win, and a job whose actual
+        // bill was signed and sent settled as the whole bond instead.
+        // Silence still forfeits the chunk; it just takes the full wait.
+        let _ = stop;
         let paid = tokio::select! {
-            biased;
-            _ = stop.notified() => {
-                self.pending_pays
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .remove(&job_id);
-                None
-            }
             p = pay_rx => p.ok(),
             _ = tokio::time::sleep(wait) => {
                 self.pending_pays
@@ -2344,6 +2343,42 @@ mod tests {
             .to_string();
         assert!(err.contains("already authorised 8064009"), "{err}");
         assert!(!err.contains("your $"), "it is not the person's limit: {err}");
+    }
+
+    /// The client hangs up the moment the answer lands: its gateway stops
+    /// the job and then pays the invoice. The stop must not race the pay
+    /// into forfeiting the chunk — the work is finished, there is nothing
+    /// left to stop, and the actual bill is on its way.
+    #[tokio::test]
+    async fn a_stop_during_capture_does_not_forfeit_the_chunk() {
+        let worker = Arc::new(priced_worker());
+        let job_id = Uuid::new_v4();
+        let chunk = rootmode_core::Price::new(20.0).chunk_micros();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let stop = Arc::new(tokio::sync::Notify::new());
+        let w = worker.clone();
+        let stop_job = stop.clone();
+        let running = tokio::spawn(async move {
+            w.handle_submit_cancellable(priced_submit(job_id, chunk), tx, stop_job, None)
+                .await;
+        });
+
+        let (_, inv) = recv_until_invoice(&mut rx).await;
+        // The hang-up: stop first, pay right after.
+        stop.notify_one();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let pay = sign_pay(job_id, inv.amount, "0x00000000000000000000000000000000000000b0");
+        let (dummy, _rx) = mpsc::unbounded_channel();
+        worker.on_line(
+            &serde_json::to_string(&ClientMessage::JobPay(pay)).unwrap(),
+            &dummy,
+        );
+        running.await.unwrap();
+        assert_eq!(
+            worker.channels.owed(),
+            inv.amount,
+            "the signed bill, not the whole chunk"
+        );
     }
 
     #[tokio::test]
