@@ -100,11 +100,13 @@ const server = http.createServer(async (req, res) => {
   }
   const pages = {
     "/": "/index.html",
+    "/manifesto": "/pages/manifesto.html",
     "/worker": "/pages/worker.html",
     "/explorer": "/pages/explorer.html",
     "/protocol": "/pages/protocol.html",
     "/discovery": "/pages/discovery.html",
     "/brand": "/pages/brand.html",
+    "/terms": "/pages/terms.html",
   };
   if (pages[file]) file = pages[file];
   else if (!file.startsWith("/assets/")) {

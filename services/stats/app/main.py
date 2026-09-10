@@ -244,6 +244,7 @@ _PAGES = {
     "/protocol": "pages/protocol.html",
     "/discovery": "pages/discovery.html",
     "/brand": "pages/brand.html",
+    "/terms": "pages/terms.html",
 }
 
 
