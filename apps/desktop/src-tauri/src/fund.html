@@ -6,6 +6,16 @@
   <meta name="theme-color" content="#7433f7" />
   <title>rootmode pot</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230d0f11'/%3E%3Cg fill='%23e8eaed'%3E%3Crect x='13' y='5.5' width='6' height='6' rx='1.2'/%3E%3Crect x='20.5' y='13' width='6' height='6' rx='1.2'/%3E%3Crect x='5.5' y='20.5' width='6' height='6' rx='1.2'/%3E%3Crect x='13' y='20.5' width='6' height='6' rx='1.2'/%3E%3Crect x='20.5' y='20.5' width='6' height='6' rx='1.2'/%3E%3C/g%3E%3C/svg%3E" type="image/svg+xml" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" />
+  <script>
+    (function () {
+      var t = new URLSearchParams(location.search).get("t") || "";
+      var l = document.createElement("link");
+      l.rel = "stylesheet";
+      l.href = "/w3a.css?t=" + encodeURIComponent(t);
+      document.head.appendChild(l);
+    })();
+  </script>
   <style>
     :root {
       --paper: #ffffff;
@@ -69,36 +79,97 @@
       margin: 0 0 22px; color: var(--ink);
     }
     .lockup svg { width: 18px; height: 18px; flex: none; }
-    h1 { font-size: 28px; letter-spacing: -0.04em; margin: 0 0 8px; font-weight: 800; }
-    p { color: var(--ink-2); line-height: 1.5; }
+    main h1 { font-size: 32px; letter-spacing: -0.045em; margin: 0 0 6px; font-weight: 800; }
+    main p { color: var(--ink-2); line-height: 1.5; }
+    .lede { margin: 0 0 22px; font-size: 16px; }
     .card {
       background: var(--paper-3);
       border: 1px solid var(--line);
       border-radius: 18px;
       padding: 20px;
-      margin: 18px 0;
+      margin: 0;
     }
-    label { display: block; font-size: 13px; color: var(--ink-2); margin: 12px 0 6px; }
-    input {
-      width: 100%; padding: 10px 12px; border-radius: 10px;
-      border: 1px solid var(--line); background: var(--paper-2); color: var(--ink); font-size: 15px;
+    main label { display: block; font-size: 13px; color: var(--ink-2); margin: 14px 0 6px; font-weight: 650; }
+    main input {
+      width: 100%; padding: 12px 12px; border-radius: 12px;
+      border: 1px solid var(--line); background: var(--paper-2); color: var(--ink); font-size: 16px;
       font-family: inherit;
     }
-    input:focus { outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent); }
-    button {
-      width: 100%; margin-top: 12px; padding: 12px; border: 0; border-radius: 999px;
-      background: var(--btn); color: #fff; font-weight: 650; font-size: 15px;
+    main input:focus { outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent); }
+    main button {
+      width: 100%; margin-top: 12px; padding: 14px; border: 0; border-radius: 999px;
+      background: var(--btn); color: #fff; font-weight: 650; font-size: 16px;
       cursor: pointer; font-family: inherit;
     }
-    button.ghost { background: var(--paper-3); border: 1px solid var(--line); color: var(--ink); }
-    button.ghost:hover { border-color: var(--accent); color: var(--accent); }
-    button:disabled { opacity: 0.5; cursor: wait; }
-    .wallets { display: grid; gap: 8px; margin-top: 12px; }
+    main button.ghost { background: var(--paper-3); border: 1px solid var(--line); color: var(--ink); }
+    main button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+    main button:disabled { opacity: 0.45; cursor: not-allowed; }
+    #connect:disabled { cursor: wait; }
+    main button.text {
+      width: auto; margin: 0; padding: 4px 0; background: none; color: var(--ink-3);
+      font-size: 13px; font-weight: 650; border-radius: 0;
+    }
+    main button.text:hover { color: var(--accent); }
+    .wallets { display: grid; gap: 8px; margin-top: 4px; }
     .wallets button { margin-top: 0; }
+    .wallet {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 12px; margin: 0 0 16px;
+    }
+    .wallet-addr { font-size: 14px; font-weight: 700; letter-spacing: -0.02em; }
+    .wallet-meta { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+    #balBlock { margin: 0 0 8px; }
+    #bal { font-size: 36px; font-weight: 800; letter-spacing: -0.045em; line-height: 1.1; }
+    .bal-label { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+    .pills { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 0 0 10px; }
+    .pills button {
+      margin: 0; padding: 10px; background: var(--paper-2); color: var(--ink);
+      border: 1px solid var(--line); border-radius: 999px; font-weight: 700; font-size: 14px;
+    }
+    .pills button.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+    .amt { position: relative; }
+    .amt span {
+      position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+      color: var(--ink-3); font-size: 13px; font-weight: 700; pointer-events: none;
+    }
+    .amt input { padding-right: 64px; font-variant-numeric: tabular-nums; }
+    #deposit { margin-top: 16px; }
+    .hint { font-size: 13px; color: var(--ink-3); margin: 8px 0 0; line-height: 1.45; }
+    details.more {
+      margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px;
+    }
+    details.more summary {
+      cursor: pointer; color: var(--ink-2); font-size: 14px; font-weight: 650;
+      list-style: none;
+    }
+    details.more summary::-webkit-details-marker { display: none; }
+    #fundBox.blocked { opacity: 0.4; pointer-events: none; }
+    .notice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .notice-actions button { width: auto; margin: 0; padding: 8px 14px; font-size: 14px; }
+    #w3a-parent-container img {
+      width: 20px;
+      height: 20px;
+      min-width: 20px;
+      min-height: 20px;
+      object-fit: contain;
+    }
     .mono { font-family: var(--mono); font-size: 12px; word-break: break-all; color: var(--ink-3); }
     .ok { color: var(--accent); }
     .bad { color: #c8392f; }
     .help { font-size: 13.5px; color: var(--ink-2); line-height: 1.6; }
+    .notice {
+      margin: 0 0 16px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: var(--paper-2);
+    }
+    .notice h3 { margin: 0 0 6px; font-size: 15px; font-weight: 750; letter-spacing: -0.02em; }
+    .notice p { margin: 0; font-size: 14px; color: var(--ink-2); line-height: 1.5; }
+    .notice.warn { border-color: var(--accent); background: var(--accent-bg); }
+    .notice.bad { border-color: #c4a0d8; background: var(--accent-bg); }
+    .notice.ok { border-color: var(--line); background: var(--accent-bg); }
+    .notice.bad h3 { color: var(--ink); }
     [hidden] { display: none !important; }
     #home { flex: 1; }
     .wizard {
@@ -172,6 +243,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     #log { margin-top: 14px; }
+    #log:empty { display: none; }
     #confetti {
       position: fixed; inset: 0; z-index: 50;
       width: 100%; height: 100%;
@@ -193,29 +265,70 @@
     rootmode
   </div>
   <div id="home">
-    <h1>Your pot</h1>
-    <p>The wallet deposits, sets caps, and withdraws unlocked funds. Work is paid from an on-chain lock the app key signs — not from this page.</p>
-
-    <div class="card help" id="help" hidden></div>
+    <h1>Add USDC</h1>
+    <p class="lede" id="lede">Fund replies. Unused money stays yours.</p>
 
     <div class="card" id="form">
-      <div class="mono" id="status">Looking for a wallet…</div>
-      <div id="bal" style="font-size:28px;font-weight:750;letter-spacing:-0.03em;margin:10px 0 4px">—</div>
-      <div class="mono" id="balhint">This number is from the chain.</div>
-      <div class="wallets" id="connectRow">
-        <button type="button" id="connectMm">MetaMask</button>
-        <button type="button" class="ghost" id="connectCb">Coinbase</button>
+      <div class="wallet" id="walletRow" hidden>
+        <div>
+          <div class="wallet-addr" id="status"></div>
+          <div class="wallet-meta" id="balhint"></div>
+        </div>
+        <button type="button" class="text" id="disconnect">Disconnect</button>
       </div>
-      <button type="button" id="disconnect" hidden>Disconnect</button>
-      <label>Amount (USDC)</label>
-      <input id="amount" value="100" />
-      <label>Max per job (USDC)</label>
-      <input id="maxJob" value="0.50" />
-      <label>Max per day (USDC)</label>
-      <input id="maxDay" value="20" />
-      <button id="deposit">Deposit</button>
-      <button class="ghost" id="limits">Save limits</button>
-      <button class="ghost" id="withdraw">Withdraw unlocked</button>
+
+      <div id="balBlock" hidden>
+        <div id="bal">—</div>
+        <div class="bal-label" id="balLabel">in this wallet</div>
+      </div>
+
+      <div class="notice" id="notice" hidden>
+        <h3 id="noticeTitle"></h3>
+        <p id="noticeBody"></p>
+        <div class="notice-actions">
+          <button type="button" id="buy" hidden>Buy with card</button>
+          <button type="button" class="ghost" id="noticeCopy" hidden>Copy address</button>
+          <button type="button" class="ghost" id="noticeRetry" hidden>Check again</button>
+        </div>
+      </div>
+
+      <div class="wallets" id="connectRow">
+        <button type="button" id="connect">Connect wallet</button>
+      </div>
+
+      <div id="fundBox" hidden>
+        <div class="fund-main">
+          <label>Amount</label>
+          <div class="pills" id="pills">
+            <button type="button" data-amt="20" class="on">$20</button>
+            <button type="button" data-amt="50">$50</button>
+            <button type="button" data-amt="100">$100</button>
+          </div>
+          <div class="amt">
+            <input id="amount" value="20" inputmode="decimal" />
+            <span>USDC</span>
+          </div>
+          <p class="hint" id="amtHint"></p>
+          <button id="deposit">Deposit 20 USDC</button>
+          <button type="button" class="ghost" id="buyMore" hidden>Buy USDC with card</button>
+        </div>
+
+        <details class="more" id="limitsBox">
+          <summary>Spending limits</summary>
+          <label>Max per reply (USDC)</label>
+          <input id="maxJob" value="0.50" />
+          <label>Max per day (USDC)</label>
+          <input id="maxDay" value="20" />
+          <p class="hint">A reply stops when it hits the per-reply amount.</p>
+          <button class="ghost" id="limits">Save limits</button>
+        </details>
+
+        <details class="more" id="withdrawBox" hidden>
+          <summary>Withdraw</summary>
+          <p class="hint">Unlocked funds return to this wallet. Locked funds wait until work settles.</p>
+          <button class="ghost" id="withdraw">Withdraw unlocked</button>
+        </details>
+      </div>
     </div>
   </div>
 
@@ -252,7 +365,6 @@
   <p class="mono" id="log"></p>
 </main>
 <canvas id="confetti"></canvas>
-<script src="https://unpkg.com/@base-org/account/dist/base-account.min.js"></script>
 <script>
 const q = new URLSearchParams(location.search);
 const rpc = q.get("rpc") || "http://127.0.0.1:8545";
@@ -265,7 +377,11 @@ const wantId = Number(chainId);
 const $ = (id) => document.getElementById(id);
 const log = (m, cls) => { $("log").textContent = m; $("log").className = "mono " + (cls || ""); };
 let connected = false;
-let walletKind = "injected";
+let w3a = null;
+let w3aProvider = null;
+let lastAccount = "";
+let walletUsdc = 0;
+let hasGas = true;
 
 function onBase() {
   return wantId === 8453 || wantId === 84532;
@@ -306,14 +422,26 @@ function chainParams() {
 
 function setConnected(on, account) {
   connected = on;
+  lastAccount = on && account ? account : "";
   $("connectRow").hidden = on;
-  $("disconnect").hidden = !on;
+  $("walletRow").hidden = !on;
+  $("balBlock").hidden = !on;
+  $("fundBox").hidden = !on;
+  $("lede").textContent = on
+    ? "This pot pays for replies."
+    : "Fund replies. Unused money stays yours.";
   if (on) {
-    if (account) $("status").textContent = "Connected " + account;
+    if (account) $("status").textContent = shortAddr(account);
   } else {
+    walletUsdc = 0;
+    hasGas = true;
     $("bal").textContent = "—";
-    $("balhint").textContent = "This number is from the chain.";
-    $("status").textContent = "Connect MetaMask or Coinbase to continue.";
+    $("balhint").textContent = "";
+    $("status").textContent = "";
+    $("withdrawBox").hidden = true;
+    $("fundBox").classList.remove("blocked");
+    hideNotice();
+    syncDepositBtn();
   }
 }
 
@@ -337,7 +465,11 @@ window.addEventListener("eip6963:announceProvider", (ev) => {
 try { window.dispatchEvent(new Event("eip6963:requestProvider")); } catch (_) {}
 
 function metamaskProvider() {
-  const by6963 = eip6963.find((d) => d.info.rdns === "io.metamask" || /metamask/i.test(d.info.name || ""));
+  const by6963 = eip6963.find((d) => {
+    const rdns = d.info.rdns || "";
+    if (rdns === "io.metamask.mmc") return false;
+    return rdns === "io.metamask" || rdns.startsWith("io.metamask") || /metamask/i.test(d.info.name || "");
+  });
   if (by6963) return by6963.provider;
   const list = window.ethereum && window.ethereum.providers;
   if (Array.isArray(list)) {
@@ -348,36 +480,207 @@ function metamaskProvider() {
   return null;
 }
 
-function baseProvider() {
-  if (typeof window.createBaseAccountSDK !== "function") return null;
-  return window.createBaseAccountSDK({
-    appName: "rootmode",
-    appLogoUrl: "https://rootmode.ai/assets/favicon.svg",
-  }).getProvider();
+function provider() {
+  if (w3aProvider) return w3aProvider;
+  throw new Error("Connect a wallet to continue.");
 }
 
-function provider() {
-  if (walletKind === "base") {
-    const p = baseProvider();
-    if (p) return p;
-    throw new Error("Coinbase is not available in this tab.");
+function w3aClientId() {
+  return (q.get("w3a") || "BIeOI4MF2OI5jKs0mBHHvURM65XrZEm9IxemF7U4u_RJO2FKQ_X9yhDcgeCmh8khKU3fOODPKR0AXVCWvpm624Q").trim();
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Could not load the wallet modal."));
+    document.head.appendChild(s);
+  });
+}
+
+async function importWeb3Auth() {
+  if (window.RootmodeW3A && window.RootmodeW3A.start) return window.RootmodeW3A;
+  await loadScript("/w3a.js?t=" + encodeURIComponent(q.get("t") || ""));
+  if (!window.RootmodeW3A || !window.RootmodeW3A.start) {
+    throw new Error("Wallet modal loaded without Web3Auth.");
   }
-  if (walletKind === "metamask") {
-    const p = metamaskProvider();
-    if (p) return p;
-    throw new Error("MetaMask is not in this browser. Open this page in Chrome with the MetaMask extension.");
+  return window.RootmodeW3A;
+}
+
+async function ensureWeb3Auth() {
+  if (w3a) return w3a;
+  const clientId = w3aClientId();
+  if (!clientId) {
+    throw new Error(
+      "Connect needs a Web3Auth Client ID from a Plug and Play Web project (not React Native). Allowlist http://127.0.0.1:17331, enable External Wallets + Coinbase and social logins, add Base, then set ROOTMODE_WEB3AUTH_CLIENT_ID or ~/.rootmode/web3auth.json."
+    );
   }
-  if (window.ethereum) return window.ethereum;
-  throw new Error("No wallet in this tab.");
+  const mod = await importWeb3Auth();
+  w3a = await mod.start({
+    clientId,
+    network: q.get("w3aNet") || "sapphire_mainnet",
+    defaultChainId: hexChainId(),
+    rpcTarget: publicRpcTarget(),
+  });
+  return w3a;
+}
+
+function publicRpcTarget() {
+  try {
+    const u = new URL(q.get("rpc") || "");
+    if (u.protocol === "https:" && u.hostname !== "127.0.0.1" && u.hostname !== "localhost") {
+      return u.toString();
+    }
+  } catch (_) {}
+  if (wantId === 8453) return "https://mainnet.base.org";
+  if (wantId === 84532) return "https://sepolia.base.org";
+  return "";
+}
+
+function takeProvider(conn) {
+  return (
+    (conn && conn.ethereumProvider) ||
+    (w3a && w3a.connection && w3a.connection.ethereumProvider) ||
+    (w3a && w3a.provider) ||
+    null
+  );
+}
+
+function listenProvider(p) {
+  if (!p || typeof p.on !== "function") return;
+  p.on("accountsChanged", (accounts) => {
+    if (!accounts || !accounts.length) {
+      w3aProvider = null;
+      setConnected(false);
+      log("Disconnected.");
+      return;
+    }
+    if (connected) {
+      void switchIfNeeded()
+        .then(() => refreshBal())
+        .catch((e) => showError(e))
+        .finally(showForm);
+    }
+  });
+  p.on("chainChanged", () => {
+    if (!connected) return;
+    void switchIfNeeded()
+      .then(() => refreshBal())
+      .catch((e) => showError(e))
+      .finally(showForm);
+  });
+}
+
+function connectorNameOf(conn) {
+  return String(
+    (conn && conn.connectorName) ||
+    (w3a && w3a.connection && w3a.connection.connectorName) ||
+    (w3a && w3a.primaryConnectorName) ||
+    ""
+  ).toLowerCase();
+}
+
+async function adoptProvider(conn) {
+  let p = takeProvider(conn);
+  const injected = metamaskProvider();
+  // Connect SDK's EIP-1193 provider RPCs over fetch and dies on this loopback
+  // page (RPCErr52). The extension talks to the chain without that hop.
+  if (injected && /metamask/i.test(connectorNameOf(conn))) p = injected;
+  if (!p) throw new Error("Login did not return a wallet.");
+  w3aProvider = p;
+  listenProvider(p);
+  await switchIfNeeded();
+  await refreshBal();
+}
+
+function isRpcFetchFail(e) {
+  const t = [e && e.message, e && e.data && e.data.message, typeof e === "string" ? e : ""]
+    .filter(Boolean).join(" ");
+  return /RPCErr52|Failed to fetch|fetch reason/i.test(t);
+}
+
+const WALLET_METHODS = {
+  eth_requestAccounts: 1,
+  eth_accounts: 1,
+  eth_chainId: 1,
+  eth_sendTransaction: 1,
+  personal_sign: 1,
+  eth_sign: 1,
+  eth_signTypedData: 1,
+  eth_signTypedData_v4: 1,
+  wallet_switchEthereumChain: 1,
+  wallet_addEthereumChain: 1,
+  wallet_watchAsset: 1,
+  wallet_sendCalls: 1,
+  wallet_getCallsStatus: 1,
+  wallet_getCapabilities: 1,
+  wallet_revokePermissions: 1,
+};
+
+async function rpcProxy(method, params) {
+  const res = await fetch("/rpc?t=" + encodeURIComponent(q.get("t") || ""), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: params || [] }),
+  });
+  const body = await res.json();
+  if (body && body.error) {
+    const err = new Error(body.error.message || "rpc error");
+    err.code = body.error.code;
+    throw err;
+  }
+  return body.result;
 }
 
 async function eth(method, params) {
+  // Reads stay on this page's /rpc. The Web3Auth iframe is https://wallet.web3auth.io
+  // and Chrome will not let that origin fetch loopback (Private Network Access).
+  if (!WALLET_METHODS[method]) return rpcProxy(method, params);
   const payload = params === undefined ? { method } : { method, params };
-  return provider().request(payload);
+  try {
+    return await provider().request(payload);
+  } catch (e) {
+    if (!isRpcFetchFail(e)) throw e;
+    const injected = metamaskProvider();
+    if (injected && injected !== provider()) {
+      w3aProvider = injected;
+      listenProvider(injected);
+      return injected.request(payload);
+    }
+    throw e;
+  }
+}
+
+async function withTimeout(p, ms) {
+  let t;
+  const timeout = new Promise((_, rej) => {
+    t = setTimeout(() => {
+      const e = new Error("Failed to fetch");
+      e.code = "TIMEOUT";
+      rej(e);
+    }, ms);
+  });
+  try {
+    return await Promise.race([Promise.resolve(p), timeout]);
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 async function currentChainId() {
-  return Number(await eth("eth_chainId"));
+  const injected = metamaskProvider();
+  if (w3aProvider && injected && w3aProvider === injected) {
+    return Number(await injected.request({ method: "eth_chainId" }));
+  }
+  // Social/embedded wallets RPC from wallet.web3auth.io. Don't wait on that
+  // iframe — a hung eth_chainId leaves Connect disabled and looking dead.
+  try {
+    return Number(await withTimeout(rpcProxy("eth_chainId", []), 8000));
+  } catch (_) {
+    return wantId;
+  }
 }
 
 async function ensureChain() {
@@ -412,8 +715,27 @@ async function switchIfNeeded() {
   await ensureChain();
 }
 
+async function ensureGas(from) {
+  const raw = await rpcProxy("eth_getBalance", [from, "latest"]).catch(() => "0x0");
+  if (toBig(raw) > 10n ** 12n) return;
+  showStage(1, [{ title: "Preparing", body: "Covering gas so you don’t need ETH." }]);
+  const res = await fetch("/sponsor?t=" + encodeURIComponent(q.get("t") || ""), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ address: from }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "Could not cover gas.");
+  for (let i = 0; i < 20; i++) {
+    const next = await rpcProxy("eth_getBalance", [from, "latest"]).catch(() => "0x0");
+    if (toBig(next) > 10n ** 12n) return;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
+
 async function send(to, data) {
   const [from] = await eth("eth_requestAccounts");
+  await ensureGas(from);
   const hash = await eth("eth_sendTransaction", [{ from, to, data }]);
   await waitMined(hash);
   return hash;
@@ -443,10 +765,141 @@ async function sendSequential(approveData, depositData) {
   return send(pot, depositData);
 }
 
+function collectErrorText(e, out, seen) {
+  if (e == null || seen.has(e)) return;
+  if (typeof e === "object") seen.add(e);
+  if (typeof e === "string") {
+    const t = e.trim();
+    if (t) out.push(t);
+    const json = t.match(/\{[\s\S]*\}/);
+    if (json) {
+      try { collectErrorText(JSON.parse(json[0]), out, seen); } catch (_) {}
+    }
+    return;
+  }
+  if (typeof e !== "object") return;
+  for (const k of ["shortMessage", "message", "details", "reason"]) {
+    if (e[k]) collectErrorText(e[k], out, seen);
+  }
+  if (e.data) collectErrorText(e.data, out, seen);
+  if (e.error) collectErrorText(e.error, out, seen);
+  if (e.cause) collectErrorText(e.cause, out, seen);
+  if (e.info) collectErrorText(e.info, out, seen);
+}
+
 function errText(e) {
-  if (!e) return "";
-  const nested = e.data && (e.data.message || (e.data.cause && e.data.cause.message));
-  return [e.message, nested, typeof e === "string" ? e : ""].filter(Boolean).join(" ");
+  const bits = [];
+  collectErrorText(e, bits, new Set());
+  return bits.join(" ");
+}
+
+function shortAddr(a) {
+  const s = String(a || "");
+  if (s.length < 12) return s;
+  return s.slice(0, 6) + "…" + s.slice(-4);
+}
+
+function hideNotice() {
+  $("notice").hidden = true;
+  $("noticeCopy").hidden = true;
+  $("noticeRetry").hidden = true;
+  $("buy").hidden = true;
+  delete $("notice").dataset.kind;
+  delete $("noticeCopy").dataset.addr;
+}
+
+function showNotice(kind, title, body, copyAddr) {
+  const gas = /ETH/i.test(title);
+  $("notice").hidden = false;
+  $("notice").className = "notice " + (kind || "");
+  $("notice").dataset.kind = gas ? "gas" : (kind || "");
+  $("noticeTitle").textContent = title;
+  $("noticeBody").textContent = body;
+  $("log").textContent = "";
+  if (copyAddr) {
+    $("noticeCopy").hidden = false;
+    $("noticeCopy").dataset.addr = copyAddr;
+  } else {
+    $("noticeCopy").hidden = true;
+  }
+  const retry = gas || !!copyAddr || kind === "bad" || /reach the chain|No USDC/i.test(title);
+  $("noticeRetry").hidden = !retry;
+  $("noticeRetry").textContent = gas ? "I sent ETH" : "Try again";
+  const showBuy = !!(copyAddr || lastAccount) && (gas || /USDC|ETH/i.test(title) || kind === "warn");
+  $("buy").hidden = !showBuy;
+  if (showBuy) $("buy").textContent = "Buy USDC with card";
+}
+
+let stripeBuy = q.get("buy") === "1";
+let stripePk = "";
+let awaitingBuy = false;
+function buyEnabled() {
+  return stripeBuy;
+}
+
+async function probeBuy() {
+  try {
+    const res = await fetch("/buy?t=" + encodeURIComponent(q.get("t") || ""));
+    const body = await res.json();
+    if (body && typeof body.enabled === "boolean") stripeBuy = body.enabled;
+    if (body && body.publishableKey) stripePk = body.publishableKey;
+  } catch (_) {}
+}
+
+function gasBody(account) {
+  const who = account || lastAccount;
+  const dest = who ? " " + shortAddr(who) : " this wallet";
+  return "Buy USDC with a card. Gas is covered — you don’t need ETH. Or send USDC on Base to" + dest + ".";
+}
+
+function friendlyError(e) {
+  const raw = errText(e);
+  const code = e && (e.code || (e.data && e.data.code));
+  if (code === 4001 || /user rejected|user denied|rejected the request|user cancelled/i.test(raw)) {
+    return { kind: "info", title: "Cancelled", body: "You cancelled in the wallet." };
+  }
+  if (/insufficient funds for gas|gas \* price \+ value|insufficient funds.*gas/i.test(raw)) {
+    return { kind: "warn", title: "Needs USDC", body: gasBody(), copy: lastAccount };
+  }
+  if (/insufficient funds|insufficient balance/i.test(raw)) {
+    return { kind: "warn", title: "Not enough funds", body: "This wallet does not have enough to complete that transaction." };
+  }
+  if (/nothing to withdraw/i.test(raw)) {
+    return { kind: "warn", title: "Nothing to withdraw", body: raw.replace(/^Error:\s*/i, "").split("\n")[0] };
+  }
+  if (/enter a number/i.test(raw)) {
+    return { kind: "warn", title: "Check the amounts", body: "Enter a number for the amount and limits." };
+  }
+  if (/Unrecognized request URL|onramp_sessions|crypto_onramp/i.test(raw)) {
+    return {
+      kind: "warn",
+      title: "Buy USDC with a card",
+      body: "Stripe hasn’t enabled crypto-to-wallet on this account yet. Apply at dashboard.stripe.com/crypto-onramp/get-started. You can still send USDC on Base to this wallet.",
+      copy: lastAccount,
+    };
+  }
+  if (/RPCErr52|Failed to fetch|loopback address space|Private Network Access|TIMEOUT/i.test(raw)) {
+    return { kind: "bad", title: "Could not reach the chain", body: "Could not talk to Base just then. Tap Try again." };
+  }
+  if (/switch your wallet|not on |wrong network|chain id/i.test(raw) && /switch|network|chain/i.test(raw)) {
+    return { kind: "warn", title: "Wrong network", body: raw.split("\n")[0].replace(/^Error:\s*/i, "") };
+  }
+  const clean = (raw || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l && !/^at\s/.test(l) && !/^\s*\{/.test(l) && l.length < 220);
+  const body = (clean || "Something went wrong. Try again.")
+    .replace(/^Error:\s*/i, "")
+    .replace(/^Transaction Signature:\s*/i, "");
+  if (/failed to sign/i.test(body) && /insufficient/i.test(raw)) {
+    return { kind: "warn", title: "Needs USDC", body: gasBody(), copy: lastAccount };
+  }
+  return { kind: "bad", title: "Could not finish", body };
+}
+
+function showError(e) {
+  const f = friendlyError(e);
+  showNotice(f.kind, f.title, f.body, f.copy);
 }
 
 function sendCallsUnsupported(e) {
@@ -620,6 +1073,7 @@ function burstConfetti() {
 }
 
 async function refreshBal() {
+  await probeBuy();
   const [from] = await eth("eth_requestAccounts");
   if (!usdc) throw new Error("missing USDC address — reopen this page from the app");
   const data = "0x70a08231" + addr(from);
@@ -629,61 +1083,233 @@ async function refreshBal() {
   }
   const raw = await eth("eth_call", [{ to: usdc, data }, "latest"]);
   const n = Number(toBig(raw)) / 1e6;
+  walletUsdc = n;
   $("bal").textContent = n.toLocaleString(undefined, { maximumFractionDigits: 2 }) + " USDC";
+  $("balLabel").textContent = "in this wallet";
   setConnected(true, from);
+  let free = 0;
+  let locked = 0;
   if (pot && worker) {
     const acc = await eth("eth_call", [{ to: pot, data: "0x5e5c06e2" + addr(from) }, "latest"]);
     const lock = await eth("eth_call", [{ to: pot, data: "0xdb20266f" + addr(from) + addr(worker) }, "latest"]);
     const words = String(acc || "").replace(/^0x/, "");
-    const free = Number(toBig(words.slice(0, 64))) / 1e6;
-    const locked = Number(toBig(lock)) / 1e6;
-    $("balhint").textContent = `wallet ${n.toFixed(2)} · pot free ${free.toFixed(2)} · locked ${locked.toFixed(2)}`;
-    // The limits fields start at a default, and "Save limits" writes both.
-    // Filled with what the account has, a person raising one cap does not
-    // quietly lower the other back to the default.
+    free = Number(toBig(words.slice(0, 64))) / 1e6;
+    locked = Number(toBig(lock)) / 1e6;
+    if (free > 0 || locked > 0) {
+      $("balhint").textContent = locked > 0
+        ? "Pot " + free.toFixed(2) + " free · " + locked.toFixed(2) + " locked"
+        : "Pot " + free.toFixed(2) + " USDC";
+    } else {
+      $("balhint").textContent = "On " + chainLabel();
+    }
+    $("withdrawBox").hidden = free <= 0;
     const maxJob = Number(toBig(words.slice(64, 128))) / 1e6;
     const maxDay = Number(toBig(words.slice(128, 192))) / 1e6;
     if (maxJob > 0 && !$("maxJob").dataset.touched) $("maxJob").value = String(maxJob);
     if (maxDay > 0 && !$("maxDay").dataset.touched) $("maxDay").value = String(maxDay);
+  } else {
+    $("balhint").textContent = "On " + chainLabel();
+    $("withdrawBox").hidden = true;
   }
+  await warnIfNoGas(from);
+  $("fundBox").classList.remove("blocked");
+  if (n > 0) {
+    if (awaitingBuy) {
+      awaitingBuy = false;
+      showNotice(
+        "ok",
+        "You have USDC",
+        "Next: deposit it into your pot to get started.",
+        from
+      );
+      $("buy").hidden = true;
+    }
+  } else {
+    showNotice(
+      "warn",
+      "No USDC yet",
+      "Buy USDC on Base with a card. Gas is covered — you don’t need ETH.",
+      from
+    );
+  }
+  syncDepositBtn();
+}
+
+async function warnIfNoGas(from) {
+  if (!from || !onBase()) {
+    hasGas = true;
+    return;
+  }
+  try {
+    const raw = await rpcProxy("eth_getBalance", [from, "latest"]);
+    hasGas = toBig(raw) > 10n ** 12n;
+  } catch (_) {}
 }
 for (const id of ["maxJob", "maxDay"]) {
   $(id).addEventListener("input", () => { $(id).dataset.touched = "1"; });
 }
+$("amount").addEventListener("input", syncDepositBtn);
+$("pills").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-amt]");
+  if (!b) return;
+  $("amount").value = b.dataset.amt;
+  syncDepositBtn();
+});
+let fundWatch = 0;
+function watchForFunds() {
+  const id = ++fundWatch;
+  let n = 0;
+  const tick = async () => {
+    if (id !== fundWatch) return;
+    n += 1;
+    if (n > 24) return;
+    try { await refreshBal(); } catch (_) {}
+    if (id !== fundWatch) return;
+    setTimeout(tick, 8000);
+  };
+  setTimeout(tick, 8000);
+}
+
+async function standaloneBuyUrl(usd) {
+  if (!window.StripeOnramp) {
+    await loadScript("https://crypto-js.stripe.com/crypto-onramp-outer.js");
+  }
+  if (!window.StripeOnramp || typeof window.StripeOnramp.Standalone !== "function") {
+    throw new Error("Stripe’s USDC buy isn’t enabled on this account yet. Apply at dashboard.stripe.com/crypto-onramp/get-started.");
+  }
+  const onramp = window.StripeOnramp.Standalone({
+    source_currency: "usd",
+    amount: { source_amount: String(usd) },
+    destination_networks: ["base"],
+    destination_currencies: ["usdc"],
+    destination_currency: "usdc",
+    destination_network: "base",
+  });
+  const url = onramp.getUrl();
+  if (!url) throw new Error("Stripe did not return a buy link.");
+  return url;
+}
+
+async function buyWithCard() {
+  const from = lastAccount || $("noticeCopy").dataset.addr;
+  if (!from) {
+    showNotice("warn", "Connect first", "Connect a wallet, then buy USDC into it.");
+    return;
+  }
+  let usd = Math.round(Number($("amount").value) || 20);
+  if (!Number.isFinite(usd) || usd < 1) usd = 20;
+  if (usd > 10000) usd = 10000;
+  $("buy").disabled = true;
+  $("buyMore").disabled = true;
+  try {
+    let url = "";
+    const res = await fetch("/buy?t=" + encodeURIComponent(q.get("t") || ""), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address: from, want: "usdc", usd }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (body && body.url) {
+      url = body.url;
+    } else if (body && body.code === "onramp_unavailable") {
+      url = await standaloneBuyUrl(usd);
+    } else {
+      throw new Error(body.error || "Could not start card checkout.");
+    }
+    window.open(url, "_blank", "noopener");
+    awaitingBuy = true;
+    showNotice(
+      "ok",
+      "Finish in Stripe",
+      "Buy " + usd + " USDC on Base to " + shortAddr(from) + ". This tab stays open — we’ll take you to deposit when it arrives.",
+      from
+    );
+    $("buy").hidden = false;
+    $("buy").textContent = "Buy USDC with card";
+    watchForFunds();
+  } catch (e) {
+    showError(e);
+  } finally {
+    $("buy").disabled = false;
+    $("buyMore").disabled = false;
+  }
+}
+
+$("buy").onclick = () => { void buyWithCard(); };
+$("buyMore").onclick = () => { void buyWithCard(); };
+
+$("noticeRetry").onclick = async () => {
+  $("noticeRetry").disabled = true;
+  $("connect").disabled = true;
+  try { await connectWallet(); }
+  catch (e) { showError(e); }
+  finally {
+    $("noticeRetry").disabled = false;
+    $("connect").disabled = false;
+    showForm();
+  }
+};
 
 const depositStep = [
   { title: "Deposit", body: "Confirm in your wallet." },
 ];
 
-async function connectWith(kind) {
-  walletKind = kind;
-  showStage(1, [{ title: "Connect", body: "Confirm in your wallet." }]);
-  log("");
-  const accounts = await eth("eth_requestAccounts", []);
-  if (!accounts || !accounts.length) throw new Error("No account returned. Unlock the wallet and try again.");
-  await switchIfNeeded();
-  await refreshBal();
-  log("Connected.", "ok");
+function syncDepositBtn() {
+  const n = Number($("amount").value);
+  const ok = Number.isFinite(n) && n > 0;
+  $("deposit").textContent = ok
+    ? "Deposit " + n.toLocaleString(undefined, { maximumFractionDigits: 2 }) + " USDC"
+    : "Deposit";
+  $("deposit").disabled = !ok || n > walletUsdc + 1e-9;
+  const hint = $("amtHint");
+  if (!ok) {
+    hint.textContent = "";
+  } else if (walletUsdc + 1e-9 < n) {
+    hint.textContent = walletUsdc <= 0
+      ? "This wallet has no USDC on Base yet."
+      : "This wallet has " + walletUsdc.toFixed(2) + " USDC.";
+  } else {
+    hint.textContent = "";
+  }
+  const pills = $("pills").querySelectorAll("button");
+  for (const b of pills) {
+    b.classList.toggle("on", Number(b.dataset.amt) === n);
+  }
+  // Empty wallet already has this CTA on the notice. Only show the second
+  // button when they have some USDC but not enough for the amount.
+  $("buyMore").hidden = !ok || n <= walletUsdc + 1e-9 || walletUsdc <= 0;
 }
 
-$("connectMm").onclick = async () => {
-  try { await connectWith("metamask"); }
-  catch (e) { log(e.message || String(e), "bad"); }
-  finally { showForm(); }
-};
+async function connectWallet() {
+  hideNotice();
+  log("");
+  const sdk = await ensureWeb3Auth();
+  const existing = takeProvider(sdk.connection);
+  if (existing) {
+    showStage(1, [{ title: "Checking Base", body: "One moment." }]);
+    await adoptProvider(sdk.connection);
+    return;
+  }
+  showStage(1, [{ title: "Connect", body: "Choose Google, email, or a wallet." }]);
+  await adoptProvider(await sdk.connect());
+}
 
-$("connectCb").onclick = async () => {
-  try { await connectWith("base"); }
-  catch (e) { log(e.message || String(e), "bad"); }
-  finally { showForm(); }
+$("connect").onclick = async () => {
+  $("connect").disabled = true;
+  try { await connectWallet(); }
+  catch (e) { showError(e); }
+  finally {
+    $("connect").disabled = false;
+    showForm();
+  }
 };
 
 $("disconnect").onclick = async () => {
   try {
-    await eth("wallet_revokePermissions", [{ eth_accounts: {} }]);
+    if (w3a) await w3a.logout();
   } catch (_) {}
+  w3aProvider = null;
   setConnected(false);
-  log("Disconnected.");
 };
 
 $("deposit").onclick = async () => {
@@ -693,6 +1319,7 @@ $("deposit").onclick = async () => {
     const maxJob = toMicros($("maxJob").value);
     const maxDay = toMicros($("maxDay").value);
     if (!pot || !usdc || !appKey) throw new Error("missing contract addresses — reopen this page from the app");
+    hideNotice();
     log("");
     const [from] = await eth("eth_requestAccounts");
     const depositData = "0xfad3cc4b" + word(amount) + word(maxJob) + word(maxDay) + addr(appKey);
@@ -729,12 +1356,13 @@ $("deposit").onclick = async () => {
     $("doneHint").textContent = Number(amount) / 1e6 + " USDC is in the pot.";
     showDone();
   } catch (e) {
-    log(e.message || String(e), "bad");
+    showError(e);
     showForm();
   }
 };
 
 $("again").onclick = () => {
+  hideNotice();
   log("");
   showForm();
 };
@@ -749,12 +1377,13 @@ $("limits").onclick = async () => {
     await switchIfNeeded();
     const maxJob = toMicros($("maxJob").value);
     const maxDay = toMicros($("maxDay").value);
+    hideNotice();
     log("");
     showStage(1, [{ title: "Save limits", body: "Confirm in your wallet." }]);
     await send(pot, "0x5247c1ca" + word(maxJob) + word(maxDay) + addr(appKey));
     log("Limits saved.", "ok");
   } catch (e) {
-    log(e.message || String(e), "bad");
+    showError(e);
   } finally {
     showForm();
   }
@@ -763,6 +1392,7 @@ $("limits").onclick = async () => {
 $("withdraw").onclick = async () => {
   try {
     await switchIfNeeded();
+    hideNotice();
     log("");
     // withdrawAll() on an account with nothing unlocked is a real
     // transaction that moves nothing: gas spent, wallet unchanged, and the
@@ -782,43 +1412,24 @@ $("withdraw").onclick = async () => {
       "Reserved funds stay locked until the worker settles or the channel is closed.";
     showDone("Withdrawn");
   } catch (e) {
-    log(e.message || String(e), "bad");
+    showError(e);
     showForm();
   }
 };
 
-$("status").textContent = "Connect MetaMask or Coinbase to continue.";
-if (!onBase() && window.ethereum) {
-  window.ethereum.on("accountsChanged", (accounts) => {
-    if (!accounts || !accounts.length) {
-      setConnected(false);
-      log("Disconnected.");
-      return;
-    }
-    if (connected) {
-      void switchIfNeeded()
-        .then(() => refreshBal())
-        .catch((e) => log(e.message || String(e), "bad"))
-        .finally(showForm);
-    }
-  });
-  window.ethereum.on("chainChanged", () => {
-    if (!connected) return;
-    void switchIfNeeded()
-      .then(() => refreshBal())
-      .catch((e) => log(e.message || String(e), "bad"))
-      .finally(showForm);
-  });
-  eth("eth_accounts", [])
-    .then(async (accounts) => {
-      if (!accounts || !accounts.length) return;
-      await switchIfNeeded();
-      await refreshBal();
-    })
-    .catch(() => undefined);
-} else if (!onBase()) {
-  $("status").textContent = "Connect your wallet to continue.";
-}
+$("noticeCopy").onclick = async () => {
+  const a = $("noticeCopy").dataset.addr;
+  if (!a) return;
+  try {
+    await navigator.clipboard.writeText(a);
+    $("noticeCopy").textContent = "Copied";
+    setTimeout(() => { $("noticeCopy").textContent = "Copy address"; }, 1400);
+  } catch (_) {
+    $("noticeCopy").textContent = a;
+  }
+};
+
+void probeBuy().then(() => syncDepositBtn());
 </script>
 </body>
 </html>

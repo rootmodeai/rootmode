@@ -14,6 +14,28 @@ pub async fn send_call(
     to: &str,
     data: Vec<u8>,
 ) -> Result<String> {
+    send_legacy(rpc_url, key, chain_id, to, 0, data).await
+}
+
+/// Send ETH from the app key so a new wallet can pay gas. The user never buys ETH.
+pub async fn send_eth(
+    rpc_url: &str,
+    key: &SigningKey,
+    chain_id: u64,
+    to: &str,
+    wei: u64,
+) -> Result<String> {
+    send_legacy(rpc_url, key, chain_id, to, wei, Vec::new()).await
+}
+
+async fn send_legacy(
+    rpc_url: &str,
+    key: &SigningKey,
+    chain_id: u64,
+    to: &str,
+    value: u64,
+    data: Vec<u8>,
+) -> Result<String> {
     let from = address_of(key.verifying_key());
     let nonce = parse_u64_hex(
         rpc(
@@ -37,9 +59,9 @@ pub async fn send_call(
     let tx = LegacyTx {
         nonce,
         gas_price,
-        gas: 500_000,
+        gas: if data.is_empty() { 21_000 } else { 500_000 },
         to: parse_address(to)?,
-        value: 0,
+        value,
         data,
         chain_id,
     };

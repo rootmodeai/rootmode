@@ -80,7 +80,7 @@ export function FundingNotice({
             void api.potOpenFund().catch((e) => onActionError?.(errorText(e)))
           }
         >
-          {kind === "cap" ? "Raise the limit in MetaMask" : "Deposit in MetaMask"}
+          {kind === "cap" ? "Raise the limit" : "Deposit"}
         </button>
       )}
     </div>

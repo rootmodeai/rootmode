@@ -1,4 +1,4 @@
-//! Client pot: deposit in MetaMask, lock a reserve before work, settle after.
+//! Client pot: deposit from a browser wallet, lock a reserve before work, settle after.
 //!
 //! A ReserveTicket is posted on-chain before the GPU runs. Withdraw can only
 //! take the unlocked remainder — omitting tickets from a forked client does
@@ -24,6 +24,18 @@ use crate::state::AppState;
 use crate::store::{Db, SpendEntry, StoredDeposit};
 
 const FUND_HTML: &str = include_str!("fund.html"); // 7702 batch on Base only
+const FUND_W3A_JS: &[u8] = include_bytes!("../resources/fund-w3a.js");
+const FUND_W3A_CSS: &[u8] = include_bytes!("../resources/fund-w3a.css");
+
+fn fund_w3a_js() -> Vec<u8> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/fund-w3a.js");
+    std::fs::read(&path).unwrap_or_else(|_| FUND_W3A_JS.to_vec())
+}
+
+fn fund_w3a_css() -> Vec<u8> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/fund-w3a.css");
+    std::fs::read(&path).unwrap_or_else(|_| FUND_W3A_CSS.to_vec())
+}
 const FUND_PORT: u16 = 17331;
 const DEFAULT_MAX_JOB: Micros = 500_000; // $0.50
 const TICKET_TTL_SECS: u64 = 3600;
@@ -271,9 +283,12 @@ pub fn load_chain_config(state: &AppState) -> Option<ChainConfig> {
 const BUNDLED_CHAIN: &str = include_str!("../chain.base.json");
 
 fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
+    dirs::home_dir()
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from)
+        })
         .unwrap_or_default()
 }
 
@@ -539,7 +554,7 @@ pub async fn check(state: &AppState, price: f64, unpriced: bool, kind: JobKind) 
         return Ok(PotCheck {
             ready: false,
             needs_fund: true,
-            reason: "Can't reach Base. Check the network, then deposit USDC in MetaMask.".into(),
+            reason: "Can't reach Base. Check the network, then deposit USDC.".into(),
             kind: "chain".into(),
             cap_micros: cap,
         });
@@ -1445,15 +1460,221 @@ pub fn fund_url(state: &AppState) -> Result<String> {
     })?;
     let app_key = app_key_address(state)?;
     Ok(format!(
-        "http://127.0.0.1:{FUND_PORT}/?t={}&rpc={}&pot={}&usdc={}&appKey={}&chainId={}&worker={}",
+        "http://127.0.0.1:{FUND_PORT}/?t={}&rpc={}&pot={}&usdc={}&appKey={}&chainId={}&worker={}{}{}",
         fund_token(),
         urlencoding_lite(&cfg.rpc),
         cfg.pot,
         cfg.usdc,
         app_key,
         cfg.chain_id,
-        cfg.worker
+        cfg.worker,
+        web3auth_query(),
+        if stripe_secret().is_some() { "&buy=1" } else { "" },
     ))
+}
+
+/// Public Plug and Play Client ID. Safe in the page; the client secret is not.
+const DEFAULT_WEB3AUTH_CLIENT_ID: &str =
+    "BIeOI4MF2OI5jKs0mBHHvURM65XrZEm9IxemF7U4u_RJO2FKQ_X9yhDcgeCmh8khKU3fOODPKR0AXVCWvpm624Q";
+const DEFAULT_WEB3AUTH_NETWORK: &str = "sapphire_mainnet";
+
+/// Client ID for the fund page's Web3Auth modal (socials + MetaMask + Coinbase).
+/// `ROOTMODE_WEB3AUTH_CLIENT_ID` wins over `~/.rootmode/web3auth.json`, then the baked default.
+fn web3auth_query() -> String {
+    let file: Option<serde_json::Value> =
+        std::fs::read_to_string(home_dir().join(".rootmode").join("web3auth.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok());
+    let client = std::env::var("ROOTMODE_WEB3AUTH_CLIENT_ID")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            file.as_ref()?
+                .get("clientId")
+                .or_else(|| file.as_ref()?.get("client_id"))?
+                .as_str()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| DEFAULT_WEB3AUTH_CLIENT_ID.to_string());
+    let net = std::env::var("ROOTMODE_WEB3AUTH_NETWORK")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            file.as_ref()?
+                .get("network")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| DEFAULT_WEB3AUTH_NETWORK.to_string());
+    format!("&w3a={client}&w3aNet={net}")
+}
+
+/// Stripe secret for the fund-page onramp. Never sent to the page, never
+/// checked into git. Order: process env, `~/.rootmode/stripe.json`, then a
+/// value baked in at compile time from `ROOTMODE_STRIPE_SECRET_KEY` (CI).
+fn stripe_secret() -> Option<String> {
+    std::env::var("ROOTMODE_STRIPE_SECRET_KEY")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::env::var("STRIPE_SECRET_KEY")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| stripe_json_string(&["secretKey", "secret_key"]))
+        .or_else(|| option_env!("ROOTMODE_STRIPE_SECRET_KEY").map(str::to_string))
+}
+
+fn stripe_publishable() -> Option<String> {
+    std::env::var("ROOTMODE_STRIPE_PUBLISHABLE_KEY")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| stripe_json_string(&["publishableKey", "publishable_key"]))
+        .or_else(|| option_env!("ROOTMODE_STRIPE_PUBLISHABLE_KEY").map(str::to_string))
+}
+
+fn stripe_json_string(keys: &[&str]) -> Option<String> {
+    let path = home_dir().join(".rootmode").join("stripe.json");
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => {
+            let file: serde_json::Value = serde_json::from_str(&raw).ok()?;
+            keys.iter().find_map(|k| {
+                file.get(*k)
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
+        }
+        Err(e) if path.exists() => {
+            log::warn!("fund page: cannot read {}: {e}", path.display());
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+fn hex_to_u128(s: &str) -> u128 {
+    let h = s.trim().trim_start_matches("0x");
+    if h.is_empty() {
+        return 0;
+    }
+    u128::from_str_radix(h, 16).unwrap_or(0)
+}
+
+fn valid_eth_addr(s: &str) -> bool {
+    let h = s.trim().trim_start_matches("0x");
+    h.len() == 40 && h.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+#[derive(Deserialize)]
+struct BuyBody {
+    address: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    want: String,
+    #[serde(default)]
+    usd: Option<f64>,
+}
+
+async fn start_onramp(body: BuyBody) -> std::result::Result<String, String> {
+    let secret = stripe_secret().ok_or_else(|| {
+        "Card buy isn’t set up. Add ROOTMODE_STRIPE_SECRET_KEY or ~/.rootmode/stripe.json, and apply at dashboard.stripe.com/crypto-onramp/get-started.".to_string()
+    })?;
+    if !valid_eth_addr(&body.address) {
+        return Err("wallet address looks wrong".into());
+    }
+    let mut usd = body.usd.unwrap_or(20.0);
+    if !usd.is_finite() || usd < 1.0 {
+        usd = 20.0;
+    }
+    if usd > 10_000.0 {
+        usd = 10_000.0;
+    }
+    let usd = format!("{usd:.2}");
+    let addr = if body.address.starts_with("0x") || body.address.starts_with("0X") {
+        body.address.clone()
+    } else {
+        format!("0x{}", body.address)
+    };
+    // Stripe's `wallet_addresses` map only has bitcoin/ethereum/polygon/solana/…
+    // — there is no `base` key, so `wallet_addresses[base]` is rejected as
+    // unknown. The hosted onramp takes a single `wallet_address` and we lock
+    // the network to Base instead.
+    let form = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("wallet_address", &addr)
+        .append_pair("destination_network", "base")
+        .append_pair("destination_networks[0]", "base")
+        .append_pair("destination_currency", "usdc")
+        .append_pair("destination_currencies[0]", "usdc")
+        .append_pair("lock_wallet_address", "true")
+        .append_pair("source_currency", "usd")
+        .append_pair("source_amount", &usd)
+        .finish();
+    let resp = reqwest::Client::new()
+        .post("https://api.stripe.com/v1/crypto/onramp_sessions")
+        .basic_auth(&secret, Some(""))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .header("Stripe-Version", "2026-08-26.dahlia")
+        .body(form)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        let msg = v
+            .pointer("/error/message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("Stripe could not start the buy.");
+        if status.as_u16() == 404 || msg.contains("Unrecognized request URL") {
+            return Err("ONRAMP_UNAVAILABLE".into());
+        }
+        return Err(msg.to_string());
+    }
+    v.get("redirect_url")
+        .and_then(|u| u.as_str())
+        .filter(|u| !u.is_empty())
+        .map(|u| u.to_string())
+        .ok_or_else(|| "ONRAMP_UNAVAILABLE".into())
+}
+
+/// Enough ETH for an approve + deposit on Base. The user only buys USDC.
+const SPONSOR_WEI: u64 = 50_000_000_000_000; // 0.00005 ETH
+
+async fn sponsor_gas(app_data: &Path, address: &str) -> std::result::Result<String, String> {
+    if !valid_eth_addr(address) {
+        return Err("wallet address looks wrong".into());
+    }
+    let cfg = load_chain_config_at(app_data).ok_or_else(|| "no chain".to_string())?;
+    let raw = rpc(
+        &cfg.rpc,
+        "eth_getBalance",
+        serde_json::json!([address, "latest"]),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let wei = hex_to_u128(raw.as_str().unwrap_or("0x0"));
+    if wei > u128::from(SPONSOR_WEI) {
+        return Ok("already".into());
+    }
+    let key = load_or_create_app_key(app_data).map_err(|e| e.to_string())?;
+    crate::eth_tx::send_eth(&cfg.rpc, &key, cfg.chain_id, address, SPONSOR_WEI)
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("needs a little ETH") {
+                "This app's gas wallet needs a little ETH on Base before it can sponsor deposits.".into()
+            } else {
+                msg
+            }
+        })
 }
 
 fn urlencoding_lite(s: &str) -> String {
@@ -1494,6 +1715,65 @@ impl FundAuth {
     }
 }
 
+fn fund_rpc_allowed(method: &str) -> bool {
+    if method.is_empty() || method.len() > 64 {
+        return false;
+    }
+    if !method
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return false;
+    }
+    let ns = method.split_once('_').map(|(n, _)| n);
+    matches!(ns, Some("eth" | "net" | "web3"))
+        && method != "eth_sendTransaction"
+        && !method.starts_with("eth_sign")
+}
+
+async fn fund_rpc_proxy(app_data: &Path, body: serde_json::Value) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let method = body
+        .get("method")
+        .and_then(|m| m.as_str())
+        .unwrap_or_default();
+    let id = body.get("id").cloned().unwrap_or(serde_json::json!(1));
+    if !fund_rpc_allowed(method) {
+        return axum::Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": -32601, "message": "method not allowed" },
+        }))
+        .into_response();
+    }
+    let Some(cfg) = load_chain_config_at(app_data) else {
+        return axum::Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": -32000, "message": "no chain" },
+        }))
+        .into_response();
+    };
+    let params = body
+        .get("params")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    match rpc(&cfg.rpc, method, params).await {
+        Ok(result) => axum::Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result,
+        }))
+        .into_response(),
+        Err(e) => axum::Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": -32000, "message": e.to_string() },
+        }))
+        .into_response(),
+    }
+}
+
 fn pending_public() -> Vec<PendingPublic> {
     latest()
         .lock()
@@ -1515,6 +1795,13 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
         return Ok(());
     }
     let html = FUND_HTML.to_string();
+    if stripe_secret().is_some() {
+        log::info!("fund page: Stripe onramp is on");
+    } else {
+        log::info!(
+            "fund page: Stripe onramp off (no ROOTMODE_STRIPE_SECRET_KEY or ~/.rootmode/stripe.json)"
+        );
+    }
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1539,6 +1826,46 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
                                 "text/html; charset=utf-8",
                             )],
                             page,
+                        )
+                            .into_response()
+                    }),
+                )
+                .route(
+                    "/w3a.js",
+                    axum::routing::get(|q: Query<FundAuth>| async move {
+                        if !q.ok() {
+                            return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                .into_response();
+                        }
+                        (
+                            [
+                                (
+                                    axum::http::header::CONTENT_TYPE,
+                                    "application/javascript; charset=utf-8",
+                                ),
+                                (axum::http::header::CACHE_CONTROL, "no-store"),
+                            ],
+                            fund_w3a_js(),
+                        )
+                            .into_response()
+                    }),
+                )
+                .route(
+                    "/w3a.css",
+                    axum::routing::get(|q: Query<FundAuth>| async move {
+                        if !q.ok() {
+                            return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                .into_response();
+                        }
+                        (
+                            [
+                                (
+                                    axum::http::header::CONTENT_TYPE,
+                                    "text/css; charset=utf-8",
+                                ),
+                                (axum::http::header::CACHE_CONTROL, "no-store"),
+                            ],
+                            fund_w3a_css(),
                         )
                             .into_response()
                     }),
@@ -1597,6 +1924,89 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
                                             .into_response()
                                     }
                                 }
+                            }
+                        }
+                    }),
+                )
+                .route(
+                    "/buy",
+                    axum::routing::get(|q: Query<FundAuth>| async move {
+                        if !q.ok() {
+                            return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                .into_response();
+                        }
+                        axum::Json(serde_json::json!({
+                            "enabled": stripe_secret().is_some() || stripe_publishable().is_some(),
+                            "publishableKey": stripe_publishable(),
+                        }))
+                        .into_response()
+                    })
+                    .post(
+                        move |q: Query<FundAuth>, axum::Json(body): axum::Json<BuyBody>| async move {
+                            if !q.ok() {
+                                return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                    .into_response();
+                            }
+                            match start_onramp(body).await {
+                                Ok(url) => {
+                                    axum::Json(serde_json::json!({ "url": url })).into_response()
+                                }
+                                Err(e) => {
+                                    let unavailable = e == "ONRAMP_UNAVAILABLE";
+                                    (
+                                        axum::http::StatusCode::BAD_GATEWAY,
+                                        axum::Json(serde_json::json!({
+                                            "error": if unavailable {
+                                                "Stripe onramp isn’t enabled on this account yet."
+                                            } else {
+                                                e.as_str()
+                                            },
+                                            "code": if unavailable { "onramp_unavailable" } else { "buy_failed" },
+                                            "publishableKey": stripe_publishable(),
+                                        })),
+                                    )
+                                        .into_response()
+                                }
+                            }
+                        },
+                    ),
+                )
+                .route(
+                    "/sponsor",
+                    axum::routing::post({
+                        let data = app_data.clone();
+                        move |q: Query<FundAuth>, axum::Json(body): axum::Json<BuyBody>| {
+                            let data = data.clone();
+                            async move {
+                                if !q.ok() {
+                                    return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                        .into_response();
+                                }
+                                match sponsor_gas(&data, &body.address).await {
+                                    Ok(status) => axum::Json(serde_json::json!({ "ok": true, "status": status }))
+                                        .into_response(),
+                                    Err(e) => (
+                                        axum::http::StatusCode::BAD_GATEWAY,
+                                        axum::Json(serde_json::json!({ "error": e })),
+                                    )
+                                        .into_response(),
+                                }
+                            }
+                        }
+                    }),
+                )
+                .route(
+                    "/rpc",
+                    axum::routing::post({
+                        let data = app_data.clone();
+                        move |q: Query<FundAuth>, axum::Json(body): axum::Json<serde_json::Value>| {
+                            let data = data.clone();
+                            async move {
+                                if !q.ok() {
+                                    return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                        .into_response();
+                                }
+                                fund_rpc_proxy(&data, body).await
                             }
                         }
                     }),
@@ -2041,6 +2451,30 @@ async fn rpc_once(url: &str, method: &str, params: serde_json::Value) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eth_addrs_are_forty_hex_digits() {
+        assert!(valid_eth_addr("0xDc9cB0CD7f2E2Fb51fa27b4134e90ae7aB64eCa8"));
+        assert!(valid_eth_addr("Dc9cB0CD7f2E2Fb51fa27b4134e90ae7aB64eCa8"));
+        assert!(!valid_eth_addr("0x123"));
+        assert!(!valid_eth_addr("not-an-address"));
+        assert!(!valid_eth_addr(""));
+    }
+
+    #[test]
+    fn fund_rpc_allows_reads_and_raw_sends_not_signing() {
+        assert!(fund_rpc_allowed("eth_call"));
+        assert!(fund_rpc_allowed("eth_chainId"));
+        assert!(fund_rpc_allowed("eth_getTransactionReceipt"));
+        assert!(fund_rpc_allowed("eth_sendRawTransaction"));
+        assert!(fund_rpc_allowed("net_version"));
+        assert!(!fund_rpc_allowed("eth_sendTransaction"));
+        assert!(!fund_rpc_allowed("eth_sign"));
+        assert!(!fund_rpc_allowed("eth_signTypedData_v4"));
+        assert!(!fund_rpc_allowed("wallet_switchEthereumChain"));
+        assert!(!fund_rpc_allowed("personal_sign"));
+        assert!(!fund_rpc_allowed(""));
+    }
 
     #[test]
     fn a_refusal_that_names_an_authorised_total_is_read() {

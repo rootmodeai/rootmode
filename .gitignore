@@ -8,6 +8,8 @@ apps/desktop/dist
 
 # tauri generated
 apps/desktop/src-tauri/gen
+apps/desktop/src-tauri/resources/fund-w3a.js
+apps/desktop/src-tauri/resources/fund-w3a.css
 
 # foundry
 contracts/cache

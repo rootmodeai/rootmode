@@ -7,7 +7,7 @@ import type { Deposit, ModelUsage, PotStatus, SpendEntry } from "../lib/types";
 
 /**
  * The pot, its deposits, and what every job cost — a money page, not a
- * setting. Caps are still set in MetaMask when you deposit.
+ * setting. Caps are set in the deposit page when you connect a wallet.
  */
 export function Wallet() {
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +122,7 @@ export function Wallet() {
           </div>
         ) : (
           <div className="note" style={{ marginBottom: 12 }}>
-            No balance yet. Deposit USDC in MetaMask to pay priced providers.
+            No balance yet. Deposit USDC to pay priced providers.
           </div>
         )}
         <div className="row">
@@ -132,7 +132,7 @@ export function Wallet() {
               void api.potOpenFund().catch((e) => setError(errorText(e)))
             }
           >
-            Deposit in MetaMask
+            Deposit
           </button>
           <button
             className="btn"
@@ -165,7 +165,7 @@ export function Wallet() {
           <p style={{ color: "var(--text-3)", fontSize: 13.5, margin: 0 }}>Loading…</p>
         ) : deposits.length === 0 ? (
           <p style={{ color: "var(--text-2)", fontSize: 13.5, margin: 0 }}>
-            No deposits yet. The first one you make in MetaMask will show up here.
+            No deposits yet. The first one you make will show up here.
           </p>
         ) : (
           <table className="ledger">
