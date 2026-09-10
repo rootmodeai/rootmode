@@ -154,7 +154,7 @@
   <h1>Terms of Service</h1>
   <p class="lede">rootmode is a peer-to-peer discovery network. We help clients find independent computers that serve models. We do not operate those models, promise they will be there, or stand behind what they say.</p>
 
-  <p>These Terms of Service (“<strong>Terms</strong>”) govern access to and use of the rootmode website, desktop software, protocols, smart contracts, documentation, and related materials (together, the “<strong>Network</strong>”). By downloading, running, connecting to, or otherwise using the Network, you agree to these Terms. If you do not agree, do not use it.</p>
+  <p>These Terms of Service (“<strong>Terms</strong>”) govern access to and use of the rootmode website, desktop software, protocols, smart contracts, documentation, and related materials (together, the “<strong>Network</strong>”). <strong>By visiting rootmode.ai, downloading the software, running a client or worker, connecting to peers, sending a job, or otherwise using the Network, you agree to these Terms.</strong> You do not need a separate click or checkbox. If you do not agree, do not download, run, or use it.</p>
   <p>“<strong>rootmode</strong>,” “<strong>we</strong>,” “<strong>us</strong>,” and “<strong>our</strong>” means the company organized under the laws of the State of Wyoming that operates rootmode.ai and publishes the rootmode software, together with its successors. “<strong>you</strong>” means any person or entity that uses the Network as a client, worker operator, or otherwise. “<strong>Operators</strong>” (also “model servers,” “workers,” or “peers”) are independent third parties who announce and serve models. We are not those Operators.</p>
   <p>Last updated 10 September 2026.</p>
 
@@ -195,42 +195,66 @@
   </ul>
   <p>You are solely responsible for how you use the Network and for any content you submit. You will not use it to violate law, to harm people, or to attack the Network itself. Operators are solely responsible for what they choose to run and to return.</p>
 
-  <h2>4. Abuse, safety, and our limited efforts</h2>
+  <h2>4. Crime, sanctions, CSAM, fraud, and attacks</h2>
+  <p>These Terms are a contract between you and us. They do not licence crime. You will not use the Network to:</p>
+  <ul>
+    <li>commit, plan, or solicit a crime;</li>
+    <li>create, possess, request, or distribute child sexual abuse material or any sexual content involving a minor (real or depicted);</li>
+    <li>evade sanctions or deal with a person, government, or region that is the subject of U.S. (including OFAC), EU, UK, or UN sanctions;</li>
+    <li>commit fraud, identity theft, or market manipulation;</li>
+    <li>hack, scan, or disrupt our systems, an Operator, or another user, or to distribute malware.</li>
+  </ul>
+  <p>You represent that you are not on a U.S. denied-party or sanctions list and are not in a comprehensively sanctioned jurisdiction. If that changes, you will stop using the Network immediately.</p>
+  <p>We do not host model weights, prompts, or outputs in the ordinary course: jobs go from your machine to an Operator’s machine. We therefore typically never possess that material. If we obtain actual knowledge of CSAM or other illegal content on systems we do operate (for example this website), we will report it as required by law, preserve what we must, and cooperate with lawful process. We may also disable listings we control, refuse downloads, or publish patches. None of that makes us the Operator, the publisher of a model’s output, or a party to your job.</p>
+  <p>We may share information with law enforcement or a regulator when we believe in good faith we are required to, or to protect people from imminent harm. That is not a waiver of any defence, including that we are a publisher of neither the prompt nor the output.</p>
+
+  <h2>5. Abuse, safety, and our limited efforts</h2>
   <p>We may publish software defaults, documentation, or protocol rules that try to reduce abuse (for example rate limits, payments, or local blocks). Those efforts are voluntary, incomplete, and may fail. They do not make us a moderator of the open network, a publisher of Operator output, or a controller of peer machines.</p>
   <p><strong>The model servers are ultimately responsible for the correctness, safety, and outputs of the models they serve.</strong> Nothing we ship shifts that responsibility onto us.</p>
   <p>We may, without obligation, refuse to list a peer on a website we operate, decline to distribute a particular build, or stop publishing software. The underlying protocol may still be used without us. Our choice to help or not help is not an admission of control or liability.</p>
 
-  <h2>5. Software, protocol, and “as is” access</h2>
-  <p>Client and worker software is provided under its licence (including the MIT licence where applicable) and these Terms. The Network is provided <strong>as is</strong> and <strong>as available</strong>. Peers go offline. RPCs fail. Contracts pause or get upgraded by whoever holds the keys that the deployments actually use. Discovery can be wrong, stale, or spoofed.</p>
-  <p>You are responsible for securing your own keys, devices, and funds. If you lose a key, we cannot recover it. If you send value on-chain, settlement is whatever the chain and contracts do, not whatever you hoped they would do.</p>
+  <h2>6. Copyright, DMCA, and others’ speech</h2>
+  <p>We are a provider of an interactive computer service. Content that Operators generate or that users submit is their speech, not ours. To the fullest extent of 47 U.S.C. § 230 and similar laws, we are not the publisher or speaker of that material.</p>
+  <p>In the ordinary course we do not host prompts or model outputs. If material appears on a site or listing we operate (for example rootmode.ai) and you are a copyright owner, send a notice that complies with 17 U.S.C. § 512(c)(3) to <a href="mailto:legal@rootmode.ai">legal@rootmode.ai</a> (DMCA agent). Include: your signature; the work claimed; the URL or other location; your contact details; a statement of good-faith belief; and a statement under penalty of perjury that you are authorised. We may remove or disable access to material on systems we control. Repeat infringers of that hosted material may lose access to listings we operate. That process does not apply to bytes that never touched our servers — take those up with the Operator.</p>
+  <p>If you believe material was removed in error, you may send a counter-notification as § 512(g) requires to the same address.</p>
 
-  <h2>6. Payments</h2>
-  <p>Some Operators charge. Payments may use public networks (for example Base) and assets such as USDC. We did not invent those networks. We do not custody your wallet. We do not guarantee prices, gas, or that a job you paid for will complete to your satisfaction.</p>
-  <p>Refunds, chargebacks, and disputes about a job are between you and the Operator (and, where applicable, the chain). Third-party on-ramps, wallets, and card processors are their own services with their own terms. We are not a bank, money transmitter, or payment processor for peer jobs.</p>
+  <h2>7. Software, bugs, and on-chain mistakes</h2>
+  <p>The software, contracts, RPCs, discovery, and payment helpers are experimental. They can send to the wrong address, mis-display a balance, fail to submit, submit twice, drip gas, or list a peer you would not have chosen. <strong>You must verify every address, amount, network, and transaction in your own wallet before you sign or send.</strong> If you sign it, it is yours.</p>
+  <p>We have no duty to audit smart contracts, peers, or third-party RPCs. A helper that pays gas, opens an on-ramp, or talks to a chain is still provided as is. To the maximum extent permitted by law, we are not liable for bugs, downtime, or “we thought rootmode was the model” confusion, including if caused by our ordinary negligence. Nothing in these Terms excludes liability for our own fraud or wilful misconduct where that exclusion is forbidden.</p>
+  <p>You are responsible for securing your own keys, devices, and funds. If you lose a key, we cannot recover it. Settlement is whatever the chain and contracts do, not whatever you hoped they would do.</p>
 
-  <h2>7. No warranty</h2>
+  <h2>8. Payments, pots, and what we are not</h2>
+  <p>Some Operators charge. Payments may use public networks (for example Base) and assets such as USDC. We did not invent those networks. <strong>You hold your own keys.</strong> We do not take custody of your USDC. A pot, channel, or lock on-chain is a public contract you interact with; we are not your bank, broker, money transmitter, money services business, escrow agent, or exchange. We do not guarantee prices, gas, or that a job you paid for will complete to your satisfaction.</p>
+  <p>Nothing in the Network is an offer of securities, an investment contract, consumer credit, or financial advice. Running a worker or depositing to pay for jobs is using software, not buying a share of rootmode.</p>
+  <p>Refunds, chargebacks, and disputes about a job are between you and the Operator (and, where applicable, the chain). Third-party on-ramps, wallets, and card processors are their own services with their own terms.</p>
+  <p>These recitals do not bind a regulator. They state how the product is built: non-custodial, peer-to-peer, and not a pooled investment. If a law still applies to you, you must comply with it. If it applies to us, we will deal with that agency; your contract with us does not rewrite the statute.</p>
+
+  <h2>9. No warranty</h2>
   <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, ROOTMODE DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, QUIET ENJOYMENT, AND ANY WARRANTY ARISING FROM COURSE OF DEALING OR USAGE OF TRADE. WE DO NOT WARRANT THAT THE NETWORK WILL BE UNINTERRUPTED, SECURE, ERROR-FREE, OR FREE OF HARMFUL COMPONENTS, OR THAT OUTPUTS WILL BE ACCURATE, LAWFUL, OR SAFE.</p>
 
-  <h2>8. Limitation of liability</h2>
-  <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, ROOTMODE AND ITS DIRECTORS, OFFICERS, EMPLOYEES, CONTRACTORS, AGENTS, SHAREHOLDERS, AND AFFILIATES SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS, DATA, GOODWILL, OR FUNDS, WHETHER IN CONTRACT, TORT (INCLUDING NEGLIGENCE), STRICT LIABILITY, OR OTHERWISE, EVEN IF ADVISED OF THE POSSIBILITY.</p>
+  <h2>10. Limitation of liability</h2>
+  <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, ROOTMODE AND ITS DIRECTORS, OFFICERS, EMPLOYEES, CONTRACTORS, AGENTS, SHAREHOLDERS, AND AFFILIATES SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS, DATA, GOODWILL, OR FUNDS, WHETHER IN CONTRACT, TORT (INCLUDING NEGLIGENCE), STRICT LIABILITY, PRODUCT LIABILITY, OR OTHERWISE, EVEN IF ADVISED OF THE POSSIBILITY, AND EVEN IF A LIMITED REMEDY FAILS OF ITS ESSENTIAL PURPOSE.</p>
   <p>OUR TOTAL LIABILITY FOR ANY CLAIM ARISING OUT OF OR RELATING TO THE NETWORK OR THESE TERMS SHALL NOT EXCEED THE GREATER OF (A) THE AMOUNTS YOU PAID DIRECTLY TO ROOTMODE (NOT TO OPERATORS) FOR THE SOFTWARE OR SERVICE GIVING RISE TO THE CLAIM IN THE THREE MONTHS BEFORE THE CLAIM, OR (B) ONE HUNDRED US DOLLARS (US$100).</p>
-  <p>Some jurisdictions do not allow certain exclusions. In those places, our liability is limited to the maximum extent permitted.</p>
+  <p>Some jurisdictions do not allow certain exclusions. In those places, our liability is limited to the maximum extent permitted. We do not exclude liability for death or personal injury caused by our negligence, or for fraud, where that exclusion is void.</p>
 
-  <h2>9. Indemnity; hold harmless</h2>
+  <h2>11. Indemnity; hold harmless</h2>
   <p>You will defend, indemnify, and hold harmless rootmode and its directors, officers, employees, contractors, agents, shareholders, and affiliates from and against any claim, loss, liability, damage, cost, or expense (including reasonable legal fees) arising out of or relating to: (a) your use of the Network; (b) your content, prompts, or jobs; (c) your operation of a worker or other peer; (d) outputs you request, receive, or redistribute; (e) your violation of law or these Terms; or (f) any dispute between you and an Operator or other user.</p>
   <p>Directors and officers are intended third-party beneficiaries of this clause and of the limitation of liability.</p>
 
-  <h2>10. Eligibility and prohibited conduct</h2>
-  <p>You must be able to form a binding contract (in most places, 18 or older). You will not use the Network if applicable law forbids it. You will not interfere with discovery or settlement, impersonate a peer in a way that defrauds others, exploit obvious protocol bugs for theft, or use the Network to deploy malware against us or other users. We may publish patches. We are not obliged to rescue you from a bad trade or a hostile peer.</p>
+  <h2>12. Eligibility</h2>
+  <p>You must be 18 or older and able to form a binding contract. You will not use the Network if applicable law forbids it. We may publish patches. We are not obliged to rescue you from a bad trade or a hostile peer.</p>
 
-  <h2>11. Changes; termination</h2>
-  <p>We may change these Terms by posting an updated version. Continued use after the update is acceptance. We may stop distributing software or operating a website at any time. You may stop using the Network at any time. Sections that by their nature should survive (including 2–9 and 12) survive.</p>
+  <h2>13. How you agree</h2>
+  <p>There is no account and no in-app accept screen. Agreement is by conduct: downloading from rootmode.ai, running the software, connecting a worker, or sending a job. The download page states that downloading is acceptance. Continued use after we post an update is acceptance of the update. If a court requires a more formal assent, your first use after these Terms were posted is still an offer to be bound that you accepted by using the Network.</p>
 
-  <h2>12. General</h2>
+  <h2>14. Changes; termination</h2>
+  <p>We may change these Terms by posting an updated version at rootmode.ai/terms. Continued use after the update is acceptance. We may stop distributing software or operating a website at any time. You may stop using the Network at any time. Sections that by their nature should survive (including 2–11 and 15) survive.</p>
+
+  <h2>15. General</h2>
   <p>These Terms are the entire agreement between you and us about the Network, and supersede prior terms on the same subject. If a provision is unenforceable, the rest remains. Failure to enforce is not a waiver. You may not assign these Terms without our consent; we may assign them. Headings are for convenience only.</p>
   <p>These Terms are governed by the laws of the State of Wyoming, U.S.A., excluding its conflict-of-law rules. Exclusive jurisdiction and venue lie in the state courts of Wyoming and the United States District Court for the District of Wyoming, except that we may seek injunctive or equitable relief in any court of competent jurisdiction. You consent to personal jurisdiction in those courts.</p>
   <p>The software licence (for example MIT) governs copying and modification of source code. These Terms govern use of the Network as a service and as a set of running systems. Where they conflict on a given fact, the licence governs the code and these Terms govern the use.</p>
-  <p>Questions: <a href="mailto:hello@rootmode.ai">hello@rootmode.ai</a>.</p>
+  <p>Questions: <a href="mailto:hello@rootmode.ai">hello@rootmode.ai</a>. Legal and DMCA: <a href="mailto:legal@rootmode.ai">legal@rootmode.ai</a>.</p>
 
   <p class="sign">Effective 10 September 2026. This page is a contract, not a conversation. If you need advice for your situation, talk to a lawyer — not to a model you found through us.</p>
 </article>
