@@ -188,8 +188,8 @@ fn strip_zeros(b: &[u8]) -> &[u8] {
 }
 
 fn parse_address(addr: &str) -> Result<[u8; 20]> {
-    let bytes = hex::decode(addr.trim_start_matches("0x"))
-        .map_err(|e| AppError::Invalid(e.to_string()))?;
+    let bytes =
+        hex::decode(addr.trim_start_matches("0x")).map_err(|e| AppError::Invalid(e.to_string()))?;
     if bytes.len() != 20 {
         return Err(AppError::Invalid(format!("not an address: {addr}")));
     }
@@ -219,7 +219,10 @@ async fn rpc(url: &str, method: &str, params: serde_json::Value) -> Result<serde
         .send()
         .await
         .map_err(|e| AppError::Net(e.to_string()))?;
-    let v: serde_json::Value = resp.json().await.map_err(|e| AppError::Net(e.to_string()))?;
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Net(e.to_string()))?;
     if let Some(err) = v.get("error") {
         return Err(AppError::Net(err.to_string()));
     }

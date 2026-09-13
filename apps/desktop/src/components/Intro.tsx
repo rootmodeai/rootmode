@@ -37,14 +37,23 @@ export function Intro({ onDone }: { onDone: () => void }) {
       .then((p) => {
         if (!p) {
           diag("warn", "intro: no film shipped; skipping");
-          finish();
+          // Do not paint the black overlay: finish() would cover the boot
+          // screen for 350ms, and on Linux a missing GStreamer used to
+          // crash the web process before that timer could fire.
+          if (!done.current) {
+            done.current = true;
+            onDone();
+          }
           return;
         }
         setSrc(convertFileSrc(p));
       })
       .catch((e) => {
         diag("warn", `intro: cannot locate the film: ${String(e)}`);
-        finish();
+        if (!done.current) {
+          done.current = true;
+          onDone();
+        }
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -88,9 +97,13 @@ export function Intro({ onDone }: { onDone: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
+  // Nothing on screen until the film is located. A full-window black
+  // overlay with no src is what a failed Linux AppImage looked like.
+  if (!src) return null;
+
   return (
     <div className={`intro${leaving ? " leaving" : ""}`}>
-      {src && <video ref={ref} src={src} playsInline preload="auto" onEnded={finish} onError={finish} />}
+      <video ref={ref} src={src} playsInline preload="auto" onEnded={finish} onError={finish} />
       <button className="intro-skip" onClick={finish}>
         Skip
       </button>

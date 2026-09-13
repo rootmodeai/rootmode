@@ -254,13 +254,20 @@ async fn attempt(
         .filter(|p| p.amount > 0.0)
     {
         if let Ok(st) = crate::pot::status(state).await {
-            if let (Some(client), Some(_cfg)) = (st.client.as_deref(), crate::pot::load_chain_config(state)) {
+            if let (Some(client), Some(_cfg)) =
+                (st.client.as_deref(), crate::pot::load_chain_config(state))
+            {
                 // A wallet that cannot lock funds is the user's to see; no
                 // other provider fixes it, so it is final, not retried.
                 let payout = match crate::pot::named_payout(peer.payout.as_deref()) {
                     Ok(p) => p,
                     Err(e) => {
-                        fail(app, state, job_id, &format!("could not lock funds for this job: {e}"));
+                        fail(
+                            app,
+                            state,
+                            job_id,
+                            &format!("could not lock funds for this job: {e}"),
+                        );
                         return Outcome::Settled;
                     }
                 };
@@ -278,7 +285,7 @@ async fn attempt(
                 {
                     Ok((bond, reserve)) => {
                         log::info!(
-                            "priced job {job_id} payout={payout} reserve={}",
+                            "priced job {job_id} client={client} payout={payout} reserve={}",
                             reserve.is_some()
                         );
                         submit_msg.payer = Some(client.to_string());
@@ -286,7 +293,12 @@ async fn attempt(
                         submit_msg.reserve = reserve;
                     }
                     Err(e) => {
-                        fail(app, state, job_id, &format!("could not lock funds for this job: {e}"));
+                        fail(
+                            app,
+                            state,
+                            job_id,
+                            &format!("could not lock funds for this job: {e}"),
+                        );
                         return Outcome::Settled;
                     }
                 }
@@ -298,7 +310,9 @@ async fn attempt(
     let (pay_tx, pay_rx) = mpsc::unbounded_channel::<ClientMessage>();
     let runner = {
         let transport = transport.clone();
-        tauri::async_runtime::spawn(async move { transport.run_job(submit_msg, tx, stop, pay_rx).await })
+        tauri::async_runtime::spawn(
+            async move { transport.run_job(submit_msg, tx, stop, pay_rx).await },
+        )
     };
 
     let mut terminal = false;
@@ -379,7 +393,8 @@ async fn attempt(
             .ok()
             .flatten()
             .map_or(false, |job| !job.status.is_terminal());
-        let why = ended.or_else(|| open.then(|| "peer ended the stream without a final status".to_string()));
+        let why = ended
+            .or_else(|| open.then(|| "peer ended the stream without a final status".to_string()));
         if let Some(why) = why {
             if !spoke {
                 return Outcome::Nothing(why);

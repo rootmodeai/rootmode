@@ -59,13 +59,18 @@ pub fn init() {
     let file = app_data_dir().and_then(|dir| match open_log(&dir) {
         Ok(f) => Some((dir.join(LOG_FILE), f)),
         Err(e) => {
-            eprintln!("rootmode: cannot open {}: {e}", dir.join(LOG_FILE).display());
+            eprintln!(
+                "rootmode: cannot open {}: {e}",
+                dir.join(LOG_FILE).display()
+            );
             None
         }
     });
 
     let stderr_layer = fmt::layer().with_target(true).with_writer(std::io::stderr);
-    let registry = tracing_subscriber::registry().with(filter).with(stderr_layer);
+    let registry = tracing_subscriber::registry()
+        .with(filter)
+        .with(stderr_layer);
 
     let path = match file {
         Some((path, f)) => {
@@ -156,6 +161,9 @@ fn describe_machine() {
         "XDG_CURRENT_DESKTOP",
         "APPIMAGE",
         "APPDIR",
+        "GST_PLUGIN_SYSTEM_PATH_1_0",
+        "GST_PLUGIN_PATH",
+        "GIO_MODULE_DIR",
         "LANG",
     ];
     let knobs: Vec<String> = KNOBS
@@ -205,8 +213,10 @@ fn os_release() -> String {
         let pretty = std::fs::read_to_string("/etc/os-release")
             .ok()
             .and_then(|s| {
-                s.lines()
-                    .find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| v.trim_matches('"').to_string()))
+                s.lines().find_map(|l| {
+                    l.strip_prefix("PRETTY_NAME=")
+                        .map(|v| v.trim_matches('"').to_string())
+                })
             })
             .unwrap_or_else(|| "Linux (no /etc/os-release)".into());
         let kernel = std::process::Command::new("uname")
@@ -232,5 +242,7 @@ fn find_shared_library(name: &str) -> Option<PathBuf> {
         "/usr/lib/aarch64-linux-gnu",
         "/usr/local/lib",
     ];
-    DIRS.iter().map(|d| Path::new(d).join(name)).find(|p| p.exists())
+    DIRS.iter()
+        .map(|d| Path::new(d).join(name))
+        .find(|p| p.exists())
 }

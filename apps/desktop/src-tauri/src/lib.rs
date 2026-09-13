@@ -10,6 +10,7 @@ pub mod eth_tx;
 pub mod gateway;
 pub mod identity_store;
 pub mod jobs;
+pub mod linux;
 pub mod mock;
 pub mod net;
 pub mod p2p;
@@ -43,6 +44,8 @@ pub fn run() {
     // RUST_LOG still overrides the filter; the `log` macros used elsewhere
     // in this crate are captured too.
     diag::init();
+    // After the original environment is on disk, before the window exists.
+    linux::apply();
 
     let stamp = |what: &str| log::info!("[+{}ms] {what}", diag::uptime_ms());
 

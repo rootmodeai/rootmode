@@ -23,7 +23,7 @@ export function fundingKindFromText(text: string): FundingKind | null {
   if (/needs a little ETH|payout address/i.test(text)) {
     return "chain";
   }
-  if (/does not cover|deposit more|fund your pot|this provider charges|could not lock funds/i.test(text)) {
+  if (/does not cover|deposit more|fund your pot|this provider charges|could not lock funds|no remaining reserve|lock funds before sending/i.test(text)) {
     return "empty";
   }
   if (/local chain|not running|\.\/contracts\/local|can't reach base|settlement is not configured/i.test(text)) {

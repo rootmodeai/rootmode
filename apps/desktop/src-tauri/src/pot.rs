@@ -13,7 +13,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use k256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey};
-use rootmode_core::payments::{address_of, keccak, Micros, Domain, ReserveTicket, SpendTicket};
+use rootmode_core::payments::{address_of, keccak, Domain, Micros, ReserveTicket, SpendTicket};
 use rootmode_core::{JobInvoice, JobKind, JobPay, JobPayload, Price, TokenUsage};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -188,8 +188,16 @@ fn gate() -> &'static tokio::sync::Mutex<()> {
     G.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-fn worker_key(worker: &str) -> String {
-    worker.trim_start_matches("0x").to_lowercase()
+fn addr_key(addr: &str) -> String {
+    addr.trim_start_matches("0x").to_lowercase()
+}
+
+/// One latest ticket per (payer, payout). Keying only by payout reused a
+/// previous wallet's cumulative on a new one — every seed shares the fee
+/// vault, so a Web3Auth deposit then inherited a MetaMask ticket and every
+/// provider refused "no remaining reserve".
+fn channel_key(client: &str, worker: &str) -> String {
+    format!("{}/{}", addr_key(client), addr_key(worker))
 }
 
 fn persist_path(app_data: &Path) -> PathBuf {
@@ -224,7 +232,9 @@ fn restore(app_data: &Path) {
     // here, and their cumulative is not a floor for this one. Rows from
     // before the pot was recorded are trusted only while their ticket can
     // still settle — past its deadline it is history on some pot or other.
-    let pot = load_chain_config_at(app_data).map(|c| c.pot).unwrap_or_default();
+    let pot = load_chain_config_at(app_data)
+        .map(|c| c.pot)
+        .unwrap_or_default();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -245,12 +255,16 @@ fn restore(app_data: &Path) {
             continue;
         }
         g.insert(
-            worker_key(&row.ticket.worker_payout),
+            channel_key(&row.ticket.client, &row.ticket.worker_payout),
             LatestTicket {
                 ticket: row.ticket,
                 sig,
                 on_chain_paid: row.on_chain_paid,
-                pot: if row.pot.is_empty() { pot.clone() } else { row.pot },
+                pot: if row.pot.is_empty() {
+                    pot.clone()
+                } else {
+                    row.pot
+                },
             },
         );
     }
@@ -335,7 +349,9 @@ fn read_chain_json(path: &Path) -> Option<ChainConfig> {
 }
 
 pub fn app_key_address(state: &AppState) -> Result<String> {
-    Ok(address_of(load_or_create_app_key(&state.app_data)?.verifying_key()))
+    Ok(address_of(
+        load_or_create_app_key(&state.app_data)?.verifying_key(),
+    ))
 }
 
 /// The address a priced job locks against: the worker's own payout, not the
@@ -364,8 +380,8 @@ fn load_or_create_app_key(app_data: &Path) -> Result<SigningKey> {
     }
     let mut bytes = [0u8; 32];
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut bytes);
-    let key = SigningKey::from_bytes((&bytes).into())
-        .map_err(|e| AppError::Invalid(e.to_string()))?;
+    let key =
+        SigningKey::from_bytes((&bytes).into()).map_err(|e| AppError::Invalid(e.to_string()))?;
     std::fs::create_dir_all(app_data)?;
     std::fs::write(&path, hex::encode(key.to_bytes()))?;
     #[cfg(unix)]
@@ -410,7 +426,9 @@ pub async fn status(state: &AppState) -> Result<PotStatus> {
     }
     let last = last.map(|(_, s)| s);
 
-    let reachable = rpc(&cfg.rpc, "eth_chainId", serde_json::json!([])).await.is_ok();
+    let reachable = rpc(&cfg.rpc, "eth_chainId", serde_json::json!([]))
+        .await
+        .is_ok();
     let client = match state.db.last_deposit_client(cfg.chain_id) {
         Ok(Some(c)) if !c.trim().is_empty() => Some(c),
         // Finding the wallet means scanning `Deposited` logs from genesis.
@@ -488,7 +506,11 @@ pub async fn deposits(state: &AppState) -> Result<Vec<Deposit>> {
         .into_iter()
         .filter(|d| chain_id == 0 || d.chain_id == 0 || d.chain_id == chain_id)
         .map(|d| {
-            let id = if d.chain_id != 0 { d.chain_id } else { chain_id };
+            let id = if d.chain_id != 0 {
+                d.chain_id
+            } else {
+                chain_id
+            };
             Deposit {
                 url: explorer_tx(id, &d.tx_hash),
                 tx_hash: d.tx_hash,
@@ -534,7 +556,12 @@ fn save_deposit(db_path: &Path, body: DepositBody) -> Result<()> {
     })
 }
 
-pub async fn check(state: &AppState, price: f64, unpriced: bool, kind: JobKind) -> Result<PotCheck> {
+pub async fn check(
+    state: &AppState,
+    price: f64,
+    unpriced: bool,
+    kind: JobKind,
+) -> Result<PotCheck> {
     if unpriced || price <= 0.0 {
         return Ok(PotCheck {
             ready: true,
@@ -666,7 +693,11 @@ pub async fn issue_ticket(
                 "This {} costs ${:.2}, more than the ${:.2} per-job cap on your payment channel. \
                  Your account allows ${:.2}; the channel takes that limit on its next reserve, \
                  which needs unlocked balance in your pot.",
-                if kind == JobKind::Video { "clip" } else { "picture" },
+                if kind == JobKind::Video {
+                    "clip"
+                } else {
+                    "picture"
+                },
                 chunk as f64 / 1_000_000.0,
                 channel_cap as f64 / 1_000_000.0,
                 cap as f64 / 1_000_000.0,
@@ -678,44 +709,57 @@ pub async fn issue_ticket(
     // a normal reply never stops to wait for another ticket.
     let need = job_cap;
     let _ = chunk;
+    let _gate = gate().lock().await;
+    let cached = cached_cumulative(&cfg, client, worker_payout);
+    let authorised = cached.max(ch.paid.max(ch.earned));
+    // The worker refuses when on-chain remaining is below this job's
+    // cumulative minus what the chain has already earned — not merely this
+    // job's cap. A leftover local ticket that never settled makes that gap
+    // bigger than `need`, and locking only `need` still bounces.
+    let lock_need = authorised
+        .saturating_add(need)
+        .saturating_sub(ch.earned)
+        .max(1);
+    let extra = reserve_extra(ch.remaining(), lock_need, st.balance_micros, raises_cap);
+    if ch.remaining().saturating_add(extra) < lock_need {
+        return Err(AppError::Invalid(format!(
+            "Your pot does not cover this job. You have ${:.2} free; lock ${:.2} before sending work.",
+            st.balance_micros as f64 / 1_000_000.0,
+            lock_need as f64 / 1_000_000.0,
+        )));
+    }
     let reserve = sign_reserve_if_needed(
         state,
         &cfg,
         client,
         worker_payout,
         ch,
-        need,
+        lock_need,
         st.balance_micros,
         raises_cap,
     )
     .await?;
 
-    let _gate = gate().lock().await;
-    let cached = cached_cumulative(&cfg, worker_payout);
-    let authorised = cached.max(ch.paid.max(ch.earned));
     let cumulative = authorised.saturating_add(need);
     let signed = sign_latest(&state.app_data, &cfg, client, worker_payout, cumulative)?;
     persist(&state.app_data);
 
-    jobs()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(
-            job_id,
-            PendingJob {
-                price,
-                kind,
-                paid: false,
-                sha256: None,
-                ceiling: need,
-                job_cap,
-                cost: None,
-                model: payload.model_label(),
-                peer: peer_label.to_string(),
-                payout: worker_payout.to_string(),
-                bond_cumulative: cumulative,
-            },
-        );
+    jobs().lock().unwrap_or_else(|e| e.into_inner()).insert(
+        job_id,
+        PendingJob {
+            price,
+            kind,
+            paid: false,
+            sha256: None,
+            ceiling: need,
+            job_cap,
+            cost: None,
+            model: payload.model_label(),
+            peer: peer_label.to_string(),
+            payout: worker_payout.to_string(),
+            bond_cumulative: cumulative,
+        },
+    );
     Ok((
         JobPay {
             v: rootmode_core::PROTOCOL_VERSION,
@@ -793,19 +837,7 @@ async fn sign_reserve_if_needed(
     // fires several at once, each settles a little, and whichever worker
     // reads the channel last finds itself a few thousand micros short and
     // refuses with "no remaining reserve". Unused lock returns on close.
-    let want = need.saturating_mul(RESERVE_HEADROOM_JOBS).max(RESERVE_HEADROOM_FLOOR);
-    let short = remaining < need.saturating_mul(2) || remaining < RESERVE_HEADROOM_FLOOR / 2;
-    let extra = if short || raise_caps {
-        // The channel's caps only move on a reserve that actually raises
-        // the lock; the contract refuses one that does not. So when the
-        // caps are what needs raising, the lock goes up by at least a
-        // micro even if it is not short.
-        want.saturating_sub(remaining)
-            .max(if raise_caps { 1 } else { 0 })
-            .min(free)
-    } else {
-        0
-    };
+    let extra = reserve_extra(remaining, need, free, raise_caps);
     // Even with nothing to add, a ticket at the current lock lets the
     // worker verify the payer signed for this channel at all.
     let new_max = ch.reserved.saturating_add(extra);
@@ -834,6 +866,29 @@ async fn sign_reserve_if_needed(
         ticket,
         sig: format!("0x{}", hex::encode(bytes)),
     }))
+}
+
+/// How much to add to the on-chain lock for this job, in micros.
+///
+/// `need` is what the worker will require as remaining after this ticket
+/// lands. Headroom is several jobs, floored at `$3`, so a burst of small
+/// replies does not each race a raise.
+fn reserve_extra(remaining: u64, need: u64, free: u64, raise_caps: bool) -> u64 {
+    let want = need
+        .saturating_mul(RESERVE_HEADROOM_JOBS)
+        .max(RESERVE_HEADROOM_FLOOR);
+    let short = remaining < need.saturating_mul(2) || remaining < RESERVE_HEADROOM_FLOOR / 2;
+    if short || raise_caps {
+        // The channel's caps only move on a reserve that actually raises
+        // the lock; the contract refuses one that does not. So when the
+        // caps are what needs raising, the lock goes up by at least a
+        // micro even if it is not short.
+        want.saturating_sub(remaining)
+            .max(if raise_caps { 1 } else { 0 })
+            .min(free)
+    } else {
+        0
+    }
 }
 
 /// Forget a job whose bond never reached a worker: nothing can be charged.
@@ -910,20 +965,20 @@ pub async fn adopt_authorised(state: &AppState, job_id: Uuid, message: &str) {
     let Some(cfg) = load_chain_config(state) else {
         return;
     };
-    let ours = cached_cumulative(&cfg, &payout);
-    if theirs <= ours {
-        return;
-    }
     let Ok(st) = status(state).await else {
         return;
     };
     let Some(client) = st.client.clone() else {
         return;
     };
+    let ours = cached_cumulative(&cfg, &client, &payout);
+    if theirs <= ours {
+        return;
+    }
     let _gate = gate().lock().await;
     match sign_latest(&state.app_data, &cfg, &client, &payout, theirs) {
         Ok((ticket, sig)) => {
-            let wk = worker_key(&payout);
+            let wk = channel_key(&client, &payout);
             let mut all = latest().lock().unwrap_or_else(|e| e.into_inner());
             let on_chain_paid = all.get(&wk).map(|t| t.on_chain_paid).unwrap_or(0);
             all.insert(
@@ -1009,9 +1064,7 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
                 invoice.completion_tokens,
                 invoice.cached_tokens,
             ),
-            JobKind::Image | JobKind::Video => {
-                (pending.price.amount * 1_000_000.0).round() as u64
-            }
+            JobKind::Image | JobKind::Video => (pending.price.amount * 1_000_000.0).round() as u64,
         };
         // The advertised rate is the worker's list price; its real upstream
         // cost can run above it, and it bills at least cost plus margin.
@@ -1070,7 +1123,7 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
     } else {
         invoice.amount
     };
-    let wk = worker_key(&worker);
+    let wk = channel_key(&client, &worker);
     let pending_delta = authorised.saturating_sub(on_chain);
     if !invoice.top_up && pending_delta > 0 && pending_delta.saturating_add(extra) > cap {
         flush_worker(&state.app_data, &cfg, &wk).await?;
@@ -1080,18 +1133,15 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
     let cumulative = authorised.saturating_add(extra);
     let signed = sign_latest(&state.app_data, &cfg, &client, &worker, cumulative)?;
     if !invoice.top_up {
-        latest()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(
-                wk,
-                LatestTicket {
-                    ticket: signed.0.clone(),
-                    sig: signed.1.clone(),
-                    on_chain_paid: on_chain,
-                    pot: cfg.pot.clone(),
-                },
-            );
+        latest().lock().unwrap_or_else(|e| e.into_inner()).insert(
+            wk,
+            LatestTicket {
+                ticket: signed.0.clone(),
+                sig: signed.1.clone(),
+                on_chain_paid: on_chain,
+                pot: cfg.pot.clone(),
+            },
+        );
         persist(&state.app_data);
         schedule_flush();
     }
@@ -1114,7 +1164,9 @@ pub async fn pay_invoice(state: &AppState, job_id: Uuid, invoice: &JobInvoice) -
         // The one place chat jobs and gateway jobs both cross when money
         // moves — so the ledger the user audits is written here, not by
         // whichever screen happened to ask.
-        let billed_tokens = invoice.prompt_tokens.saturating_add(invoice.completion_tokens);
+        let billed_tokens = invoice
+            .prompt_tokens
+            .saturating_add(invoice.completion_tokens);
         if let Err(e) = state.db.record_spend(&SpendEntry {
             job_id: job_id.to_string(),
             model: pending.model.clone(),
@@ -1221,7 +1273,7 @@ pub async fn settle_job(
 
     ensure_flush_loop(state.app_data.clone());
 
-    let wk = worker_key(&worker);
+    let wk = channel_key(&client, &worker);
     let (authorised, on_chain) = authorised_so_far(&cfg, &client, &worker).await?;
     let pending_delta = authorised.saturating_sub(on_chain);
     if pending_delta > 0 && pending_delta.saturating_add(amount) > cap {
@@ -1233,18 +1285,15 @@ pub async fn settle_job(
     let (authorised, on_chain) = authorised_so_far(&cfg, &client, &worker).await?;
     let cumulative = authorised.saturating_add(amount);
     let signed = sign_latest(&state.app_data, &cfg, &client, &worker, cumulative)?;
-    latest()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(
-            wk,
-            LatestTicket {
-                ticket: signed.0,
-                sig: signed.1,
-                on_chain_paid: on_chain,
-                pot: cfg.pot.clone(),
-            },
-        );
+    latest().lock().unwrap_or_else(|e| e.into_inner()).insert(
+        wk,
+        LatestTicket {
+            ticket: signed.0,
+            sig: signed.1,
+            on_chain_paid: on_chain,
+            pot: cfg.pot.clone(),
+        },
+    );
     persist(&state.app_data);
     schedule_flush();
     // This settle path bills providers that never invoiced, and it runs after
@@ -1267,9 +1316,9 @@ fn record_job_cost(
         log::warn!("record job cost: {e}");
     }
     let tokens = match pending.kind {
-        JobKind::Llm => meta.and_then(TokenUsage::from_meta).map(|u| {
-            u.prompt.saturating_add(u.completion)
-        }),
+        JobKind::Llm => meta
+            .and_then(TokenUsage::from_meta)
+            .map(|u| u.prompt.saturating_add(u.completion)),
         JobKind::Image | JobKind::Video => None,
     }
     .filter(|&n| n > 0);
@@ -1293,14 +1342,16 @@ fn record_job_cost(
     }
 }
 
-/// The highest cumulative this app has signed for `worker` on the configured
-/// pot. A ticket cached for another pot counts for nothing here.
-fn cached_cumulative(cfg: &ChainConfig, worker: &str) -> u64 {
+/// The highest cumulative this app has signed for `client` → `worker` on
+/// the configured pot. A ticket cached for another pot or another payer
+/// counts for nothing here.
+fn cached_cumulative(cfg: &ChainConfig, client: &str, worker: &str) -> u64 {
     latest()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .get(&worker_key(worker))
+        .get(&channel_key(client, worker))
         .filter(|t| t.pot.eq_ignore_ascii_case(&cfg.pot))
+        .filter(|t| t.ticket.client.eq_ignore_ascii_case(client))
         .map(|t| t.ticket.cumulative)
         .unwrap_or(0)
 }
@@ -1328,7 +1379,7 @@ async fn channel_with_retry(cfg: &ChainConfig, client: &str, worker: &str) -> Re
 }
 
 async fn authorised_so_far(cfg: &ChainConfig, client: &str, worker: &str) -> Result<(u64, u64)> {
-    let cached = cached_cumulative(cfg, worker);
+    let cached = cached_cumulative(cfg, client, worker);
     let ch = channel_with_retry(cfg, client, worker).await?;
     let on_chain = ch.paid.max(ch.earned);
     Ok((cached.max(on_chain), on_chain))
@@ -1441,7 +1492,12 @@ async fn send_settle(
 async fn wait_ok(cfg: &ChainConfig, hash: &str) -> Result<()> {
     for _ in 0..20 {
         tokio::time::sleep(Duration::from_millis(150)).await;
-        let rec = rpc(&cfg.rpc, "eth_getTransactionReceipt", serde_json::json!([hash])).await?;
+        let rec = rpc(
+            &cfg.rpc,
+            "eth_getTransactionReceipt",
+            serde_json::json!([hash]),
+        )
+        .await?;
         if rec.is_null() {
             continue;
         }
@@ -1455,9 +1511,8 @@ async fn wait_ok(cfg: &ChainConfig, hash: &str) -> Result<()> {
 }
 
 pub fn fund_url(state: &AppState) -> Result<String> {
-    let cfg = load_chain_config(state).ok_or_else(|| {
-        AppError::Invalid("settlement is not configured on this build".into())
-    })?;
+    let cfg = load_chain_config(state)
+        .ok_or_else(|| AppError::Invalid("settlement is not configured on this build".into()))?;
     let app_key = app_key_address(state)?;
     Ok(format!(
         "http://127.0.0.1:{FUND_PORT}/?t={}&rpc={}&pot={}&usdc={}&appKey={}&chainId={}&worker={}{}{}",
@@ -1670,7 +1725,8 @@ async fn sponsor_gas(app_data: &Path, address: &str) -> std::result::Result<Stri
         .map_err(|e| {
             let msg = e.to_string();
             if msg.contains("needs a little ETH") {
-                "This app's gas wallet needs a little ETH on Base before it can sponsor deposits.".into()
+                "This app's gas wallet needs a little ETH on Base before it can sponsor deposits."
+                    .into()
             } else {
                 msg
             }
@@ -2061,7 +2117,11 @@ async fn find_client(cfg: &ChainConfig, app_key: &str) -> Option<String> {
     let want = app_key.trim_start_matches("0x").to_lowercase();
     logs.iter()
         .rev()
-        .find(|l| l.app_key.trim_start_matches("0x").eq_ignore_ascii_case(&want))
+        .find(|l| {
+            l.app_key
+                .trim_start_matches("0x")
+                .eq_ignore_ascii_case(&want)
+        })
         .map(|l| l.client.clone())
 }
 
@@ -2137,7 +2197,9 @@ pub async fn sync_settlements(state: &AppState) -> Result<usize> {
     let head = rpc(&cfg.rpc, "eth_blockNumber", serde_json::json!([])).await?;
     let head = u64::from_str_radix(head.as_str().unwrap_or("0x0").trim_start_matches("0x"), 16)
         .unwrap_or(0);
-    let mut from = state.db.settlement_scan_from(cfg.chain_id, cfg.deploy_block)?;
+    let mut from = state
+        .db
+        .settlement_scan_from(cfg.chain_id, cfg.deploy_block)?;
     if head == 0 || from > head {
         return Ok(0);
     }
@@ -2170,12 +2232,17 @@ pub async fn sync_settlements(state: &AppState) -> Result<usize> {
                 found += 1;
             }
         }
-        state.db.set_setting("settle_scan_block", &(to + 1).to_string())?;
+        state
+            .db
+            .set_setting("settle_scan_block", &(to + 1).to_string())?;
         from = to + 1;
     }
     if found > 0 {
         match state.db.resolve_abandoned() {
-            Ok(n) if n > 0 => log::info!("{n} stopped repl{} charged their prepaid chunk", if n == 1 { "y" } else { "ies" }),
+            Ok(n) if n > 0 => log::info!(
+                "{n} stopped repl{} charged their prepaid chunk",
+                if n == 1 { "y" } else { "ies" }
+            ),
             Err(e) => log::warn!("resolve abandoned replies: {e}"),
             _ => {}
         }
@@ -2280,8 +2347,8 @@ async fn sum_locked(state: &AppState, cfg: &ChainConfig, client: &str) -> Option
             }
         }
     }
-    for k in latest().lock().unwrap_or_else(|e| e.into_inner()).keys() {
-        addrs.insert(format!("0x{k}"));
+    for t in latest().lock().unwrap_or_else(|e| e.into_inner()).values() {
+        addrs.insert(t.ticket.worker_payout.to_lowercase());
     }
     let mut total = 0u64;
     for addr in addrs {
@@ -2441,7 +2508,10 @@ async fn rpc_once(url: &str, method: &str, params: serde_json::Value) -> Result<
         .send()
         .await
         .map_err(|e| AppError::Net(e.to_string()))?;
-    let v: serde_json::Value = resp.json().await.map_err(|e| AppError::Net(e.to_string()))?;
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Net(e.to_string()))?;
     if let Some(err) = v.get("error") {
         return Err(AppError::Net(err.to_string()));
     }
@@ -2486,7 +2556,10 @@ mod tests {
             authorised_in("the prepaid ticket raises this channel by only $0.0003 (already authorised 8064009), and the prompt alone is 35756 tokens"),
             Some(8_064_009)
         );
-        assert_eq!(authorised_in("this reply reached your $12.00 limit for a single job"), None);
+        assert_eq!(
+            authorised_in("this reply reached your $12.00 limit for a single job"),
+            None
+        );
         assert_eq!(authorised_in("already authorised 0"), None);
     }
 
@@ -2509,8 +2582,74 @@ mod tests {
         .unwrap();
         let lock = job_lock_micros(&price, JobKind::Llm, &payload);
         // 16,384 × $17.25/M = $0.283 for the answer, plus a few tokens of prompt.
-        assert!(lock > 280_000 && lock < 320_000, "lock was ${:.3}", lock as f64 / 1e6);
+        assert!(
+            lock > 280_000 && lock < 320_000,
+            "lock was ${:.3}",
+            lock as f64 / 1e6
+        );
         // Not the $17.25 a whole million-token slice at the top rate would be.
         assert!(lock < price.chunk_micros() / 50);
+    }
+
+    #[test]
+    fn a_short_channel_locks_headroom_up_to_what_is_free() {
+        // Empty channel, $1 free, job needs $0.28 → lock the $1, still short.
+        assert_eq!(reserve_extra(0, 280_000, 1_000_000, false), 1_000_000);
+        // $5 free → lock the $3 floor, which covers the job.
+        assert_eq!(reserve_extra(0, 280_000, 5_000_000, false), 3_000_000);
+        // $1 remaining is under half the $3 floor, so top up toward $3.
+        assert_eq!(
+            reserve_extra(1_000_000, 280_000, 5_000_000, false),
+            2_000_000
+        );
+        // Plenty remaining: do not raise.
+        assert_eq!(reserve_extra(10_000_000, 280_000, 5_000_000, false), 0);
+        // No unlocked funds: cannot raise, even when short.
+        assert_eq!(reserve_extra(0, 280_000, 0, false), 0);
+    }
+
+    #[test]
+    fn a_cached_ticket_does_not_floor_a_different_payer() {
+        let cfg = ChainConfig {
+            rpc: String::new(),
+            chain_id: 8453,
+            usdc: String::new(),
+            pot: "0x811544168635F23C2F31aD5d9aAD874Bd8A4D5a9".into(),
+            fee_vault: String::new(),
+            worker: String::new(),
+            client: String::new(),
+            deploy_block: 0,
+        };
+        let old = "0x2d4247a84AE44346652f74DF3826757a494Fde40";
+        let new = "0x7b8b53021926ad6dcf011556614d049426c12e66";
+        let payout = "0x17Def6df8c13100aD7c88521c05A23a95fcC6B14";
+        let key = channel_key(old, payout);
+        {
+            let mut all = latest().lock().unwrap_or_else(|e| e.into_inner());
+            all.insert(
+                key.clone(),
+                LatestTicket {
+                    ticket: SpendTicket {
+                        client: old.into(),
+                        worker_payout: payout.into(),
+                        cumulative: 13_450_567,
+                        deadline: 2_000_000_000,
+                    },
+                    sig: vec![0; 65],
+                    on_chain_paid: 13_450_567,
+                    pot: cfg.pot.clone(),
+                },
+            );
+        }
+        assert_eq!(cached_cumulative(&cfg, old, payout), 13_450_567);
+        assert_eq!(
+            cached_cumulative(&cfg, new, payout),
+            0,
+            "a new wallet must not inherit another payer's cumulative"
+        );
+        latest()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&key);
     }
 }

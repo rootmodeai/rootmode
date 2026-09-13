@@ -129,9 +129,18 @@ pub async fn probe_peer(app: AppHandle, id: String) -> Result<Peer> {
             } else {
                 "offline"
             };
-            state
-                .db
-                .update_peer_status(&id, status, None, None, None, None, None, None, Some(&msg), None)?;
+            state.db.update_peer_status(
+                &id,
+                status,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(&msg),
+                None,
+            )?;
         }
     }
 
@@ -528,7 +537,9 @@ pub async fn rotate_gateway_token(app: AppHandle) -> Result<GatewayStatus> {
 /// The catalog of coding-agent CLIs and editors this app can point at its own
 /// local endpoint, and whether each is installed and currently connected.
 #[tauri::command]
-pub async fn list_connected_tools(app: AppHandle) -> Result<Vec<crate::connected_tools::ToolStatus>> {
+pub async fn list_connected_tools(
+    app: AppHandle,
+) -> Result<Vec<crate::connected_tools::ToolStatus>> {
     let state = app.state::<Arc<AppState>>().inner().clone();
     Ok(crate::connected_tools::list(&state))
 }
@@ -536,9 +547,18 @@ pub async fn list_connected_tools(app: AppHandle) -> Result<Vec<crate::connected
 /// Turns the local endpoint on if it is not already, then patches the given
 /// tool's own config file to use it.
 #[tauri::command]
-pub async fn connect_tool(app: AppHandle, key: String) -> Result<crate::connected_tools::ToolStatus> {
+pub async fn connect_tool(
+    app: AppHandle,
+    key: String,
+) -> Result<crate::connected_tools::ToolStatus> {
     let state = app.state::<Arc<AppState>>().inner().clone();
-    if !matches!(state.db.get_setting(crate::gateway::SETTING_GATEWAY)?.as_deref(), Some("true")) {
+    if !matches!(
+        state
+            .db
+            .get_setting(crate::gateway::SETTING_GATEWAY)?
+            .as_deref(),
+        Some("true")
+    ) {
         state.set_setting(crate::gateway::SETTING_GATEWAY, "true")?;
         let gateway = app.state::<Arc<Gateway>>().inner().clone();
         crate::gateway::reconcile(gateway.clone(), state.clone()).await;
@@ -551,7 +571,10 @@ pub async fn connect_tool(app: AppHandle, key: String) -> Result<crate::connecte
 
 /// Removes just what a connect added from the tool's config file.
 #[tauri::command]
-pub async fn disconnect_tool(app: AppHandle, key: String) -> Result<crate::connected_tools::ToolStatus> {
+pub async fn disconnect_tool(
+    app: AppHandle,
+    key: String,
+) -> Result<crate::connected_tools::ToolStatus> {
     let state = app.state::<Arc<AppState>>().inner().clone();
     crate::connected_tools::disconnect(&state, &key)
 }
@@ -593,7 +616,9 @@ pub fn token_usage(state: St<'_>) -> Result<Vec<ModelUsage>> {
 /// first, so the user can audit exactly what left the pot and for what.
 #[tauri::command]
 pub fn spend_history(state: St<'_>, limit: Option<u32>) -> Result<Vec<crate::store::SpendEntry>> {
-    let chain_id = crate::pot::load_chain_config(&state).map(|c| c.chain_id).unwrap_or(0);
+    let chain_id = crate::pot::load_chain_config(&state)
+        .map(|c| c.chain_id)
+        .unwrap_or(0);
     let mut rows = state.db.spend_history(limit.unwrap_or(100))?;
     for row in &mut rows {
         row.settle_url = row
@@ -824,8 +849,15 @@ pub fn read_picture_bytes(state: St<'_>, id: String) -> Result<String> {
 /// Where the intro film was installed, for the webview to play through the
 /// asset protocol — the embedded-asset scheme cannot serve media, since
 /// WebKit's media loader needs byte ranges and it answers whole files.
+///
+/// Returns `None` on a Linux AppImage whose GStreamer cannot play media:
+/// creating the `<video>` then kills WebKitWebProcess instead of erroring.
 #[tauri::command]
 pub fn intro_path(app: AppHandle) -> Option<String> {
+    if !crate::linux::media_playback_available() {
+        log::warn!("intro: GStreamer cannot play media on this system; skipping the film");
+        return None;
+    }
     let path = app
         .path()
         .resolve("resources/intro.mp4", tauri::path::BaseDirectory::Resource)
