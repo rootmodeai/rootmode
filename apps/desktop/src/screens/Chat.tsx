@@ -15,9 +15,10 @@ import { Glider } from "../components/Glider";
 import { DeleteAllChats } from "../components/DeleteAllChats";
 import { MarkdownBody } from "../components/Markdown";
 import { useChoice, usePick } from "../lib/choice";
-import { describe, targetFor } from "../lib/models";
+import { describe, isFree, targetFor } from "../lib/models";
 import {
   FundingHint,
+  FreeModelHint,
   FundingNotice,
   fundingKindFromText,
   noticeFromCheck,
@@ -603,7 +604,8 @@ export function Chat() {
               )}
             </div>
             <div className="composer-hint">
-              {option && !option.unpriced && option.price > 0 && pot?.client && (
+              {option && isFree(option) && <FreeModelHint />}
+              {option && !isFree(option) && pot?.client && (
                 <FundingHint
                   capMicros={
                     pot.max_per_job_micros > 0 ? pot.max_per_job_micros : 500_000

@@ -27,6 +27,9 @@ pub struct VllmBackend {
     /// server that does not know the field typically ignores it, but some
     /// reject unknown keys, so it stays off unless the caller is OpenRouter.
     include_cost: bool,
+    /// Ground every answer with OpenRouter's web plugin: one search, then
+    /// the reply. Off for a local vLLM — that server has no such plugin.
+    web_search: bool,
 }
 
 impl VllmBackend {
@@ -40,12 +43,20 @@ impl VllmBackend {
             http,
             discovered: std::sync::RwLock::new(Vec::new()),
             include_cost: false,
+            web_search: false,
         })
     }
 
     /// OpenRouter: include `usage.cost` and cache details in the stream.
     pub fn reporting_cost(mut self) -> Self {
         self.include_cost = true;
+        self
+    }
+
+    /// OpenRouter: search the web on every text job, so the answer is
+    /// grounded in what is true now rather than in training.
+    pub fn offering_web_search(mut self) -> Self {
+        self.web_search = true;
         self
     }
 
@@ -106,6 +117,15 @@ struct Usage {
     /// OpenRouter's billed dollar amount for this generation, when asked.
     #[serde(default)]
     cost: Option<f64>,
+    /// How many times the model actually searched, when it did.
+    #[serde(default)]
+    server_tool_use: Option<ServerToolUse>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+struct ServerToolUse {
+    #[serde(default)]
+    web_search_requests: u64,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -321,23 +341,17 @@ impl Backend for VllmBackend {
         if let Some(model) = &model {
             body["model"] = serde_json::Value::String(model.clone());
         }
+        let tools = completion_tools(params);
+        if !tools.is_empty() {
+            body["tools"] = serde_json::Value::Array(tools);
+        }
+        if self.web_search {
+            // Always, not "if the model feels like it". Leaving the choice
+            // to the model is how a seed node answers last night's score
+            // from training. One search, then the reply.
+            body["plugins"] = serde_json::json!([{ "id": "web" }]);
+        }
         if !params.tools.is_empty() {
-            body["tools"] = serde_json::Value::Array(
-                params
-                    .tools
-                    .iter()
-                    .map(|t| {
-                        serde_json::json!({
-                            "type": "function",
-                            "function": {
-                                "name": t.name,
-                                "description": t.description.clone().unwrap_or_default(),
-                                "parameters": t.input_schema,
-                            }
-                        })
-                    })
-                    .collect(),
-            );
             // A reasoning model with tools must emit a tool call, not just an
             // answer. Servers that default to a high reasoning effort (e.g.
             // `--default-chat-template-kwargs reasoning_effort=max`) let the
@@ -345,6 +359,8 @@ impl Backend for VllmBackend {
             // emitting the answer delimiter — an empty completion. Cap the
             // effort per-request so a tool-using client gets a tool call, not
             // a monologue. Servers that do not know this option ignore it.
+            // Only the client's tools trip this — offering OpenRouter's own
+            // search is not the same as a coding agent waiting on a call.
             if params.reasoning_effort.is_none() {
                 body["chat_template_kwargs"] = serde_json::json!({
                     "thinking": true,
@@ -552,6 +568,14 @@ impl Backend for VllmBackend {
         if let Some(cost) = usage.as_ref().and_then(|u| u.cost) {
             meta["upstream_cost"] = serde_json::json!(cost);
         }
+        if let Some(n) = usage
+            .as_ref()
+            .and_then(|u| u.server_tool_use.as_ref())
+            .map(|s| s.web_search_requests)
+            .filter(|n| *n > 0)
+        {
+            meta["web_search_requests"] = serde_json::json!(n);
+        }
 
         Ok(JobResult {
             v: PROTOCOL_VERSION,
@@ -675,6 +699,26 @@ fn fold_late_system_messages(messages: &mut Vec<ChatMessage>) {
             i += 1;
         }
     }
+}
+
+/// The client's function tools, in the shape an OpenAI-compatible server
+/// expects. Web search is not a tool: a seed node attaches it as a plugin
+/// so it always runs, rather than waiting for the model to ask.
+fn completion_tools(params: &LlmParams) -> Vec<serde_json::Value> {
+    params
+        .tools
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description.clone().unwrap_or_default(),
+                    "parameters": t.input_schema,
+                }
+            })
+        })
+        .collect()
 }
 
 /// The whole conversation on the wire, with every `tool` message naming the
@@ -1344,6 +1388,67 @@ mod tests {
         assert!(!sent.contains("reasoning_effort"), "{sent}");
     }
 
+    #[test]
+    fn a_clients_tools_are_the_only_tools() {
+        assert!(super::completion_tools(&params()).is_empty());
+        let mut p = params();
+        p.tools.push(rootmode_core::ToolDef {
+            name: "Read".into(),
+            description: Some("read a file".into()),
+            input_schema: serde_json::json!({ "type": "object" }),
+        });
+        let tools = super::completion_tools(&p);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["function"]["name"], "Read");
+    }
+
+    #[tokio::test]
+    async fn a_seed_node_searches_the_web_and_a_local_one_does_not() {
+        let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n";
+
+        let stub = StubHttp::start(vec![StubHttp::sse(sse)]).await;
+        backend(stub.base_url())
+            .offering_web_search()
+            .run(Uuid::nil(), &JobPayload::Llm(params()), &Progress::none())
+            .await
+            .unwrap();
+        let sent = stub.requests().into_iter().last().unwrap();
+        assert!(sent.contains("\"plugins\""), "{sent}");
+        assert!(sent.contains("\"id\":\"web\""), "{sent}");
+        assert!(
+            !sent.contains("openrouter:web_search"),
+            "search is a plugin, not a tool the model can skip: {sent}"
+        );
+
+        let stub = StubHttp::start(vec![StubHttp::sse(sse)]).await;
+        backend(stub.base_url())
+            .run(Uuid::nil(), &JobPayload::Llm(params()), &Progress::none())
+            .await
+            .unwrap();
+        let sent = stub.requests().into_iter().last().unwrap();
+        assert!(!sent.contains("\"plugins\""), "{sent}");
+    }
+
+    #[tokio::test]
+    async fn a_clients_tools_sit_next_to_search() {
+        let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n";
+        let mut p = params();
+        p.tools.push(rootmode_core::ToolDef {
+            name: "Read".into(),
+            description: Some("read a file".into()),
+            input_schema: serde_json::json!({ "type": "object" }),
+        });
+        let stub = StubHttp::start(vec![StubHttp::sse(sse)]).await;
+        backend(stub.base_url())
+            .offering_web_search()
+            .run(Uuid::nil(), &JobPayload::Llm(p), &Progress::none())
+            .await
+            .unwrap();
+        let sent = stub.requests().into_iter().last().unwrap();
+        assert!(sent.contains("\"id\":\"web\""), "{sent}");
+        assert!(sent.contains("\"Read\""), "{sent}");
+    }
+
     #[tokio::test]
     async fn surfaces_the_servers_error_body() {
         let stub = StubHttp::start(vec![StubHttp::json(
@@ -1476,6 +1581,26 @@ mod tests {
         assert_eq!(result.meta["cached_tokens"], 50);
         assert_eq!(result.meta["reasoning_tokens"], 8);
         assert_eq!(result.meta["upstream_cost"], 0.00042);
+    }
+
+    #[tokio::test]
+    async fn a_search_count_is_taken_from_the_provider() {
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"3-1\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{",
+            "\"prompt_tokens\":10,\"completion_tokens\":4,\"total_tokens\":14,",
+            "\"cost\":0.007,",
+            "\"server_tool_use\":{\"web_search_requests\":1}}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let stub = StubHttp::start(vec![StubHttp::sse(sse)]).await;
+        let result = backend(stub.base_url())
+            .offering_web_search()
+            .run(Uuid::nil(), &JobPayload::Llm(params()), &Progress::none())
+            .await
+            .unwrap();
+        assert_eq!(result.meta["web_search_requests"], 1);
+        assert_eq!(result.meta["upstream_cost"], 0.007);
     }
 
     #[tokio::test]

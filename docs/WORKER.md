@@ -496,6 +496,24 @@ Reputation. Discovery gets clients to you; it does not tell them whether you
 are honest, and it does not tell you whether they are. Use `allow_peers` if
 you only want to serve people you know.
 
+## Live facts (seed nodes)
+
+An `openrouter` backend runs a web search on every text job so answers are
+grounded in the live web, not training. OpenRouter does the lookup; this
+node just forwards. Search costs extra even on a free model, and is billed
+as part of `upstream_cost`. A listing advertised as free still invoices
+the client $0, so the seed fleet eats those lookups. Set
+`web_search = false` on the backend to turn it off.
+
+```toml
+[[backends]]
+kind = "openrouter"
+api_key = "sk-or-..."
+models = ["llama-3.3-70b-instruct"]
+markup = 1.15
+# web_search = false   # off: the model answers from training only
+```
+
 ## Images from OpenRouter
 
 An `openrouter` backend can also serve pictures: name a model whose output

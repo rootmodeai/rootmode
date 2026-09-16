@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { StoreProvider, useStore } from "./lib/store";
 import { api } from "./lib/api";
 import { diag } from "./lib/diag";
+import { goTo, useScreen, type Screen } from "./lib/nav";
 import { Boot } from "./screens/Boot";
 import { Intro, markIntroSeen } from "./components/Intro";
 import { Chat } from "./screens/Chat";
@@ -16,7 +17,7 @@ import { Glider } from "./components/Glider";
 import { ChatIcon, ImagesIcon, VideoIcon, FlowsIcon, ConnectIcon, WalletIcon, SettingsIcon } from "./components/NavIcons";
 import { NavModels } from "./components/NavModels";
 
-export type Screen = "chat" | "image" | "video" | "flows" | "network" | "connect" | "wallet" | "settings";
+export type { Screen };
 
 // "Providers" has no tab of its own — it's an advanced, under-the-hood view,
 // and a dedicated nav entry for it reads as something everyone is meant to
@@ -94,7 +95,7 @@ function Gate() {
 }
 
 function Shell() {
-  const [screen, setScreen] = useState<Screen>("chat");
+  const screen = useScreen();
   // The section whose models are unfolded in the navigation. Closed until
   // you open one; clicking the open section again folds it away.
   const [unfolded, setUnfolded] = useState<Screen | null>(null);
@@ -152,7 +153,7 @@ function Shell() {
                   aria-current={screen === item.key}
                   aria-expanded={work ? open : undefined}
                   onClick={() => {
-                    setScreen(item.key);
+                    goTo(item.key);
                     if (work) setUnfolded(open && screen === item.key ? null : item.key);
                   }}
                 >
@@ -165,7 +166,7 @@ function Shell() {
                 {open && (
                   <NavModels
                     kind={item.key === "chat" ? "llm" : item.key === "image" ? "image" : "video"}
-                    onPick={() => setScreen(item.key)}
+                    onPick={() => goTo(item.key)}
                   />
                 )}
               </div>
@@ -174,7 +175,7 @@ function Shell() {
         </nav>
 
         <div className="rail-foot">
-          <button className="status-chip" onClick={() => setScreen("network")}>
+          <button className="status-chip" onClick={() => goTo("network")}>
             <span className={`dot ${online > 0 ? "ok" : status?.searching ? "busy" : "off"}`} />
             <span>
               {online > 0

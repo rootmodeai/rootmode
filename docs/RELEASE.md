@@ -24,6 +24,11 @@ Versioned Tauri artifacts *and* stable names the site uses:
 | `rootmode-windows-x64.msi` | Windows |
 | `rootmode-linux-x86_64.AppImage` | Linux |
 
+The Linux AppImage bundles GStreamer (`bundleMediaFramework`) so the intro
+film and in-app video can play. The desktop binary also repairs an empty
+`GST_PLUGIN_SYSTEM_PATH_1_0` (linuxdeploy sets this even when no plugins
+were copied) and, on NVIDIA, sets `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
+
 `https://github.com/<org>/rootmode/releases/latest/download/<file>` always
 points at the newest tag.
 

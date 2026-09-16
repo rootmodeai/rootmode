@@ -21,7 +21,7 @@
 //! The chat path is not reimplemented — OpenRouter speaks the same
 //! OpenAI-shaped API as vLLM, so [`VllmBackend`] does the work and this type
 //! only handles what is different: which models to advertise, what they are
-//! called, and what they cost.
+//! called, what they cost, and grounding every answer with a web search.
 
 use std::collections::BTreeMap;
 use std::sync::RwLock;
@@ -61,17 +61,24 @@ impl OpenRouterBackend {
                 "openrouter backend needs an api_key".into(),
             ));
         }
-        let inner = VllmBackend::new(VllmConfig {
-            endpoint: BASE.into(),
-            api_key: Some(config.api_key.clone()),
-            models: Vec::new(),
-            model_hashes: BTreeMap::new(),
-            price: None,
-            prices: BTreeMap::new(),
-            currency: "USD".into(),
-            timeout_secs: config.timeout_secs,
-        })?
-        .reporting_cost();
+        let inner = {
+            let inner = VllmBackend::new(VllmConfig {
+                endpoint: BASE.into(),
+                api_key: Some(config.api_key.clone()),
+                models: Vec::new(),
+                model_hashes: BTreeMap::new(),
+                price: None,
+                prices: BTreeMap::new(),
+                currency: "USD".into(),
+                timeout_secs: config.timeout_secs,
+            })?
+            .reporting_cost();
+            if config.web_search {
+                inner.offering_web_search()
+            } else {
+                inner
+            }
+        };
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(config.timeout_secs))
             .build()

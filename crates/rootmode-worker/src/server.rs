@@ -1415,6 +1415,11 @@ impl Worker {
             cached = usage.cached,
             completion = usage.completion,
             reasoning = usage.reasoning,
+            web_search = result
+                .meta
+                .get("web_search_requests")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
             "billed"
         );
         self.settle_if_configured(job_id, &chosen).await;

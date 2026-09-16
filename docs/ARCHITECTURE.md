@@ -65,7 +65,7 @@ What an operator runs on a GPU box. Binary + library.
 | `backends` | `Backend` trait + registry/routing by kind and model |
 | `backends::vllm` | OpenAI-compatible chat completions, streamed for progress |
 | `backends::comfyui` | one API-format workflow, declared slots only |
-| `backends::openrouter` | OpenAI-compatible proxy, catalogue rates × `markup` |
+| `backends::openrouter` | OpenAI-compatible proxy, catalogue rates × `markup`, optional web search |
 | `chain` | pot lock check; this node signs `settle` and sends it |
 
 Its `examples/submit.rs` is a minimal standalone client, useful for checking a

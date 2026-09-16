@@ -130,9 +130,14 @@ export function searchTerms(id: string): string {
   return [id, d.name, d.maker ?? "", ...(KNOWN[bare]?.aliases ?? [])].join(" ").toLowerCase();
 }
 
+/** A model that bills nothing — unpriced, or quoted at zero. */
+export function isFree(o: { price: number; unpriced: boolean }): boolean {
+  return o.unpriced || o.price <= 0;
+}
+
 /** "$0.09 / picture", "$0.35 / clip", "$1.20 / M tokens", or "free". */
 export function priceLabel(o: { price: number; currency: string; unpriced: boolean; kind: JobKind }): string {
-  if (o.unpriced || o.price <= 0) return "free";
+  if (isFree(o)) return "free";
   const unit = o.kind === "image" ? "picture" : o.kind === "video" ? "clip" : "M tokens";
   return `${o.price.toFixed(2)} ${o.currency} / ${unit}`;
 }

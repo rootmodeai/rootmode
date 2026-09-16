@@ -1,4 +1,5 @@
 import { api, errorText } from "../lib/api";
+import { goTo } from "../lib/nav";
 import type { FundingKind, PotCheck } from "../lib/types";
 
 export function usd(micros: number) {
@@ -93,6 +94,19 @@ export function FundingHint({ capMicros }: { capMicros: number }) {
   return (
     <div className="funding-hint">
       Spending limit {usd(capMicros)} per reply
+    </div>
+  );
+}
+
+/** Quiet line under the composer when the current model costs nothing. */
+export function FreeModelHint() {
+  return (
+    <div className="funding-hint">
+      Free model active.{" "}
+      <button type="button" className="add-balance" onClick={() => goTo("wallet")}>
+        Add balance
+      </button>{" "}
+      for top models
     </div>
   );
 }

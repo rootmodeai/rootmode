@@ -8,9 +8,10 @@ import type { Conversation, ImageParams, JobPayload, Message, ProviderOption } f
 import { Glider } from "../components/Glider";
 import { DeleteAllChats } from "../components/DeleteAllChats";
 import { useChoice, usePick } from "../lib/choice";
-import { describe, targetFor } from "../lib/models";
+import { describe, isFree, targetFor } from "../lib/models";
 import {
   FundingHint,
+  FreeModelHint,
   FundingNotice,
   fundingKindFromText,
   noticeFromCheck,
@@ -494,7 +495,8 @@ export function Create({ kind }: { kind: "image" | "video" }) {
               <ClipOptions offer={provider.video} choice={clip} onChange={setClip} currency={provider.currency} disabled={waiting} />
             )}
             <div className="composer-hint">
-              {provider && !provider.unpriced && provider.price > 0 && pot?.client && (
+              {provider && isFree(provider) && <FreeModelHint />}
+              {provider && !isFree(provider) && pot?.client && (
                 <FundingHint
                   capMicros={
                     pot.max_per_job_micros > 0 ? pot.max_per_job_micros : 500_000

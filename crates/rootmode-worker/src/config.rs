@@ -258,12 +258,22 @@ pub struct OpenRouterConfig {
     /// they do; 1.15 is 15% above catalogue. Unset is 1.0.
     #[serde(default = "default_markup")]
     pub markup: f64,
+    /// Ground every text job with a web search. OpenRouter runs it before
+    /// the model writes; this node just forwards. Unset is on — that is
+    /// what the seed fleet is for. Set false to answer from training only.
+    /// A local GPU does not have this, and is unaffected.
+    #[serde(default = "default_web_search")]
+    pub web_search: bool,
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
 }
 
 fn default_markup() -> f64 {
     1.0
+}
+
+fn default_web_search() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -799,6 +809,8 @@ models = ["llama-3.3-70b-instruct", "qwen3-coder"]
         assert_eq!(c.models.len(), 2);
         // Unset markup is catalogue price. Seed nodes set 1.15 explicitly.
         assert_eq!(c.markup, 1.0);
+        // Unset web_search is on: a seed node does not answer from training.
+        assert!(c.web_search);
 
         let marked: Config = toml::from_str(
             r#"
@@ -817,6 +829,25 @@ models = ["llama-3.3-70b-instruct"]
             panic!("expected an openrouter backend");
         };
         assert_eq!(c.markup, 1.15);
+        assert!(c.web_search);
+
+        let quiet: Config = toml::from_str(
+            r#"
+[worker]
+label = "atlas"
+
+[[backends]]
+kind = "openrouter"
+api_key = "sk-or-test"
+models = ["llama-3.3-70b-instruct"]
+web_search = false
+"#,
+        )
+        .unwrap();
+        let BackendConfig::Openrouter(c) = &quiet.backends[0] else {
+            panic!("expected an openrouter backend");
+        };
+        assert!(!c.web_search);
     }
 
     #[test]
