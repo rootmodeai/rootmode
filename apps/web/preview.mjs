@@ -107,6 +107,8 @@ const server = http.createServer(async (req, res) => {
     "/discovery": "/pages/discovery.html",
     "/brand": "/pages/brand.html",
     "/terms": "/pages/terms.html",
+    "/blog": "/pages/blog.html",
+    "/blog/use-it-elsewhere": "/pages/blog-use-it-elsewhere.html",
   };
   if (pages[file]) file = pages[file];
   else if (!file.startsWith("/assets/")) {

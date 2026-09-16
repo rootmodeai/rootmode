@@ -1,7 +1,7 @@
 # rootmode.ai
 
 Static site. No build step. Public paths are `/`, `/worker`, `/explorer`,
-`/protocol`, `/discovery`, `/brand` — no `.html` in the URL. Press colours
+`/protocol`, `/discovery`, `/brand`, `/blog` — no `.html` in the URL. Press colours
 live at `/brand`. Wire format for `/protocol` is
 [`docs/PROTOCOL.md`](../../docs/PROTOCOL.md); if they disagree, the Rust
 types in `crates/rootmode-core` win.

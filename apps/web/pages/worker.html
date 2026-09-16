@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <title>Run a rootmode worker</title>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -49,7 +50,7 @@
     color-scheme: light;
   }
 
-  :root[data-theme="dark"] {
+  html.dark {
     --paper:      #0d0f11;
     --paper-2:    #150f2c;
     --paper-3:    #1a1338;
@@ -137,8 +138,8 @@
   }
   .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
   .icon-btn .moon { display: none; }
-  :root[data-theme="dark"] .icon-btn .sun { display: none; }
-  :root[data-theme="dark"] .icon-btn .moon { display: block; }
+  html.dark .icon-btn .sun { display: none; }
+  html.dark .icon-btn .moon { display: block; }
 
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 9px;
@@ -388,6 +389,7 @@
     <nav class="navlinks" aria-label="Pages">
       <a href="/">Home</a>
       <a href="/manifesto">Manifesto</a>
+      <a href="/blog">Blog</a>
       <a href="/explorer">Explorer</a>
       <a href="/worker" aria-current="page">Run a worker</a>
       <a href="/discovery">Discovery</a>
@@ -406,6 +408,7 @@
   <nav class="nav-drop" aria-label="Pages, expanded">
       <a href="/">Home</a>
       <a href="/manifesto">Manifesto</a>
+      <a href="/blog">Blog</a>
       <a href="/explorer">Explorer</a>
       <a href="/worker" aria-current="page">Run a worker</a>
       <a href="/discovery">Discovery</a>
@@ -786,15 +789,20 @@ $ docker compose logs -f</pre>
   (function () {
     var root = document.documentElement, btn = document.getElementById("theme"), saved = null;
     try { saved = localStorage.getItem("rootmode.theme"); } catch (e) {}
-    if (saved === "dark") root.setAttribute("data-theme", "dark");
+    function paint(dark) {
+      root.classList.toggle("dark", !!dark);
+      if (dark) root.setAttribute("data-theme", "dark");
+      else root.removeAttribute("data-theme");
+    }
+    paint(saved === "dark");
     function label() {
       btn.setAttribute("aria-label",
-        root.getAttribute("data-theme") === "dark" ? "Switch to light theme" : "Switch to dark theme");
+        root.classList.contains("dark") ? "Switch to light theme" : "Switch to dark theme");
     }
     label();
     btn.addEventListener("click", function () {
-      var dark = root.getAttribute("data-theme") === "dark";
-      if (dark) root.removeAttribute("data-theme"); else root.setAttribute("data-theme", "dark");
+      var dark = root.classList.contains("dark");
+      paint(!dark);
       try { localStorage.setItem("rootmode.theme", dark ? "light" : "dark"); } catch (e) {}
       label();
     });

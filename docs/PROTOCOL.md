@@ -58,7 +58,8 @@ Sent immediately after connecting.
   "from": "peer_id_hex",
   "payload": { "kind": "llm", "...": "kind-specific fields" },
   "sig": "optional_signature_over_canonical_json",
-  "payer": "optional_0x_wallet"
+  "payer": "optional_0x_wallet",
+  "bond": { "ticket": { "…": "prepaid SpendTicket, priced jobs only" }, "sig": "0x…" }
 }
 ```
 
@@ -222,6 +223,37 @@ its own Ethereum key (`eth_sendRawTransaction`) so collection does not
 depend on the client. The result and `job.delta` tokens were already sent:
 they were prepaid by the chunk.
 
+## Payments
+
+Priced work is paid in **USDC on Base** (chain id `8453`, USDC
+`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`). The contract is
+`RootmodePot`. Amounts on the wire are integer micros (1 USDC = 1_000_000).
+
+**How USDC gets into the pot.** The desktop Wallet deposits USDC the client
+already holds on Base, or buys it there with a card. Card buy is Stripe's
+crypto onramp (`POST /v1/crypto/onramp_sessions`) with
+`destination_network=base` and `destination_currency=usdc`, locked to the
+app wallet; that USDC is then deposited like any other. Stripe never sees a
+job. It only funds the wallet.
+
+**How a job is paid.** Before GPU time, the client locks a slice of the pot
+for that worker (`reserve`, an EIP-712 `ReserveTicket` signed by the pot
+app key). `job.submit` carries `payer` (the `0x` wallet) and `bond` (a
+prepaid `SpendTicket` covering 1M-token chunks at the dearest rate). The
+worker checks the on-chain lock (`reserved − earned`) and will not start
+without it. After the run it sends `job.invoice` for the actual micros; the
+client signs `job.pay` at or below the bond. If `job.pay` never arrives,
+the worker settles the prepaid bond itself. 90% goes to the worker's
+payout address, 10% to FeeVault. Nothing about the job — no prompt, no
+answer — goes on-chain.
+
+A worker that charges nothing omits `payer` / `bond`. A free listing still
+runs.
+
+The live ticket types are `ReserveTicket` and `SpendTicket` against
+`RootmodePot` (`crates/rootmode-core/src/payments.rs`). `RootmodeChannels`
+is the earlier session-auth design; digest tests still pin it.
+
 ## Worked example
 
 ```
@@ -273,9 +305,10 @@ record is a claim by whoever wrote it.
 
 ## Not in v1
 
-Brokered queues, payments, IPFS CIDs, streaming token deltas, signed announces,
-and a bid/quote step before submitting. Reserve new `type` values for them; v1
-clients ignore what they do not know.
+Brokered queues, IPFS CIDs, signed announces, and a bid/quote step before
+submitting. Payments (USDC on Base, pot locks, `job.invoice` / `job.pay`)
+and streaming token deltas (`job.delta`) *are* in v1. Reserve new `type`
+values for the rest; v1 clients ignore what they do not know.
 
 ## Tools (added after v1)
 

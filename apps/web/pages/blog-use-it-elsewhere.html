@@ -1,20 +1,20 @@
 <!DOCTYPE html>
-<title>The first dose was free</title>
+<title>Use Rootmode with Claude, Codex, OpenCode or any other coding harness</title>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="description" content="The first dose was free. Now they raise the price, then they lock the door." />
+<meta name="description" content="Point Claude Code, Codex, OpenCode or Cursor at rootmode so they use the network instead of a paid API." />
 <meta name="theme-color" content="#7433f7" />
-<link rel="canonical" href="https://rootmode.ai/manifesto" />
+<link rel="canonical" href="https://rootmode.ai/blog/use-it-elsewhere" />
 <meta property="og:type" content="article" />
 <meta property="og:site_name" content="rootmode" />
-<meta property="og:title" content="The first dose was free" />
-<meta property="og:description" content="Now they raise the price, then they lock the door." />
-<meta property="og:url" content="https://rootmode.ai/manifesto" />
-<meta property="og:image" content="https://rootmode.ai/assets/og.png" />
+<meta property="og:title" content="Use Rootmode with Claude, Codex, OpenCode or any other coding harness" />
+<meta property="og:description" content="Point Claude Code, Codex, OpenCode or Cursor at rootmode so they use the network instead of a paid API." />
+<meta property="og:url" content="https://rootmode.ai/blog/use-it-elsewhere" />
+<meta property="og:image" content="https://rootmode.ai/assets/blog/elsewhere.png" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="The first dose was free" />
-<meta name="twitter:description" content="Now they raise the price, then they lock the door." />
-<meta name="twitter:image" content="https://rootmode.ai/assets/og.png" />
+<meta name="twitter:title" content="Use Rootmode with Claude, Codex, OpenCode or any other coding harness" />
+<meta name="twitter:description" content="Point Claude Code, Codex, OpenCode or Cursor at rootmode so they use the network instead of a paid API." />
+<meta name="twitter:image" content="https://rootmode.ai/assets/blog/elsewhere.png" />
 <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
 <style>
   :root {
@@ -22,7 +22,9 @@
     --line: #e4dbf7; --ink: #180f38; --ink-2: #5f5680; --ink-3: #8b82ab;
     --accent: #7433f7; --accent-ink: #5a1fe0; --accent-bg: #f0e7ff;
     --btn-ink: #180f38; --btn-on: #ffffff;
+    --code-bg: #180f38; --code-fg: #e9e4fa; --code-dim: #7c73a0;
     --sans: "Avenir Next", "Helvetica Neue", ui-sans-serif, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     --pad: clamp(18px, 4vw, 40px);
     color-scheme: light;
   }
@@ -31,6 +33,7 @@
     --line: #2e2454; --ink: #f3f0ff; --ink-2: #a79ecb; --ink-3: #7d74a3;
     --accent: #a78bfa; --accent-ink: #cabaff; --accent-bg: #241a4d;
     --btn-ink: #f3f0ff; --btn-on: #0d0f11;
+    --code-bg: #0d0f11; --code-fg: #e9e4fa; --code-dim: #7d74a3;
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
@@ -41,6 +44,11 @@
     -webkit-font-smoothing: antialiased;
   }
   a { color: var(--accent); }
+  code {
+    font-family: var(--mono); font-size: 0.88em;
+    background: var(--paper-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 5px;
+  }
   .nav { position: sticky; top: 14px; z-index: 40; padding-inline: var(--pad); margin-top: 14px; }
   .nav-inner {
     width: min(1120px, 100%); margin-inline: auto;
@@ -71,17 +79,37 @@
   @media (max-width: 860px) { .menu-btn { display: grid; } }
 
   article {
-    width: min(680px, 100%);
+    width: min(720px, 100%);
     margin: clamp(48px, 8vw, 96px) auto 80px;
     padding-inline: var(--pad);
   }
   .kicker { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; margin: 0 0 16px; }
-  h1 { font-size: clamp(36px, 6vw, 58px); font-weight: 800; letter-spacing: -0.04em; line-height: 1.05; margin: 0 0 12px; text-wrap: balance; }
+  .kicker a { color: inherit; text-decoration: none; }
+  .kicker a:hover { color: var(--accent); }
+  h1 { font-size: clamp(34px, 5.6vw, 54px); font-weight: 800; letter-spacing: -0.04em; line-height: 1.05; margin: 0 0 12px; text-wrap: balance; }
   .lede { font-size: 20px; color: var(--ink-2); font-weight: 500; margin: 0 0 40px; }
   h2 { font-size: 22px; letter-spacing: -0.03em; margin: 48px 0 14px; }
+  h3 { font-size: 17px; letter-spacing: -0.02em; margin: 28px 0 10px; }
   p { margin: 0 0 1.1em; }
   strong { font-weight: 700; }
+  ol, ul { margin: 0 0 1.2em; padding-left: 1.2em; color: var(--ink-2); }
+  li { margin: 0 0 0.45em; }
+  li strong { color: var(--ink); }
   hr { border: 0; border-top: 1px solid var(--line); margin: 40px 0; }
+  figure { margin: 28px -4px 36px; }
+  figure img {
+    display: block; width: 100%; height: auto;
+    border-radius: 14px; border: 1px solid var(--line);
+    background: #0d0f11;
+  }
+  figcaption { font-size: 13.5px; color: var(--ink-3); margin-top: 10px; padding-inline: 4px; }
+  pre {
+    margin: 0 0 1.3em; padding: 16px 18px; overflow-x: auto;
+    font-family: var(--mono); font-size: 13px; line-height: 1.7;
+    background: var(--code-bg); color: var(--code-fg);
+    border-radius: 12px;
+  }
+  .note { font-size: 15.5px; color: var(--ink-2); background: var(--paper-2); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 0 0 1.3em; }
   .sign { margin-top: 48px; color: var(--ink-3); font-size: 15px; }
   footer { border-top: 1px solid var(--line); padding: 22px var(--pad) 40px; font-size: 14px; color: var(--ink-3); }
   footer .wrap { width: min(1120px, 100%); margin-inline: auto; display: flex; gap: 18px; flex-wrap: wrap; }
@@ -103,8 +131,8 @@
     </a>
     <nav class="navlinks" aria-label="Pages">
       <a href="/">Home</a>
-      <a href="/manifesto" aria-current="page">Manifesto</a>
-      <a href="/blog">Blog</a>
+      <a href="/manifesto">Manifesto</a>
+      <a href="/blog" aria-current="page">Blog</a>
       <a href="/explorer">Explorer</a>
       <a href="/worker">Run a worker</a>
       <a href="/discovery">Discovery</a>
@@ -122,8 +150,8 @@
   </div>
   <nav class="nav-drop" aria-label="Pages, expanded">
     <a href="/">Home</a>
-    <a href="/manifesto" aria-current="page">Manifesto</a>
-    <a href="/blog">Blog</a>
+    <a href="/manifesto">Manifesto</a>
+    <a href="/blog" aria-current="page">Blog</a>
     <a href="/explorer">Explorer</a>
     <a href="/worker">Run a worker</a>
     <a href="/discovery">Discovery</a>
@@ -155,25 +183,74 @@
   })();
 </script>
 <article>
-  <p class="kicker">Manifesto</p>
-  <h1>The first dose was free</h1>
-  <p class="lede">Now they raise the price, then they lock the door.</p>
-  <p>That is how this always starts. The first line of cocaine is a gift. You do not pay because they are not selling you the powder. They are selling you the need.</p>
-  <p>The model was the same gift. You write with it. You think with it. You stop being able to do the work without it. Then the price moves. Then the model that was open is not. Then someone decides what you are allowed to ask. Then someone decides who is allowed to ask. Then there are a few doors, and they have the keys.</p>
-  <p>You already know this sequence. Mail did it. Search did it. The feed did it. Intelligence is next, and it is further along than it looks.</p>
-  <hr />
-  <p>A public good does not begin as a product. Electricity did not. When it showed up it was a fact about the world: light, heat, motion. And the fight was whether a handful of men would meter the dark. They tried. People built grids anyway. The ones that lasted were the ones you could plug into without asking a landlord for permission to think at night.</p>
-  <p>The internet was meant to be that kind of thing. End to end. Anyone can speak. Anyone can host. No one in the middle owns the packet. We got something else: five companies, a login, a terms of service, a switch they can throw. The wire is still there. The idea was abandoned because it was inconvenient for capture.</p>
-  <p>AI is the same fight, earlier, while people still remember the free hit. That is the only advantage we have. Use it.</p>
-  <p>Intelligence is not a brand. It is not a subscription. It is not a safety briefing attached to a throne. It is a public good, like current in the wall, like a packet on the wire, and public goods that stay public have to be <strong>open</strong> and <strong>unrestricted</strong>, or they become someone else's rent.</p>
-  <p>Closed weights are not safety. They are a valve. Rising prices are not the market discovering value. They are the hook completing. Content filters that only run in one company's cloud are not morals. They are control. “API access” that can be revoked is not access. It is a leash.</p>
-  <p>If only a few can use it, it was never given to you. It was demonstrated.</p>
-  <hr />
-  <p>So we do not ask them to be kinder. We do not wait for a steward. We run it the way the internet was meant to be run.</p>
-  <p>You hold a key. You pick a machine. You send a job. You get bytes and a hash. Nobody in the middle reads the prompt. Nobody can close your account, because there is no account. A worker is someone's computer, not a product team. If you have GPUs you are not an applicant. You plug in. If you want it local, it stays in the room. If we disappear, the machines keep talking.</p>
-  <p>Plug in. Walk away. A head office does not get to kill the lights. That is how electricity stayed a public good. Inference has to work the same way: open, unrestricted, yours to run.</p>
-  <p>The first dose was free. Do not confuse that with generosity.</p>
-  <p class="sign">August 2026</p>
+  <p class="kicker"><a href="/blog">Blog</a> · 15 September 2026</p>
+  <h1>Use Rootmode with Claude, Codex, OpenCode or any other coding harness</h1>
+  <p class="lede">You can point Claude Code, Codex, OpenCode, Cursor and most other editors at rootmode, so they use the network instead of a paid API.</p>
+
+  <p>You don’t need a plugin. Open the app, click <strong>Use it elsewhere</strong> in the sidebar, and turn it on. Other programs on this computer can then use the same models you already chat with.</p>
+
+  <p>Nothing is exposed to the internet. Only apps on this machine can connect, and only if they have the key on that screen. Keep rootmode open while you work: the editor talks to the app, and the app talks to the network.</p>
+
+  <h2>If the tool is already installed</h2>
+  <p>Claude Code, Codex, OpenCode, Zed, Goose, Crush and pi don’t need anything pasted. Flip the switch next to the name and rootmode writes the address, the key and the model into that tool’s own config, then opens it. Flip the switch off and those lines are removed again.</p>
+
+  <figure>
+    <img src="/assets/blog/elsewhere.png" width="1180" height="430" alt="The Use it elsewhere screen in rootmode, with OpenCode turned on in the one-click list." />
+    <figcaption>OpenCode connected. The others work the same way if they’re installed.</figcaption>
+  </figure>
+
+  <p>Under the hood that’s a small edit to a file you might already know:</p>
+  <ul>
+    <li><strong>Claude Code</strong> gets <code>ANTHROPIC_BASE_URL</code>, <code>ANTHROPIC_AUTH_TOKEN</code> and <code>ANTHROPIC_MODEL</code> in <code>~/.claude/settings.json</code>.</li>
+    <li><strong>Codex</strong> gets a <code>rootmode</code> provider in <code>~/.codex/config.toml</code>.</li>
+    <li><strong>OpenCode</strong> gets a <code>rootmode</code> provider in <code>~/.config/opencode/opencode.jsonc</code>.</li>
+    <li><strong>Zed, Goose, Crush and pi</strong> each get the same treatment in their own config. Zed will ask you to paste the key once.</li>
+  </ul>
+
+  <p>At the top of the screen you can pick which model other apps should use, or leave it on cheapest. If an editor asks for a model nobody on the network is serving — Claude Code does this for some of its background work — that’s the model it gets.</p>
+
+  <h2>If you have to paste</h2>
+  <p>Cursor, Continue, Cline, Roo and Aider don’t have a switch yet. The same screen has a tab for each of them, with the address, key and model already filled in. Copy those three values into the tool.</p>
+
+  <h3>Cursor</h3>
+  <p>Go to Settings → Models and turn on “Override OpenAI Base URL”, then paste:</p>
+  <pre>Base URL   http://127.0.0.1:11435/v1
+API key    &lt;copy from the screen&gt;
+Model      &lt;the model you picked&gt;</pre>
+  <p>Cursor checks the key by calling the endpoint, so rootmode has to be open when you save.</p>
+
+  <h3>Continue, Cline and Roo</h3>
+  <p>They take the same three values. For Continue, put them in <code>~/.continue/config.json</code>:</p>
+  <pre>{
+  "models": [{
+    "title": "rootmode",
+    "provider": "openai",
+    "model": "&lt;the model you picked&gt;",
+    "apiBase": "http://127.0.0.1:11435/v1",
+    "apiKey": "&lt;copy from the screen&gt;"
+  }]
+}</pre>
+
+  <h3>Aider</h3>
+  <pre>export OPENAI_API_BASE=http://127.0.0.1:11435/v1
+export OPENAI_API_KEY=&lt;copy from the screen&gt;
+aider --model openai/&lt;the model you picked&gt;</pre>
+
+  <h3>Anything else</h3>
+  <p>If a tool can be pointed at an OpenAI-compatible server, these two fields are enough:</p>
+  <pre>Base URL   http://127.0.0.1:11435/v1
+API key    &lt;copy from the screen&gt;</pre>
+  <p>If it speaks Anthropic’s API instead, drop the <code>/v1</code> from the address and send the key as <code>ANTHROPIC_AUTH_TOKEN</code>. You can check the endpoint from a terminal:</p>
+  <pre>curl http://127.0.0.1:11435/v1/models \
+  -H "Authorization: Bearer $KEY"</pre>
+
+  <h2>How to tell it’s working</h2>
+  <p>The listening line on that screen counts requests. Send a prompt from the editor and the number should go up. If it doesn’t, the editor is still talking to its usual API.</p>
+  <p>Claude Code’s banner will still say Claude. That label is its own and doesn’t follow the address you set. Watch the request counter instead.</p>
+  <p>If you want to cut off anything still using the old key, hit Replace. The default port is <code>11435</code>, one above Ollama, so the two can sit side by side. You can change it under Details if something else has taken it.</p>
+  <p>This path is text only. Pictures and video stay in their own tabs, and answers arrive all at once rather than being typed out.</p>
+
+  <p class="sign">15 September 2026</p>
 </article>
 <footer>
   <div class="wrap">

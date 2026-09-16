@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <title>rootmode</title>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -43,7 +44,7 @@
     color-scheme: light;
   }
 
-  :root[data-theme="dark"] {
+  html.dark {
     --paper:      #0d0f11;
     --paper-2:    #150f2c;
     --paper-3:    #1a1338;
@@ -113,8 +114,8 @@
   }
   .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
   .icon-btn .moon { display: none; }
-  :root[data-theme="dark"] .icon-btn .sun { display: none; }
-  :root[data-theme="dark"] .icon-btn .moon { display: block; }
+  html.dark .icon-btn .sun { display: none; }
+  html.dark .icon-btn .moon { display: block; }
 
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 9px;
@@ -167,10 +168,10 @@
     display: grid; place-items: center;
     box-shadow: 0 0 24px 6px rgba(116, 51, 247, 0.22);
   }
-  :root[data-theme="dark"] .card-top {
+  html.dark .card-top {
     background: linear-gradient(to top right, #0d0f11 0%, #0d0f11 42%, #3d1a88 78%, #7433f7 100%);
   }
-  :root[data-theme="dark"] .card-top .glyph {
+  html.dark .card-top .glyph {
     background: #0d0f11; color: #e8eaed;
     box-shadow: 0 0 24px 6px rgba(116, 51, 247, 0.35);
   }
@@ -354,6 +355,7 @@
     <nav class="navlinks" aria-label="Pages">
       <a href="/" aria-current="page">Home</a>
       <a href="/manifesto">Manifesto</a>
+      <a href="/blog">Blog</a>
       <a href="/explorer">Explorer</a>
       <a href="/worker">Run a worker</a>
       <a href="/discovery">Discovery</a>
@@ -372,6 +374,7 @@
   <nav class="nav-drop" aria-label="Pages, expanded">
       <a href="/" aria-current="page">Home</a>
       <a href="/manifesto">Manifesto</a>
+      <a href="/blog">Blog</a>
       <a href="/explorer">Explorer</a>
       <a href="/worker">Run a worker</a>
       <a href="/discovery">Discovery</a>
@@ -648,6 +651,7 @@
   <div class="wrap foot">
     <span><b>rootmode</b></span>
     <a href="/manifesto">Manifesto</a>
+    <a href="/blog">Blog</a>
     <a href="/worker">Run a worker</a>
     <a href="/discovery">Discovery</a>
     <a href="/protocol">Protocol</a>
@@ -665,15 +669,22 @@
     var btn = document.getElementById("theme");
     var saved = null;
     try { saved = localStorage.getItem("rootmode.theme"); } catch (e) {}
-    if (saved === "dark") root.setAttribute("data-theme", "dark");
+    // Class on <html>, not only data-theme on :root: Firefox does not
+    // repaint custom properties when an attribute on :root changes.
+    function paint(dark) {
+      root.classList.toggle("dark", !!dark);
+      if (dark) root.setAttribute("data-theme", "dark");
+      else root.removeAttribute("data-theme");
+    }
+    paint(saved === "dark");
     function label() {
-      var dark = root.getAttribute("data-theme") === "dark";
+      var dark = root.classList.contains("dark");
       btn.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
     }
     label();
     btn.addEventListener("click", function () {
-      var dark = root.getAttribute("data-theme") === "dark";
-      if (dark) root.removeAttribute("data-theme"); else root.setAttribute("data-theme", "dark");
+      var dark = root.classList.contains("dark");
+      paint(!dark);
       try { localStorage.setItem("rootmode.theme", dark ? "light" : "dark"); } catch (e) {}
       label();
     });

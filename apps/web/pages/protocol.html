@@ -1,20 +1,21 @@
+<!DOCTYPE html>
 <title>RootmodeProtocol v1</title>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="description" content="Versioned JSON messages between a client and a worker: five message types, two transports, and one rule that keeps a future v2 from breaking anything running today." />
+<meta name="description" content="Versioned JSON messages between a client and a worker, including how priced work is prepaid and settled in USDC on Base." />
 <meta name="theme-color" content="#7433f7" />
 <link rel="canonical" href="https://rootmode.ai/protocol" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="rootmode" />
 <meta property="og:title" content="RootmodeProtocol v1" />
-<meta property="og:description" content="Versioned JSON messages between a client and a worker: five message types, two transports, and one rule that keeps a future v2 from breaking anything running today." />
+<meta property="og:description" content="Versioned JSON messages between a client and a worker, including how priced work is prepaid and settled in USDC on Base." />
 <meta property="og:url" content="https://rootmode.ai/protocol" />
 <meta property="og:image" content="https://rootmode.ai/assets/og.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="RootmodeProtocol v1" />
-<meta name="twitter:description" content="Versioned JSON messages between a client and a worker: five message types, two transports, and one rule that keeps a future v2 from breaking anything running today." />
+<meta name="twitter:description" content="Versioned JSON messages between a client and a worker, including how priced work is prepaid and settled in USDC on Base." />
 <meta name="twitter:image" content="https://rootmode.ai/assets/og.png" />
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
 <style>
@@ -49,7 +50,7 @@
     color-scheme: light;
   }
 
-  :root[data-theme="dark"] {
+  html.dark {
     --paper:      #0d0f11;
     --paper-2:    #150f2c;
     --paper-3:    #1a1338;
@@ -137,8 +138,8 @@
   }
   .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
   .icon-btn .moon { display: none; }
-  :root[data-theme="dark"] .icon-btn .sun { display: none; }
-  :root[data-theme="dark"] .icon-btn .moon { display: block; }
+  html.dark .icon-btn .sun { display: none; }
+  html.dark .icon-btn .moon { display: block; }
 
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 9px;
@@ -389,6 +390,7 @@
     <nav class="navlinks" aria-label="Pages">
       <a href="/">Home</a>
       <a href="/manifesto">Manifesto</a>
+      <a href="/blog">Blog</a>
       <a href="/explorer">Explorer</a>
       <a href="/worker">Run a worker</a>
       <a href="/discovery">Discovery</a>
@@ -407,6 +409,7 @@
   <nav class="nav-drop" aria-label="Pages, expanded">
       <a href="/">Home</a>
       <a href="/manifesto">Manifesto</a>
+      <a href="/blog">Blog</a>
       <a href="/explorer">Explorer</a>
       <a href="/worker">Run a worker</a>
       <a href="/discovery">Discovery</a>
@@ -443,9 +446,9 @@
       <p class="eyebrow">Specification</p>
       <h1>RootmodeProtocol v1.</h1>
       <p class="lede">
-        Versioned JSON messages between a client and a worker. Five message types,
-        two transports, and one rule that keeps a future v2 from breaking anything
-        running today.
+        Versioned JSON messages between a client and a worker. Two transports,
+        priced work prepaid in USDC on Base, and one rule that keeps a future v2
+        from breaking anything running today.
       </p>
       <div class="actions">
         <a class="btn btn-solid" href="#messages">The messages</a>
@@ -527,9 +530,11 @@
   <span class="k">"job_id"</span>: <span class="s">"550e8400-e29b-41d4-a716-446655440000"</span>,
   <span class="k">"from"</span>: <span class="s">"peer_id_hex"</span>,
   <span class="k">"payload"</span>: { <span class="k">"kind"</span>: <span class="s">"llm"</span>, <span class="c">…kind-specific fields</span> },
-  <span class="k">"sig"</span>: <span class="s">"optional_signature_over_canonical_json"</span>
+  <span class="k">"sig"</span>: <span class="s">"optional_signature_over_canonical_json"</span>,
+  <span class="k">"payer"</span>: <span class="s">"optional_0x_wallet"</span>,
+  <span class="k">"bond"</span>: { <span class="c">prepaid SpendTicket — priced jobs only</span> }
 }</pre>
-          <p><code>payload</code> is discriminated by <code>kind</code>. Payloads are validated against these bounds <b>before</b> they leave the client.</p>
+          <p><code>payload</code> is discriminated by <code>kind</code>. Payloads are validated against these bounds <b>before</b> they leave the client. A priced job also carries <code>payer</code> (the wallet on the pot) and <code>bond</code> (a prepaid spend covering the prompt and the answer ceiling). A worker that charges nothing omits both.</p>
 
           <h3 class="kindhead">kind: "llm"</h3>
           <div class="tablewrap">
@@ -662,6 +667,74 @@
           </p>
         </div>
       </div>
+
+      <div class="msg">
+        <div class="msg-head"><h3>job.invoice</h3><span class="dir in">worker → client</span></div>
+        <div class="msg-body">
+          <p>Sent by a priced worker after the run, for the actual bill. Streaming already happened against the prepaid bond on submit. An honest client signs a lower capture; if they don't, the worker settles the chunk they already authorised.</p>
+          <pre>{
+  <span class="k">"v"</span>: 1, <span class="k">"type"</span>: <span class="s">"job.invoice"</span>,
+  <span class="k">"job_id"</span>: <span class="s">"550e…"</span>,
+  <span class="k">"amount"</span>: 250000,
+  <span class="k">"sha256"</span>: <span class="s">"ba78…"</span>,
+  <span class="k">"prompt_tokens"</span>: 1200,
+  <span class="k">"completion_tokens"</span>: 340,
+  <span class="k">"cached_tokens"</span>: 0
+}</pre>
+          <p><code>amount</code> is this job's charge in USDC micros, not the channel cumulative. The client recomputes it from the advertised price and these token counts, and refuses to sign a higher number. <code>sha256</code> is the hash of the result the worker will send after pay; a result that does not match is rejected.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap stack rv">
+      <div class="head">
+        <p class="eyebrow">Payments</p>
+        <h2>USDC on Base, locked before the GPU runs.</h2>
+        <p>
+          Priced work is paid in USDC on Base (chain id <code>8453</code>, token
+          <code>0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913</code>). The contract is
+          <code>RootmodePot</code>. Amounts on the wire are integer micros:
+          1 USDC = 1,000,000.
+        </p>
+      </div>
+      <div class="bullets">
+        <div class="bl">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>The wallet holds USDC, then deposits it</strong>
+          <span>Send USDC on Base into the app wallet, or buy it there with a card. Card buy is Stripe's crypto onramp, locked to this wallet, destination network Base, destination currency USDC. Stripe never sees a job — it only funds the wallet. Deposit puts that USDC in the pot.</span>
+        </div>
+        <div class="bl">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>A lock per worker, signed by the app key</strong>
+          <span>Before GPU time the client reserves a slice of the pot for that worker (EIP-712 <code>ReserveTicket</code>). <code>job.submit</code> carries <code>payer</code> and a prepaid <code>bond</code>. The worker checks <code>reserved − earned</code> on-chain and will not start without it. Withdraw cannot take a lock.</span>
+        </div>
+        <div class="bl">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>Capture the actual bill, or settle the bond</strong>
+          <span>After the run the worker sends <code>job.invoice</code>. The client signs <code>job.pay</code> (a cumulative <code>SpendTicket</code>) at or below the bond. If that never arrives, the worker settles the prepaid amount itself. 90% to the worker's payout address, 10% to FeeVault. Nothing about the job goes on-chain.</span>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="msg-head"><h3>job.pay</h3><span class="dir out">client → worker</span></div>
+        <div class="msg-body">
+          <p>The pot app key's EIP-712 SpendTicket for the invoice. Cumulative: the newest total this worker is authorised to take from the lock.</p>
+          <pre>{
+  <span class="k">"v"</span>: 1, <span class="k">"type"</span>: <span class="s">"job.pay"</span>,
+  <span class="k">"job_id"</span>: <span class="s">"550e…"</span>,
+  <span class="k">"ticket"</span>: {
+    <span class="k">"client"</span>: <span class="s">"0x…"</span>,
+    <span class="k">"worker_payout"</span>: <span class="s">"0x…"</span>,
+    <span class="k">"cumulative"</span>: 250000,
+    <span class="k">"deadline"</span>: 1786000000
+  },
+  <span class="k">"sig"</span>: <span class="s">"0x…65-byte hex"</span>
+}</pre>
+          <p>The worker recovers the signer, checks the delta equals the invoice and is at or below the prepaid chunk, records the ticket, and signs <code>settle</code> with its own Ethereum key so collection does not depend on the client. The result was already sent: it was prepaid by the bond.</p>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -677,10 +750,17 @@
 <span class="from">←</span> {"v":1,"type":"peer.announce","peer_id":"41ab…","caps":["llm"],"models":[],"max_concurrent":1}
 <span class="to">→</span> {"v":1,"type":"job.submit","job_id":"550e…","from":"9f2c…","payload":{"kind":"llm",
      "model_id":"m","messages":[{"role":"user","content":"ping"}],
-     "max_tokens":64,"temperature":0.0},"sig":"a71…"}
+     "max_tokens":64,"temperature":0.0},"sig":"a71…","payer":"0x…",
+     "bond":{"v":1,"job_id":"550e…","ticket":{"client":"0x…","worker_payout":"0x…",
+     "cumulative":20000000,"deadline":1786…},"sig":"0x…"}}
 <span class="from">←</span> {"v":1,"type":"job.status","job_id":"550e…","status":"running","progress":0.3,"error":null}
+<span class="from">←</span> {"v":1,"type":"job.delta","job_id":"550e…","text":"pong"}
 <span class="from">←</span> {"v":1,"type":"job.result","job_id":"550e…","kind":"llm","sha256":"ba78…","text":"pong","meta":{"model":"m"}}
-<span class="from">←</span> {"v":1,"type":"job.status","job_id":"550e…","status":"done","progress":1.0,"error":null}</pre>
+<span class="from">←</span> {"v":1,"type":"job.status","job_id":"550e…","status":"done","progress":1.0,"error":null}
+<span class="from">←</span> {"v":1,"type":"job.invoice","job_id":"550e…","amount":250000,"sha256":"ba78…",
+     "prompt_tokens":12,"completion_tokens":1,"cached_tokens":0}
+<span class="to">→</span> {"v":1,"type":"job.pay","job_id":"550e…","ticket":{"client":"0x…","worker_payout":"0x…",
+     "cumulative":250000,"deadline":1786…},"sig":"0x…"}</pre>
       </div>
     </div>
   </section>
@@ -689,7 +769,7 @@
     <div class="wrap stack rv">
       <div class="head">
         <p class="eyebrow">If you're implementing a worker</p>
-        <h2>Four rules that aren't negotiable.</h2>
+        <h2>Rules that aren't negotiable.</h2>
       </div>
       <div class="bullets">
         <div class="bl">
@@ -711,6 +791,11 @@
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
           <strong>No filesystem paths for remote clients</strong>
           <span>Don't put one in <code>image_path_or_b64</code> unless the client is on the same machine.</span>
+        </div>
+        <div class="bl">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <strong>Don't run priced work without a prepaid bond</strong>
+          <span>Check the on-chain lock before spending GPU time. Never forward tokens that aren't prepaid. If <code>job.pay</code> doesn't arrive, settle the bond yourself.</span>
         </div>
       </div>
     </div>
@@ -743,9 +828,11 @@
 
       <h3>Not in v1</h3>
       <p >
-        Brokered queues, payments, IPFS CIDs, streaming token deltas, signed announces,
-        and a bid/quote step before submitting. New <code>type</code> values are
-        reserved for them; v1 clients ignore what they don't know.
+        Brokered queues, IPFS CIDs, signed announces, and a bid/quote step before
+        submitting. Payments — USDC on Base, pot locks, <code>job.invoice</code>
+        and <code>job.pay</code> — and streaming token deltas
+        (<code>job.delta</code>) <b>are</b> in v1. New <code>type</code> values
+        are reserved for the rest; v1 clients ignore what they don't know.
       </p>
 
       <h3>Tools, added after v1</h3>
@@ -795,15 +882,20 @@
   (function () {
     var root = document.documentElement, btn = document.getElementById("theme"), saved = null;
     try { saved = localStorage.getItem("rootmode.theme"); } catch (e) {}
-    if (saved === "dark") root.setAttribute("data-theme", "dark");
+    function paint(dark) {
+      root.classList.toggle("dark", !!dark);
+      if (dark) root.setAttribute("data-theme", "dark");
+      else root.removeAttribute("data-theme");
+    }
+    paint(saved === "dark");
     function label() {
       btn.setAttribute("aria-label",
-        root.getAttribute("data-theme") === "dark" ? "Switch to light theme" : "Switch to dark theme");
+        root.classList.contains("dark") ? "Switch to light theme" : "Switch to dark theme");
     }
     label();
     btn.addEventListener("click", function () {
-      var dark = root.getAttribute("data-theme") === "dark";
-      if (dark) root.removeAttribute("data-theme"); else root.setAttribute("data-theme", "dark");
+      var dark = root.classList.contains("dark");
+      paint(!dark);
       try { localStorage.setItem("rootmode.theme", dark ? "light" : "dark"); } catch (e) {}
       label();
     });

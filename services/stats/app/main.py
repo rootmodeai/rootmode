@@ -245,6 +245,8 @@ _PAGES = {
     "/discovery": "pages/discovery.html",
     "/brand": "pages/brand.html",
     "/terms": "pages/terms.html",
+    "/blog": "pages/blog.html",
+    "/blog/use-it-elsewhere": "pages/blog-use-it-elsewhere.html",
 }
 
 
