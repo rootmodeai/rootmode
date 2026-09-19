@@ -4,7 +4,7 @@ p2p inference.
 
 you hold the key. you pick the peer. the answer is a hash.
 
-no account. no cloud. nobody in the middle reading the prompt.
+no account. no cloud. prompts travel encrypted. nobody in the middle reading them.
 
 [rootmode.ai](https://rootmode.ai) · [manifesto](https://rootmode.ai/manifesto) · [protocol](docs/PROTOCOL.md)
 
