@@ -26,6 +26,7 @@ use crate::store::{Db, SpendEntry, StoredDeposit};
 const FUND_HTML: &str = include_str!("fund.html"); // 7702 batch on Base only
 const FUND_W3A_JS: &[u8] = include_bytes!("../resources/fund-w3a.js");
 const FUND_W3A_CSS: &[u8] = include_bytes!("../resources/fund-w3a.css");
+const FUND_QR_JS: &[u8] = include_bytes!("../resources/qrcode.min.js");
 
 fn fund_w3a_js() -> Vec<u8> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/fund-w3a.js");
@@ -36,7 +37,49 @@ fn fund_w3a_css() -> Vec<u8> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/fund-w3a.css");
     std::fs::read(&path).unwrap_or_else(|_| FUND_W3A_CSS.to_vec())
 }
+
+fn fund_qr_js() -> Vec<u8> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/qrcode.min.js");
+    std::fs::read(&path).unwrap_or_else(|_| FUND_QR_JS.to_vec())
+}
 const FUND_PORT: u16 = 17331;
+/// Public operator desk. Keys never live in this app — we only proxy quotes.
+const DEFAULT_DESK_URL: &str = "https://desk.rootmode.ai";
+
+fn desk_base() -> String {
+    std::env::var("ROOTMODE_DESK_URL")
+        .ok()
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_DESK_URL.to_string())
+}
+
+async fn desk_get(path: &str) -> std::result::Result<(axum::http::StatusCode, serde_json::Value), String> {
+    let url = format!("{}{path}", desk_base());
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = axum::http::StatusCode::from_u16(resp.status().as_u16())
+        .unwrap_or(axum::http::StatusCode::BAD_GATEWAY);
+    let v = resp.json().await.unwrap_or_else(|_| serde_json::json!({ "error": "desk returned no json" }));
+    Ok((status, v))
+}
+
+async fn desk_post(path: &str, body: serde_json::Value) -> std::result::Result<(axum::http::StatusCode, serde_json::Value), String> {
+    let url = format!("{}{path}", desk_base());
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = axum::http::StatusCode::from_u16(resp.status().as_u16())
+        .unwrap_or(axum::http::StatusCode::BAD_GATEWAY);
+    let v = resp.json().await.unwrap_or_else(|_| serde_json::json!({ "error": "desk returned no json" }));
+    Ok((status, v))
+}
 const DEFAULT_MAX_JOB: Micros = 500_000; // $0.50
 const TICKET_TTL_SECS: u64 = 3600;
 /// How many jobs' worth of lock to hold on a channel when topping it up —
@@ -1515,7 +1558,7 @@ pub fn fund_url(state: &AppState) -> Result<String> {
         .ok_or_else(|| AppError::Invalid("settlement is not configured on this build".into()))?;
     let app_key = app_key_address(state)?;
     Ok(format!(
-        "http://127.0.0.1:{FUND_PORT}/?t={}&rpc={}&pot={}&usdc={}&appKey={}&chainId={}&worker={}{}{}",
+        "http://127.0.0.1:{FUND_PORT}/?t={}&rpc={}&pot={}&usdc={}&appKey={}&chainId={}&worker={}{}{}{}",
         fund_token(),
         urlencoding_lite(&cfg.rpc),
         cfg.pot,
@@ -1525,6 +1568,7 @@ pub fn fund_url(state: &AppState) -> Result<String> {
         cfg.worker,
         web3auth_query(),
         if stripe_secret().is_some() { "&buy=1" } else { "" },
+        "&desk=1",
     ))
 }
 
@@ -1858,6 +1902,7 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
             "fund page: Stripe onramp off (no ROOTMODE_STRIPE_SECRET_KEY or ~/.rootmode/stripe.json)"
         );
     }
+
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1882,6 +1927,26 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
                                 "text/html; charset=utf-8",
                             )],
                             page,
+                        )
+                            .into_response()
+                    }),
+                )
+                .route(
+                    "/qr.js",
+                    axum::routing::get(|q: Query<FundAuth>| async move {
+                        if !q.ok() {
+                            return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                .into_response();
+                        }
+                        (
+                            [
+                                (
+                                    axum::http::header::CONTENT_TYPE,
+                                    "application/javascript; charset=utf-8",
+                                ),
+                                (axum::http::header::CACHE_CONTROL, "public, max-age=86400"),
+                            ],
+                            fund_qr_js(),
                         )
                             .into_response()
                     }),
@@ -2023,6 +2088,63 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
                                     )
                                         .into_response()
                                 }
+                            }
+                        },
+                    ),
+                )
+                .route(
+                    "/desk",
+                    axum::routing::get(|q: Query<FundAuth>| async move {
+                        if !q.ok() {
+                            return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                .into_response();
+                        }
+                        match desk_get("/status").await {
+                            Ok((status, v)) => (status, axum::Json(v)).into_response(),
+                            Err(e) => axum::Json(serde_json::json!({
+                                "enabled": false,
+                                "btc": false,
+                                "xmr": false,
+                                "error": e,
+                            }))
+                            .into_response(),
+                        }
+                    }),
+                )
+                .route(
+                    "/desk/quote",
+                    axum::routing::post(
+                        |q: Query<FundAuth>, axum::Json(body): axum::Json<serde_json::Value>| async move {
+                            if !q.ok() {
+                                return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                    .into_response();
+                            }
+                            match desk_post("/quote", body).await {
+                                Ok((status, v)) => (status, axum::Json(v)).into_response(),
+                                Err(e) => (
+                                    axum::http::StatusCode::BAD_GATEWAY,
+                                    axum::Json(serde_json::json!({ "error": e })),
+                                )
+                                    .into_response(),
+                            }
+                        },
+                    ),
+                )
+                .route(
+                    "/desk/quote/{id}",
+                    axum::routing::get(
+                        |q: Query<FundAuth>, axum::extract::Path(id): axum::extract::Path<String>| async move {
+                            if !q.ok() {
+                                return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                    .into_response();
+                            }
+                            match desk_get(&format!("/quote/{id}")).await {
+                                Ok((status, v)) => (status, axum::Json(v)).into_response(),
+                                Err(e) => (
+                                    axum::http::StatusCode::BAD_GATEWAY,
+                                    axum::Json(serde_json::json!({ "error": e })),
+                                )
+                                    .into_response(),
                             }
                         },
                     ),

@@ -14,6 +14,9 @@
       l.rel = "stylesheet";
       l.href = "/w3a.css?t=" + encodeURIComponent(t);
       document.head.appendChild(l);
+      var s = document.createElement("script");
+      s.src = "/qr.js?t=" + encodeURIComponent(t);
+      document.head.appendChild(s);
     })();
   </script>
   <style>
@@ -110,8 +113,20 @@
       font-size: 13px; font-weight: 650; border-radius: 0;
     }
     main button.text:hover { color: var(--accent); }
-    .wallets { display: grid; gap: 8px; margin-top: 4px; }
+    .wallets { display: grid; gap: 8px; margin-top: 12px; }
     .wallets button { margin-top: 0; }
+    .methods { display: grid; gap: 8px; }
+    button.method {
+      margin: 0; padding: 14px 16px; text-align: left; border-radius: 14px;
+      background: var(--paper-2); border: 1px solid var(--line); color: var(--ink);
+      display: grid; gap: 4px;
+    }
+    button.method:hover { border-color: var(--accent); }
+    button.method strong { font-size: 15px; font-weight: 750; letter-spacing: -0.02em; }
+    button.method span { font-size: 13px; font-weight: 500; color: var(--ink-2); line-height: 1.4; }
+    #stepConnect { margin-top: 4px; }
+    #connectExplain { margin: 10px 0 0; font-size: 15px; color: var(--ink-2); line-height: 1.5; }
+    #backMethod { margin: 0 0 8px; }
     .wallet {
       display: flex; align-items: flex-start; justify-content: space-between;
       gap: 12px; margin: 0 0 16px;
@@ -134,6 +149,37 @@
     }
     .amt input { padding-right: 64px; font-variant-numeric: tabular-nums; }
     #deposit { margin-top: 16px; }
+    #payBox {
+      margin-top: 18px; padding-top: 16px;
+      border-top: 1px solid var(--line); text-align: center;
+    }
+    #payQr {
+      width: 220px; height: 220px; margin: 0 auto 12px;
+      background: #fff; border-radius: 14px; padding: 10px;
+      border: 1px solid var(--line);
+    }
+    #payQr svg { width: 100%; height: 100%; display: block; }
+    #payAmt { margin: 0 0 8px; font-size: 20px; font-weight: 800; letter-spacing: -0.03em; color: var(--ink); }
+    #payAddr {
+      margin: 0 auto 10px; max-width: 100%;
+      font-family: var(--mono); font-size: 12px; line-height: 1.45;
+      word-break: break-all; color: var(--ink-2);
+    }
+    #payCopy { width: auto; margin: 0 auto; padding: 8px 16px; font-size: 14px; }
+    .buy-steps {
+      list-style: none; margin: 0 0 16px; padding: 0;
+      display: grid; gap: 6px;
+    }
+    .buy-steps li {
+      font-size: 13px; font-weight: 650; line-height: 1.4;
+      color: var(--ink-3); padding: 10px 12px;
+      border-radius: 12px; border: 1px solid var(--line);
+      background: var(--paper-2);
+    }
+    .buy-steps li.on {
+      color: var(--ink); border-color: var(--accent); background: var(--accent-bg);
+    }
+    .buy-steps li.done { color: var(--ink-2); }
     .hint { font-size: 13px; color: var(--ink-3); margin: 8px 0 0; line-height: 1.45; }
     details.more {
       margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px;
@@ -265,8 +311,8 @@
     rootmode
   </div>
   <div id="home">
-    <h1>Add USDC</h1>
-    <p class="lede" id="lede">Fund replies. Unused money stays yours.</p>
+    <h1>Add funds</h1>
+    <p class="lede" id="lede">How do you want to add funds?</p>
 
     <div class="card" id="form">
       <div class="wallet" id="walletRow" hidden>
@@ -292,11 +338,38 @@
         </div>
       </div>
 
-      <div class="wallets" id="connectRow">
-        <button type="button" id="connect">Connect wallet</button>
+      <div id="methodPick" class="methods">
+        <button type="button" class="method" data-method="usdc">
+          <strong>Deposit USDC on Base</strong>
+          <span>You already have USDC. Deposit it into Rootmode.</span>
+        </button>
+        <button type="button" class="method" data-method="card">
+          <strong>Buy USDC with a card</strong>
+          <span>USDC arrives in your wallet first. Then you deposit into Rootmode.</span>
+        </button>
+        <button type="button" class="method" data-method="btc">
+          <strong>Buy USDC with Bitcoin</strong>
+          <span>Pay with BTC. USDC arrives in your wallet first. Then you deposit into Rootmode.</span>
+        </button>
+        <button type="button" class="method" data-method="xmr">
+          <strong>Buy USDC with Monero</strong>
+          <span>Pay with XMR. USDC arrives in your wallet first. Then you deposit into Rootmode.</span>
+        </button>
+      </div>
+
+      <div id="stepConnect" hidden>
+        <button type="button" class="text" id="backMethod">← Choose a different way</button>
+        <p id="connectExplain"></p>
+        <div class="wallets" id="connectRow">
+          <button type="button" id="connect">Connect USDC wallet</button>
+        </div>
       </div>
 
       <div id="fundBox" hidden>
+        <ol id="buySteps" class="buy-steps" hidden>
+          <li id="buyStepPay">1. Pay — USDC arrives in this wallet, not in Rootmode</li>
+          <li id="buyStepDeposit">2. Deposit that USDC into Rootmode to get started</li>
+        </ol>
         <div class="fund-main">
           <label>Amount</label>
           <div class="pills" id="pills">
@@ -311,6 +384,14 @@
           <p class="hint" id="amtHint"></p>
           <button id="deposit">Deposit 20 USDC</button>
           <button type="button" class="ghost" id="buyMore" hidden>Buy USDC with card</button>
+          <button type="button" id="goDesk" hidden>Continue with Bitcoin</button>
+          <div id="payBox" hidden>
+            <div id="payQr"></div>
+            <p id="payAmt"></p>
+            <p id="payAddr"></p>
+            <button type="button" class="ghost" id="payCopy">Copy address</button>
+            <p class="hint" id="payHint">Send exactly this amount to this address. Changing USDC above updates it.</p>
+          </div>
         </div>
 
         <details class="more" id="limitsBox">
@@ -341,8 +422,8 @@
       </div>
     </div>
     <div class="body">
-      <h2 id="stageTitle">Deposit</h2>
-      <p id="stageBody">Confirm in your wallet.</p>
+      <h2 id="stageTitle">Deposit into Rootmode</h2>
+      <p id="stageBody">Confirm in your wallet. This moves USDC from the wallet into Rootmode.</p>
       <div class="spin"></div>
     </div>
   </div>
@@ -354,8 +435,8 @@
           <path d="M5 12.5l4.5 4.5L19 7"/>
         </svg>
       </div>
-      <h2 id="doneTitle">Deposited</h2>
-      <p id="doneHint">Your pot is funded.</p>
+      <h2 id="doneTitle">Deposited into Rootmode</h2>
+      <p id="doneHint">Rootmode can spend it now.</p>
       <div class="actions">
         <button id="again">Deposit again</button>
         <button class="ghost" id="closeTab">Close</button>
@@ -420,19 +501,124 @@ function chainParams() {
   };
 }
 
+let method = ""; // usdc | card | btc | xmr
+
+function buyMethod() {
+  return method === "card" || method === "btc" || method === "xmr";
+}
+
+function methodCopy() {
+  if (buyMethod() && fundsArrived) {
+    return {
+      lede: "Funds arrived in your wallet.",
+      explain: "USDC is in this wallet — not in Rootmode yet. Deposit below to get started.",
+    };
+  }
+  if (buyMethod() && awaitingBuy) {
+    return {
+      lede: "Waiting for USDC in your wallet.",
+      explain: "Pay first. USDC lands in this wallet. This page watches the balance, then you deposit into Rootmode.",
+    };
+  }
+  if (method === "usdc") {
+    return {
+      lede: "Deposit USDC you already hold.",
+      explain: "Connect the wallet on Base that already has your USDC. Deposit it into Rootmode — that is what the pot spends.",
+    };
+  }
+  if (method === "card") {
+    return {
+      lede: "Buy USDC with a card.",
+      explain: "Connect a USDC wallet on Base. Stripe sends USDC there first. Then you deposit that USDC into Rootmode.",
+    };
+  }
+  if (method === "btc") {
+    return {
+      lede: "Buy USDC with Bitcoin.",
+      explain: "Connect a USDC wallet on Base — not a Bitcoin wallet. After you pay, USDC lands here first. Then you deposit it into Rootmode.",
+    };
+  }
+  if (method === "xmr") {
+    return {
+      lede: "Buy USDC with Monero.",
+      explain: "Connect a USDC wallet on Base — not a Monero wallet. After you pay, USDC lands here first. Then you deposit it into Rootmode.",
+    };
+  }
+  return {
+    lede: "How do you want to add funds?",
+    explain: "",
+  };
+}
+
+function paintMethod() {
+  const c = methodCopy();
+  $("lede").textContent = c.lede;
+  $("connectExplain").textContent = c.explain;
+  $("methodPick").hidden = !!method;
+  $("stepConnect").hidden = !method || connected;
+  $("connectRow").hidden = !method || connected;
+  $("walletRow").hidden = !connected;
+  $("balBlock").hidden = !connected;
+  $("fundBox").hidden = !connected || !method;
+  const waiting = awaitingBuy && !fundsArrived;
+  $("deposit").hidden = method !== "usdc" && !fundsArrived;
+  $("buyMore").hidden = method !== "card" || fundsArrived;
+  $("buyMore").textContent = waiting ? "Open card checkout again" : "Buy USDC with card";
+  $("goDesk").hidden = (method !== "btc" && method !== "xmr") || fundsArrived || payLive;
+  $("goDesk").textContent = method === "xmr" ? "Pay with Monero" : "Pay with Bitcoin";
+  $("payBox").hidden = !payLive || fundsArrived;
+  $("connect").textContent = "Connect USDC wallet";
+  $("buySteps").hidden = !buyMethod();
+  $("buyStepPay").classList.toggle("on", buyMethod() && !fundsArrived);
+  $("buyStepPay").classList.toggle("done", fundsArrived);
+  $("buyStepDeposit").classList.toggle("on", fundsArrived);
+  $("buyStepDeposit").classList.toggle("done", false);
+  syncDepositBtn();
+}
+
+function resetBuyWatch() {
+  awaitingBuy = false;
+  fundsArrived = false;
+  walletUsdcAtQuote = 0;
+  lastCheckoutUrl = "";
+  lastPayAddress = "";
+  payLive = false;
+  quoting = false;
+  if (quoteTimer) {
+    clearTimeout(quoteTimer);
+    quoteTimer = 0;
+  }
+  if (deskPoll) {
+    clearInterval(deskPoll);
+    deskPoll = 0;
+  }
+  fundWatch += 1;
+  if ($("payBox")) $("payBox").hidden = true;
+}
+
+function pickMethod(m) {
+  method = m;
+  resetBuyWatch();
+  hideNotice();
+  paintMethod();
+}
+
+$("methodPick").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-method]");
+  if (b) pickMethod(b.dataset.method);
+});
+$("backMethod").onclick = () => {
+  method = "";
+  resetBuyWatch();
+  hideNotice();
+  paintMethod();
+};
+
 function setConnected(on, account) {
   connected = on;
   lastAccount = on && account ? account : "";
-  $("connectRow").hidden = on;
-  $("walletRow").hidden = !on;
-  $("balBlock").hidden = !on;
-  $("fundBox").hidden = !on;
-  $("lede").textContent = on
-    ? "This pot pays for replies."
-    : "Fund replies. Unused money stays yours.";
-  if (on) {
-    if (account) $("status").textContent = shortAddr(account);
-  } else {
+  if (on && account) $("status").textContent = shortAddr(account);
+  if (!on) {
     walletUsdc = 0;
     hasGas = true;
     $("bal").textContent = "—";
@@ -440,9 +626,10 @@ function setConnected(on, account) {
     $("status").textContent = "";
     $("withdrawBox").hidden = true;
     $("fundBox").classList.remove("blocked");
+    resetBuyWatch();
     hideNotice();
-    syncDepositBtn();
   }
+  paintMethod();
 }
 
 function word(n) {
@@ -804,6 +991,7 @@ function hideNotice() {
   $("noticeCopy").hidden = true;
   $("noticeRetry").hidden = true;
   $("buy").hidden = true;
+  $("noticeCopy").textContent = "Copy address";
   delete $("notice").dataset.kind;
   delete $("noticeCopy").dataset.addr;
 }
@@ -831,8 +1019,22 @@ function showNotice(kind, title, body, copyAddr) {
 }
 
 let stripeBuy = q.get("buy") === "1";
+let deskBtc = true;
+let deskXmr = true;
+let deskSpread = 1000;
+let deskBtcUsd = 0;
+let deskXmrUsd = 0;
+let quoteTimer = 0;
+let quoting = false;
+let payLive = false;
 let stripePk = "";
 let awaitingBuy = false;
+let fundsArrived = false;
+let walletUsdcAtQuote = 0;
+let deskPoll = 0;
+let fundWatch = 0;
+let lastCheckoutUrl = "";
+let lastPayAddress = "";
 function buyEnabled() {
   return stripeBuy;
 }
@@ -843,6 +1045,15 @@ async function probeBuy() {
     const body = await res.json();
     if (body && typeof body.enabled === "boolean") stripeBuy = body.enabled;
     if (body && body.publishableKey) stripePk = body.publishableKey;
+  } catch (_) {}
+  try {
+    const res = await fetch("/desk?t=" + encodeURIComponent(q.get("t") || ""));
+    const body = await res.json();
+    if (body && typeof body.btc === "boolean") deskBtc = body.btc;
+    if (body && typeof body.xmr === "boolean") deskXmr = body.xmr;
+    if (body && typeof body.spread_bps === "number") deskSpread = body.spread_bps;
+    if (body && typeof body.btc_usd === "number") deskBtcUsd = body.btc_usd;
+    if (body && typeof body.xmr_usd === "number") deskXmrUsd = body.xmr_usd;
   } catch (_) {}
 }
 
@@ -876,6 +1087,20 @@ function friendlyError(e) {
       title: "Buy USDC with a card",
       body: "Stripe hasn’t enabled crypto-to-wallet on this account yet. Apply at dashboard.stripe.com/crypto-onramp/get-started. You can still send USDC on Base to this wallet.",
       copy: lastAccount,
+    };
+  }
+  if (/Full node not available|payment methods configured but none of them match|rate is not available/i.test(raw)) {
+    return {
+      kind: "warn",
+      title: "Bitcoin node is still syncing",
+      body: "The desk is up. BTCPay cannot create an invoice until bitcoind and NBXplorer have caught up. Leave Bitcoin for later, or deposit USDC you already have.",
+    };
+  }
+  if (/Bitcoin is not configured/i.test(raw)) {
+    return {
+      kind: "warn",
+      title: "Bitcoin desk is not ready",
+      body: "The app reached the desk, but BTCPay store keys or a Bitcoin wallet are missing on the server.",
     };
   }
   if (/RPCErr52|Failed to fetch|loopback address space|Private Network Access|TIMEOUT/i.test(raw)) {
@@ -1113,24 +1338,19 @@ async function refreshBal() {
   }
   await warnIfNoGas(from);
   $("fundBox").classList.remove("blocked");
-  if (n > 0) {
-    if (awaitingBuy) {
-      awaitingBuy = false;
+  if (awaitingBuy && !fundsArrived && n + 1e-9 >= walletUsdcAtQuote + 0.01) {
+    markFundsArrived(from);
+  } else if (method === "usdc") {
+    if (n > 0) {
+      hideNotice();
+    } else {
       showNotice(
-        "ok",
-        "You have USDC",
-        "Next: deposit it into your pot to get started.",
+        "warn",
+        "No USDC yet",
+        "This wallet has no USDC on Base. Go back and buy with a card, Bitcoin, or Monero — or send USDC here first.",
         from
       );
-      $("buy").hidden = true;
     }
-  } else {
-    showNotice(
-      "warn",
-      "No USDC yet",
-      "Buy USDC on Base with a card. Gas is covered — you don’t need ETH.",
-      from
-    );
   }
   syncDepositBtn();
 }
@@ -1148,26 +1368,51 @@ async function warnIfNoGas(from) {
 for (const id of ["maxJob", "maxDay"]) {
   $(id).addEventListener("input", () => { $(id).dataset.touched = "1"; });
 }
-$("amount").addEventListener("input", syncDepositBtn);
+$("amount").addEventListener("input", () => {
+  syncDepositBtn();
+  scheduleQuote();
+});
 $("pills").addEventListener("click", (ev) => {
   const b = ev.target.closest("button[data-amt]");
   if (!b) return;
   $("amount").value = b.dataset.amt;
   syncDepositBtn();
+  scheduleQuote();
 });
-let fundWatch = 0;
+function startAwaiting() {
+  awaitingBuy = true;
+  fundsArrived = false;
+  walletUsdcAtQuote = walletUsdc;
+  paintMethod();
+  watchForFunds();
+}
+
+function markFundsArrived(from) {
+  if (fundsArrived) return;
+  fundsArrived = true;
+  awaitingBuy = false;
+  const who = from || lastAccount;
+  showNotice(
+    "ok",
+    "Funds arrived in your wallet",
+    "USDC is in " + shortAddr(who) + " — not in Rootmode yet. Deposit below to get started."
+  );
+  $("buy").hidden = true;
+  paintMethod();
+  try { $("notice").scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (_) {}
+}
+
 function watchForFunds() {
   const id = ++fundWatch;
-  let n = 0;
   const tick = async () => {
     if (id !== fundWatch) return;
-    n += 1;
-    if (n > 24) return;
+    if (!awaitingBuy || fundsArrived) return;
     try { await refreshBal(); } catch (_) {}
     if (id !== fundWatch) return;
+    if (fundsArrived) return;
     setTimeout(tick, 8000);
   };
-  setTimeout(tick, 8000);
+  setTimeout(tick, 4000);
 }
 
 async function standaloneBuyUrl(usd) {
@@ -1217,16 +1462,13 @@ async function buyWithCard() {
       throw new Error(body.error || "Could not start card checkout.");
     }
     window.open(url, "_blank", "noopener");
-    awaitingBuy = true;
     showNotice(
       "ok",
       "Finish in Stripe",
-      "Buy " + usd + " USDC on Base to " + shortAddr(from) + ". This tab stays open — we’ll take you to deposit when it arrives.",
-      from
+      "Stripe sends USDC to " + shortAddr(from) + " first — not into Rootmode. Leave this tab open. When it arrives, deposit below."
     );
-    $("buy").hidden = false;
-    $("buy").textContent = "Buy USDC with card";
-    watchForFunds();
+    $("buy").hidden = true;
+    startAwaiting();
   } catch (e) {
     showError(e);
   } finally {
@@ -1237,6 +1479,160 @@ async function buyWithCard() {
 
 $("buy").onclick = () => { void buyWithCard(); };
 $("buyMore").onclick = () => { void buyWithCard(); };
+$("goDesk").onclick = () => { void payDesk(method === "xmr" ? "xmr" : "btc"); };
+
+function coinsFor(usd, price, spread, decimals) {
+  const gross = usd * (1 + spread / 10000);
+  const coins = gross / Math.max(price, 1e-12);
+  const scale = Math.pow(10, decimals);
+  return Math.ceil(coins * scale - 1e-12) / scale;
+}
+
+function fmtCoins(n, rail) {
+  if (!(n > 0)) return "";
+  if (rail === "xmr") return n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") + " XMR";
+  return n.toFixed(8).replace(/0+$/, "").replace(/\.$/, "") + " BTC";
+}
+
+function prettyPay(s) {
+  const m = String(s || "").trim().match(/^([0-9.]+)\s*(XMR|BTC)\s*$/i);
+  if (!m) return s;
+  let n = m[1];
+  if (n.indexOf(".") >= 0) n = n.replace(/0+$/, "").replace(/\.$/, "");
+  return n + " " + m[2].toUpperCase();
+}
+
+function looksLikeUrl(s) {
+  return /^https?:\/\//i.test(s || "");
+}
+
+function previewPayAmount() {
+  if (!buyMethod() || fundsArrived) return "";
+  const usd = Number($("amount").value);
+  if (!Number.isFinite(usd) || usd <= 0) return "";
+  const rail = method === "xmr" ? "xmr" : "btc";
+  const price = rail === "xmr" ? deskXmrUsd : deskBtcUsd;
+  if (!(price > 0)) return "";
+  const coins = coinsFor(usd, price, deskSpread, rail === "xmr" ? 12 : 8);
+  return fmtCoins(coins, rail);
+}
+
+function renderPayQr(text) {
+  const host = $("payQr");
+  host.replaceChildren();
+  if (!text || looksLikeUrl(text)) {
+    host.style.display = "none";
+    return;
+  }
+  host.style.display = "";
+  if (typeof qrcode !== "function") return;
+  try {
+    const qr = qrcode(0, "M");
+    qr.addData(text);
+    qr.make();
+    host.innerHTML = qr.createSvgTag(4, 2);
+  } catch (_) {}
+}
+
+function showPayQuote(body) {
+  payLive = true;
+  lastCheckoutUrl = body.checkout_url || "";
+  const addr = body.pay_address || "";
+  lastPayAddress = looksLikeUrl(addr) ? "" : addr;
+  const uri = body.pay_uri || (lastPayAddress ? (method === "xmr" ? "monero:" : "bitcoin:") + lastPayAddress : "");
+  $("payBox").hidden = false;
+  $("payAmt").textContent = body.pay_amount
+    ? "Send " + prettyPay(body.pay_amount)
+    : "Send the amount shown in your wallet";
+  $("payAddr").textContent = lastPayAddress;
+  $("payCopy").hidden = !lastPayAddress;
+  $("payCopy").dataset.addr = lastPayAddress;
+  renderPayQr(uri || lastPayAddress);
+  if (!lastPayAddress && lastCheckoutUrl) {
+    $("payHint").innerHTML = "On-chain address is not ready yet (node still syncing). <a href=\"" + lastCheckoutUrl + "\" target=\"_blank\" rel=\"noopener\">Open BTCPay checkout</a>.";
+  } else {
+    $("payHint").textContent = "Send exactly this amount to this address. Changing USDC above updates it. USDC then lands in your wallet — deposit into Rootmode after that.";
+  }
+  $("goDesk").hidden = true;
+}
+
+function scheduleQuote() {
+  previewPayAmount();
+  if (!buyMethod() || fundsArrived || !awaitingBuy) return;
+  clearTimeout(quoteTimer);
+  quoteTimer = setTimeout(() => {
+    void payDesk(method === "xmr" ? "xmr" : "btc");
+  }, 550);
+}
+
+async function payDesk(rail) {
+  const from = lastAccount || ($("noticeCopy") && $("noticeCopy").dataset.addr);
+  if (!from) {
+    showNotice("warn", "Connect first", "Connect a wallet, then pay with " + (rail === "xmr" ? "Monero" : "Bitcoin") + ".");
+    return;
+  }
+  let usd = Math.round(Number($("amount").value) || 20);
+  if (!Number.isFinite(usd) || usd < 1) usd = 20;
+  if (quoting) return;
+  quoting = true;
+  const btn = $("goDesk");
+  btn.disabled = true;
+  const wasAwaiting = awaitingBuy;
+  try {
+    const res = await fetch("/desk/quote?t=" + encodeURIComponent(q.get("t") || ""), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rail: rail, usd: usd, address: from }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.id) throw new Error(body.error || "Bitcoin/Monero desk isn’t reachable right now.");
+    showPayQuote(body);
+    showNotice(
+      "ok",
+      rail === "xmr" ? "Send Monero" : "Send Bitcoin",
+      "Scan the QR or copy the address. USDC arrives in " + shortAddr(from) + " first — not in Rootmode. Leave this page open, then deposit."
+    );
+    $("buy").hidden = true;
+    if (!wasAwaiting) startAwaiting();
+    else paintMethod();
+    watchDeskQuote(body.id);
+  } catch (e) {
+    showError(e);
+  } finally {
+    quoting = false;
+    btn.disabled = false;
+    const now = Math.round(Number($("amount").value) || 20);
+    if (awaitingBuy && now !== usd) scheduleQuote();
+  }
+}
+
+function watchDeskQuote(id) {
+  if (deskPoll) clearInterval(deskPoll);
+  deskPoll = setInterval(async () => {
+    try {
+      const res = await fetch("/desk/quote/" + encodeURIComponent(id) + "?t=" + encodeURIComponent(q.get("t") || ""));
+      const body = await res.json().catch(() => ({}));
+      if (body.status === "credited" || body.status === "paid") {
+        clearInterval(deskPoll);
+        deskPoll = 0;
+        if (!fundsArrived) {
+          showNotice(
+            "ok",
+            body.status === "credited" ? "USDC sent to your wallet" : "Payment seen",
+            body.status === "credited"
+              ? "We sent USDC to " + shortAddr(lastAccount) + ". This page is watching the wallet. Deposit into Rootmode when it shows up."
+              : "Payment received. Sending USDC to " + shortAddr(lastAccount) + " — not into Rootmode yet."
+          );
+        }
+        watchForFunds();
+      } else if (body.status === "expired" || body.status === "failed") {
+        clearInterval(deskPoll);
+        deskPoll = 0;
+        showNotice("bad", body.status === "expired" ? "Quote expired" : "Could not credit", body.error || "Try again.");
+      }
+    } catch (_) {}
+  }, 4000);
+}
 
 $("noticeRetry").onclick = async () => {
   $("noticeRetry").disabled = true;
@@ -1251,23 +1647,32 @@ $("noticeRetry").onclick = async () => {
 };
 
 const depositStep = [
-  { title: "Deposit", body: "Confirm in your wallet." },
+  { title: "Deposit into Rootmode", body: "Confirm in your wallet. This moves USDC from the wallet into Rootmode." },
 ];
 
 function syncDepositBtn() {
   const n = Number($("amount").value);
   const ok = Number.isFinite(n) && n > 0;
   $("deposit").textContent = ok
-    ? "Deposit " + n.toLocaleString(undefined, { maximumFractionDigits: 2 }) + " USDC"
-    : "Deposit";
+    ? "Deposit " + n.toLocaleString(undefined, { maximumFractionDigits: 2 }) + " USDC into Rootmode"
+    : "Deposit into Rootmode";
   $("deposit").disabled = !ok || n > walletUsdc + 1e-9;
   const hint = $("amtHint");
-  if (!ok) {
+  if (awaitingBuy && !fundsArrived) {
+    hint.textContent = "Watching this wallet for USDC. Rootmode is not funded until you deposit.";
+  } else if (buyMethod() && !fundsArrived) {
+    const est = previewPayAmount();
+    hint.textContent = est
+      ? "You send about " + est + " (includes the desk spread). USDC lands in this wallet, then you deposit."
+      : "";
+  } else if (!ok) {
     hint.textContent = "";
   } else if (walletUsdc + 1e-9 < n) {
     hint.textContent = walletUsdc <= 0
       ? "This wallet has no USDC on Base yet."
-      : "This wallet has " + walletUsdc.toFixed(2) + " USDC.";
+      : "This wallet has " + walletUsdc.toFixed(2) + " USDC. Rootmode only spends what you deposit.";
+  } else if (fundsArrived) {
+    hint.textContent = "This is still in your wallet. Deposit to put it in Rootmode.";
   } else {
     hint.textContent = "";
   }
@@ -1275,9 +1680,8 @@ function syncDepositBtn() {
   for (const b of pills) {
     b.classList.toggle("on", Number(b.dataset.amt) === n);
   }
-  // Empty wallet already has this CTA on the notice. Only show the second
-  // button when they have some USDC but not enough for the amount.
-  $("buyMore").hidden = !ok || n <= walletUsdc + 1e-9 || walletUsdc <= 0;
+  if (method === "card" && !fundsArrived) $("buyMore").hidden = false;
+  else $("buyMore").hidden = true;
 }
 
 async function connectWallet() {
@@ -1353,7 +1757,7 @@ $("deposit").onclick = async () => {
       // The chain already has the money. Missing a local receipt is a blank
       // history row, not a failed deposit.
     }
-    $("doneHint").textContent = Number(amount) / 1e6 + " USDC is in the pot.";
+    $("doneHint").textContent = Number(amount) / 1e6 + " USDC is in Rootmode.";
     showDone();
   } catch (e) {
     showError(e);
@@ -1417,6 +1821,18 @@ $("withdraw").onclick = async () => {
   }
 };
 
+$("payCopy").onclick = async () => {
+  const a = $("payCopy").dataset.addr;
+  if (!a) return;
+  try {
+    await navigator.clipboard.writeText(a);
+    $("payCopy").textContent = "Copied";
+    setTimeout(() => { $("payCopy").textContent = "Copy address"; }, 1400);
+  } catch (_) {
+    $("payCopy").textContent = a;
+  }
+};
+
 $("noticeCopy").onclick = async () => {
   const a = $("noticeCopy").dataset.addr;
   if (!a) return;
@@ -1429,7 +1845,10 @@ $("noticeCopy").onclick = async () => {
   }
 };
 
-void probeBuy().then(() => syncDepositBtn());
+void probeBuy().then(() => {
+  paintMethod();
+  syncDepositBtn();
+});
 </script>
 </body>
 </html>
