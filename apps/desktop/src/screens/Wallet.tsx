@@ -89,6 +89,23 @@ export function Wallet() {
       <div className="page-head">
         <h1>Wallet</h1>
         <p>USDC you deposit is what priced providers bill. Usage is counted on this computer.</p>
+        {pot?.client ? (
+          <p
+            className="mono"
+            style={{
+              fontSize: 13,
+              color: "var(--text-2)",
+              margin: "10px 0 0",
+              wordBreak: "break-all",
+            }}
+          >
+            {pot.client}
+          </p>
+        ) : pot ? (
+          <p style={{ color: "var(--text-2)", fontSize: 13, margin: "10px 0 0" }}>
+            No wallet connected. Open Deposit and connect one.
+          </p>
+        ) : null}
       </div>
 
       {error && (

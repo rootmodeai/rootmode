@@ -7,6 +7,8 @@ import {
   authConnector,
   metaMaskConnector,
 } from "@web3auth/modal";
+import { baseAccountConnector } from "@web3auth/no-modal/connectors/base-account-connector";
+import { coinbaseConnector } from "@web3auth/no-modal/connectors/coinbase-connector";
 
 export type StartOpts = {
   clientId: string;
@@ -57,6 +59,20 @@ async function start(opts: StartOpts) {
         dapp: { name: "rootmode", url: "https://rootmode.ai" },
         ui: { preferExtension: true, headless: false, showInstallModal: true },
       }),
+      // The old pot is a Coinbase smart wallet (Base Account), not a Web3Auth
+      // social account. Both have to stay on the modal or that address cannot
+      // sign a withdraw.
+      coinbaseConnector({
+        appName: "rootmode",
+        appLogoUrl: null,
+        appChainIds: chainIds(opts.defaultChainId),
+        options: "all",
+      }),
+      baseAccountConnector({
+        appName: "rootmode",
+        appLogoUrl: null,
+        appChainIds: chainIds(opts.defaultChainId),
+      }),
     ],
     modalConfig: {
       connectors: {
@@ -88,12 +104,27 @@ async function start(opts: StartOpts) {
           label: "MetaMask",
           showOnModal: true,
         },
+        [WALLET_CONNECTORS.COINBASE]: {
+          label: "Coinbase Wallet",
+          showOnModal: true,
+        },
+        [WALLET_CONNECTORS.BASE_ACCOUNT]: {
+          label: "Base Account",
+          showOnModal: true,
+        },
       },
     },
   });
   await web3auth.init();
   skipWeb3AuthSession(web3auth);
   return web3auth;
+}
+
+function chainIds(defaultChainId: string): number[] {
+  const ids = [8453];
+  const n = Number(defaultChainId);
+  if (Number.isFinite(n) && n > 0 && !ids.includes(n)) ids.push(n);
+  return ids;
 }
 
 function chainFor(chainId: string, rpcTarget: string) {

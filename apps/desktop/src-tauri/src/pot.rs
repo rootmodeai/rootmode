@@ -435,6 +435,54 @@ fn load_or_create_app_key(app_data: &Path) -> Result<SigningKey> {
     Ok(key)
 }
 
+fn selected_client_path(app_data: &Path) -> PathBuf {
+    app_data.join("pot-selected-client")
+}
+
+/// Wallet the deposit page last connected. Missing or garbage means "not set",
+/// and status falls back to the last on-chain deposit.
+fn selected_client(app_data: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(selected_client_path(app_data)).ok()?;
+    let s = raw.trim();
+    if !valid_eth_addr(s) {
+        return None;
+    }
+    Some(canonical_addr(s))
+}
+
+fn canonical_addr(s: &str) -> String {
+    let h = s.trim().trim_start_matches("0x").trim_start_matches("0X");
+    format!("0x{h}")
+}
+
+/// True when the deposit page has picked a wallet the cached status is not.
+fn selection_moved(picked: &Option<String>, shown: Option<&str>) -> bool {
+    match (picked, shown) {
+        (Some(p), Some(c)) => addr_key(p) != addr_key(c),
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+fn set_selected_client(app_data: &Path, addr: &str) -> std::result::Result<(), String> {
+    if !valid_eth_addr(addr) {
+        return Err("wallet address looks wrong".into());
+    }
+    let next = canonical_addr(addr);
+    if selected_client(app_data)
+        .as_deref()
+        .is_some_and(|cur| addr_key(cur) == addr_key(&next))
+    {
+        return Ok(());
+    }
+    std::fs::create_dir_all(app_data).map_err(|e| e.to_string())?;
+    std::fs::write(selected_client_path(app_data), &next).map_err(|e| e.to_string())?;
+    // The wallet screen serves a 3s-old status. Drop it or a switch keeps
+    // showing the previous wallet's balance until that timer expires.
+    *status_memo().lock().unwrap_or_else(|e| e.into_inner()) = None;
+    Ok(())
+}
+
 pub async fn status(state: &AppState) -> Result<PotStatus> {
     let app_key = app_key_address(state)?;
     let Some(cfg) = load_chain_config(state) else {
@@ -462,8 +510,9 @@ pub async fn status(state: &AppState) -> Result<PotStatus> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
+    let picked = selected_client(&state.app_data);
     if let Some((at, ref s)) = last {
-        if at.elapsed() < STATUS_FRESH {
+        if at.elapsed() < STATUS_FRESH && !selection_moved(&picked, s.client.as_deref()) {
             return Ok(s.clone());
         }
     }
@@ -472,21 +521,28 @@ pub async fn status(state: &AppState) -> Result<PotStatus> {
     let reachable = rpc(&cfg.rpc, "eth_chainId", serde_json::json!([]))
         .await
         .is_ok();
-    let client = match state.db.last_deposit_client(cfg.chain_id) {
-        Ok(Some(c)) if !c.trim().is_empty() => Some(c),
-        // Finding the wallet means scanning `Deposited` logs from genesis.
-        // Once found it does not change out from under us — reuse it rather
-        // than re-scanning on every poll.
-        _ => match last.as_ref().and_then(|s| s.client.clone()) {
-            Some(c) => Some(c),
-            None => find_client(&cfg, &app_key).await,
+    // The deposit page is the source of truth for which wallet is connected.
+    // The last on-chain deposit is only a fallback for a machine that has
+    // not opened that page yet.
+    let client = match picked {
+        Some(c) => Some(c),
+        None => match state.db.last_deposit_client(cfg.chain_id) {
+            Ok(Some(c)) if !c.trim().is_empty() => Some(c),
+            _ => match last.as_ref().and_then(|s| s.client.clone()) {
+                Some(c) => Some(c),
+                None => find_client(&cfg, &app_key).await,
+            },
         },
     };
     // On a failed read, carry the last good numbers instead of printing $0.
     // A balance that alternates between the truth and zero with every flaky
     // RPC response looks like money disappearing; `reachable` is the honest
     // signal for "the chain is actually gone".
-    let same_wallet = |s: &&PotStatus| s.client == client;
+    let same_wallet = |s: &&PotStatus| match (&s.client, &client) {
+        (Some(a), Some(b)) => addr_key(a) == addr_key(b),
+        (None, None) => true,
+        _ => false,
+    };
     let (balance, max_job, max_day, spent) = if let Some(ref c) = client {
         match account(&cfg, c).await {
             Ok(v) => v,
@@ -533,7 +589,9 @@ pub async fn status(state: &AppState) -> Result<PotStatus> {
         usdc: cfg.usdc,
         chain_id: cfg.chain_id,
     };
-    if st.reachable {
+    if st.reachable
+        && !selection_moved(&selected_client(&state.app_data), st.client.as_deref())
+    {
         *status_memo().lock().unwrap_or_else(|e| e.into_inner()) =
             Some((Instant::now(), st.clone()));
     }
@@ -1744,37 +1802,13 @@ async fn start_onramp(body: BuyBody) -> std::result::Result<String, String> {
         .ok_or_else(|| "ONRAMP_UNAVAILABLE".into())
 }
 
-/// Enough ETH for an approve + deposit on Base. The user only buys USDC.
-const SPONSOR_WEI: u64 = 50_000_000_000_000; // 0.00005 ETH
-
-async fn sponsor_gas(app_data: &Path, address: &str) -> std::result::Result<String, String> {
+async fn sponsor_gas(_app_data: &Path, address: &str) -> std::result::Result<String, String> {
     if !valid_eth_addr(address) {
         return Err("wallet address looks wrong".into());
     }
-    let cfg = load_chain_config_at(app_data).ok_or_else(|| "no chain".to_string())?;
-    let raw = rpc(
-        &cfg.rpc,
-        "eth_getBalance",
-        serde_json::json!([address, "latest"]),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    let wei = hex_to_u128(raw.as_str().unwrap_or("0x0"));
-    if wei > u128::from(SPONSOR_WEI) {
-        return Ok("already".into());
-    }
-    let key = load_or_create_app_key(app_data).map_err(|e| e.to_string())?;
-    crate::eth_tx::send_eth(&cfg.rpc, &key, cfg.chain_id, address, SPONSOR_WEI)
-        .await
-        .map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("needs a little ETH") {
-                "This app's gas wallet needs a little ETH on Base before it can sponsor deposits."
-                    .into()
-            } else {
-                msg
-            }
-        })
+    Err(format!(
+        "This wallet needs a little ETH on Base to pay gas. {address}"
+    ))
 }
 
 fn urlencoding_lite(s: &str) -> String {
@@ -2002,20 +2036,25 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
                 )
                 .route(
                     "/flush",
-                    axum::routing::post(move |q: Query<FundAuth>| {
+                    axum::routing::post({
                         let data = data.clone();
-                        async move {
-                            if !q.ok() {
-                                return (axum::http::StatusCode::FORBIDDEN, "forbidden")
-                                    .into_response();
-                            }
-                            match flush_all(&data).await {
-                                Ok(n) => (axum::http::StatusCode::OK, n.to_string()).into_response(),
-                                Err(e) => (
-                                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                    e.to_string(),
-                                )
-                                    .into_response(),
+                        move |q: Query<FundAuth>| {
+                            let data = data.clone();
+                            async move {
+                                if !q.ok() {
+                                    return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                        .into_response();
+                                }
+                                match flush_all(&data).await {
+                                    Ok(n) => {
+                                        (axum::http::StatusCode::OK, n.to_string()).into_response()
+                                    }
+                                    Err(e) => (
+                                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                        e.to_string(),
+                                    )
+                                        .into_response(),
+                                }
                             }
                         }
                     }),
@@ -2093,6 +2132,32 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
                     ),
                 )
                 .route(
+                    "/wallet",
+                    axum::routing::post({
+                        let data = data.clone();
+                        move |q: Query<FundAuth>, axum::Json(body): axum::Json<serde_json::Value>| async move {
+                            if !q.ok() {
+                                return (axum::http::StatusCode::FORBIDDEN, "forbidden")
+                                    .into_response();
+                            }
+                            let addr = body
+                                .get("address")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            match set_selected_client(&data, addr) {
+                                Ok(()) => {
+                                    axum::Json(serde_json::json!({ "ok": true })).into_response()
+                                }
+                                Err(e) => (
+                                    axum::http::StatusCode::BAD_REQUEST,
+                                    axum::Json(serde_json::json!({ "error": e })),
+                                )
+                                    .into_response(),
+                            }
+                        }
+                    }),
+                )
+                .route(
                     "/desk",
                     axum::routing::get(|q: Query<FundAuth>| async move {
                         if !q.ok() {
@@ -2131,7 +2196,9 @@ pub fn ensure_fund_server(app_data: PathBuf) -> Result<()> {
                     ),
                 )
                 .route(
-                    "/desk/quote/{id}",
+                    // axum 0.7 captures `:id`. `{id}` is a literal, so the
+                    // fund page poll 404s and never hears that Monero arrived.
+                    "/desk/quote/:id",
                     axum::routing::get(
                         |q: Query<FundAuth>, axum::extract::Path(id): axum::extract::Path<String>| async move {
                             if !q.ok() {
@@ -2643,6 +2710,32 @@ async fn rpc_once(url: &str, method: &str, params: serde_json::Value) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_deposit_page_wallet_replaces_the_one_the_app_shows() {
+        let dir = std::env::temp_dir().join(format!(
+            "rootmode-selected-client-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(selected_client(&dir).is_none());
+        assert!(set_selected_client(&dir, "not-an-address").is_err());
+        set_selected_client(&dir, "0xDc9cB0CD7f2E2Fb51fa27b4134e90ae7aB64eCa8").unwrap();
+        let first = selected_client(&dir).unwrap();
+        assert_eq!(addr_key(&first), addr_key("0xdc9cb0cd7f2e2fb51fa27b4134e90ae7ab64eca8"));
+        // Same wallet again must not be treated as a change.
+        set_selected_client(&dir, "0xdc9cb0cd7f2e2fb51fa27b4134e90ae7ab64eca8").unwrap();
+        assert_eq!(addr_key(&selected_client(&dir).unwrap()), addr_key(&first));
+        set_selected_client(&dir, "0x3960008f969AAd36963e4C5a7cd5cB7FE4A02de3").unwrap();
+        assert_eq!(
+            addr_key(&selected_client(&dir).unwrap()),
+            addr_key("0x3960008f969AAd36963e4C5a7cd5cB7FE4A02de3")
+        );
+        assert!(selection_moved(&selected_client(&dir), Some(first.as_str())));
+        assert!(!selection_moved(&None, Some(first.as_str())));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn eth_addrs_are_forty_hex_digits() {
