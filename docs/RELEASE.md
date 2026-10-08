@@ -34,9 +34,19 @@ points at the newest tag.
 
 ## Apple signing and notarization
 
-Without these secrets the macOS job still builds, but Gatekeeper will block
-the `.dmg` for people who did not right-click → Open. With them,
-`tauri-action` signs, notarizes, and staples.
+Without these secrets the macOS job fails. An unsigned or unstapled `.dmg`
+is what Gatekeeper rejects when someone downloads it, and the app inside
+never gets the chance to run.
+
+`tauri-action` signs and notarizes the `.app`. That is not the file a
+browser saves. The workflow then submits the `.dmg` itself to the notary
+service and staples the ticket onto the image before uploading the stable
+name the Download button serves. A release that went out without that
+ticket can be repaired without a rebuild:
+
+```sh
+gh workflow run release.yml -f repair_tag=v0.1.25
+```
 
 1. Apple Developer Program. Create a **Developer ID Application** certificate.
 2. Keychain Access → export that cert + private key as a `.p12`.
